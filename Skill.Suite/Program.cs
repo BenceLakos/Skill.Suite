@@ -1,14 +1,22 @@
 using Microsoft.AspNetCore.Identity;
+using MudBlazor.Services;
+using Scalar.AspNetCore;
+using Skill.Suite.Application;
+using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Components;
+using Skill.Suite.Infra;
+using Skill.Suite.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// --- Blazor / MudBlazor UI -----------------------------------------------------------
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+builder.Services.AddMudServices();
 builder.Services.AddCascadingAuthenticationState();
 
+// --- Authentication ------------------------------------------------------------------
 builder.Services.AddAuthentication(options =>
     {
         options.DefaultScheme = IdentityConstants.ApplicationScheme;
@@ -16,27 +24,40 @@ builder.Services.AddAuthentication(options =>
     })
     .AddIdentityCookies();
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ??
-                       throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+builder.Services.AddAuthorization();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+
+// --- Application & Infrastructure ----------------------------------------------------
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+
+// --- Minimal APIs / OpenAPI / Scalar -------------------------------------------------
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApi();
+
 builder.Services.AddDatabaseDeveloperPageExceptionFilter();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// --- HTTP pipeline -------------------------------------------------------------------
 if (app.Environment.IsDevelopment())
 {
     app.UseMigrationsEndPoint();
+    app.MapOpenApi();
+    app.MapScalarApiReference();
 }
 else
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapStaticAssets();

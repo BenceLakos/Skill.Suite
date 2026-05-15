@@ -40,13 +40,13 @@ Skill Suite manages competition entities, including competitors, experts, sessio
 - Commands: `Create[Entity]Command`, `Update[Entity]Command`
 - Queries: `Get[Entity]Query`, `List[Entities]Query`
 - Handlers: `[Command/Query]Handler`
-- DTOs: `[Entity]Dto`, `Create[Entity]Request`
+- DTOs: `[Entity]Dto`, `Create[Entity]Request`, `Create[Entity]Response`
 
 ### Patterns We Use
 - Primary constructors for DI
 - Records for DTOs and commands
 - Result<T> pattern for error handling (no exceptions for flow control)
-- File-scoped namespaces
+- File-scoped namespaces (Always put the namespace declaration at the top, then the imports)
 - Always pass CancellationToken to async methods
 - Mapperly mappers for object mapping (https://mapperly.riok.app)
 
@@ -54,6 +54,9 @@ Skill Suite manages competition entities, including competitors, experts, sessio
 - Repository pattern (use EF Core directly)
 - Exceptions for business logic errors
 - Stored procedures
+- Two classes in a single file, even if they are small
+- Commenting every line of code (code should be self-explanatory, use meaningful names instead)
+- Magic strings or numbers (use constants or enums instead)
 
 ## Validation
 - All request validation in FluentValidation validators

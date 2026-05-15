@@ -1,7 +1,35 @@
-﻿services:
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: skillsuite
+      POSTGRES_USER: skillsuite
+      POSTGRES_PASSWORD: skillsuite
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U skillsuite -d skillsuite" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   skill.suite:
     image: skill.suite
     build:
       context: .
       dockerfile: Skill.Suite/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=skillsuite;Username=skillsuite;Password=skillsuite"
+      ASPNETCORE_ENVIRONMENT: Development
+    ports:
+      - "8080:8080"
+      - "8081:8081"
 
+volumes:
+  postgres-data:
