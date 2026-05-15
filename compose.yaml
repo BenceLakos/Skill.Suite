@@ -1,0 +1,7 @@
+﻿services:
+  skill.suite:
+    image: skill.suite
+    build:
+      context: .
+      dockerfile: Skill.Suite/Dockerfile
+
