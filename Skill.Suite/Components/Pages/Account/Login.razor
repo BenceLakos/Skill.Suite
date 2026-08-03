@@ -1,0 +1,55 @@
+@page "/Account/Login"
+@layout Layout.AuthLayout
+@attribute [AllowAnonymous]
+@inject ITranslator T
+
+<PageTitle>@T["common.signIn"]</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraSmall" Class="mt-16">
+    <MudPaper Class="pa-8" Elevation="3">
+        <MudText Typo="Typo.h5" Class="mb-6">@T["auth.login.title"]</MudText>
+
+        @if (HasError)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@T["auth.login.invalid"]</MudAlert>
+        }
+
+        <form method="post" action="/Account/Login" class="d-flex flex-column gap-4">
+            <input type="hidden" name="ReturnUrl" value="@ReturnUrl"/>
+
+            <div class="mud-input-control mud-input-input-control">
+                <label class="mud-input-label mud-input-label-animated mud-input-label-text mud-input-label-margin-dense" for="login-username">
+                    @T["auth.login.username"]
+                </label>
+                <div class="mud-input mud-input-outlined mud-input-underline mud-shrink mud-input-margin-dense" style="margin-top:0.5rem;">
+                    <input id="login-username" name="Username" type="text" autocomplete="username" required class="mud-input-slot mud-input-root mud-input-root-outlined" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--mud-palette-lines-inputs);border-radius:4px;background:transparent;color:inherit;"/>
+                </div>
+            </div>
+
+            <div class="mud-input-control mud-input-input-control">
+                <label class="mud-input-label mud-input-label-animated mud-input-label-text mud-input-label-margin-dense" for="login-password">
+                    @T["auth.login.password"]
+                </label>
+                <div style="margin-top:0.5rem;">
+                    <input id="login-password" name="Password" type="password" required class="mud-input-slot" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--mud-palette-lines-inputs);border-radius:4px;background:transparent;color:inherit;"/>
+                </div>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:0.5rem;color:inherit;">
+                <input type="checkbox" name="RememberMe" value="true"/>
+                @T["auth.login.remember"]
+            </label>
+
+            <button type="submit" class="mud-button-root mud-button mud-button-filled mud-button-filled-primary mud-button-filled-size-medium mud-ripple" style="padding:0.5rem 1rem;border-radius:4px;border:none;cursor:pointer;">
+                <span class="mud-button-label">@T["common.signIn"]</span>
+            </button>
+        </form>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+
+    private bool HasError => string.Equals(Error, "invalid", StringComparison.OrdinalIgnoreCase);
+}

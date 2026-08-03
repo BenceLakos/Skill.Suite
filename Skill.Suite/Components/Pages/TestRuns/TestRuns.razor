@@ -1,0 +1,167 @@
+@page "/test-runs"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject NavigationManager Nav
+@inject ITranslator T
+
+@using Skill.Suite.Application.Sessions
+@using Skill.Suite.Application.Sessions.ListSessions
+@using Skill.Suite.Application.TestRuns.ListCompetitorTestRunsOverview
+@using Skill.Suite.Domain.Sessions
+@using Skill.Suite.Domain.TestRuns
+
+<PageTitle>@T["testRuns.title"]</PageTitle>
+
+<PageHeader Title="@T["testRuns.title"]" Subtitle="@T["testRuns.subtitle"]">
+    <Actions>
+        <MudSelect T="Guid?"
+                   Value="_sessionId"
+                   ValueChanged="OnSessionChanged"
+                   Label="@T["testRuns.field.session"]"
+                   Variant="Variant.Outlined"
+                   Margin="Margin.Dense"
+                   Style="min-width:240px;">
+            @foreach (var s in _sessions)
+            {
+                <MudSelectItem T="Guid?" Value="@((Guid?)s.Id)">@SessionLabel(s)</MudSelectItem>
+            }
+        </MudSelect>
+    </Actions>
+</PageHeader>
+
+<MudDataGrid T="CompetitorTestRunsOverviewDto"
+             Elevation="1"
+                 Items="_items"
+                 Loading="_loading"
+                 QuickFilter="QuickFilter"
+                 Hover="true"
+                 SortMode="SortMode.Multiple"
+                 Filterable="false"
+                 RowClick="OnRowClick"
+                 RowStyle="cursor:pointer">
+        <ToolBarContent>
+            <MudTextField @bind-Value="_search"
+                          Placeholder="@T["common.search"]"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          IconSize="Size.Medium"
+                          Immediate="true"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Class="mt-0" Style="max-width:320px;"/>
+        </ToolBarContent>
+        <Columns>
+            <PropertyColumn Property="x => x.Username" Title="@T["competitors.field.username"]"/>
+            <PropertyColumn Property="x => x.FullName" Title="@T["competitors.field.fullName"]"/>
+            <PropertyColumn Property="x => x.TestRunCount" Title="@T["testRuns.field.executions"]"/>
+            <TemplateColumn Title="@T["testRuns.field.currentStatus"]" Sortable="false">
+                <CellTemplate>
+                    @if (context.Item.CurrentStatus.HasValue)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.CurrentStatus.Value)" Variant="Variant.Filled">
+                            @StatusLabel(context.Item.CurrentStatus.Value)
+                        </MudChip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["testRuns.field.lastResult"]" Sortable="false">
+                <CellTemplate>
+                    @if (context.Item.LastResultTestsRun > 0)
+                    {
+                        <MudText Typo="Typo.body2">
+                            @context.Item.LastResultTestsPassed / @context.Item.LastResultTestsRun
+                            @if (context.Item.LastResultTestsFailed > 0)
+                            {
+                                <MudText Inline="true" Color="Color.Error" Typo="Typo.body2">
+                                    (@context.Item.LastResultTestsFailed @T["testRuns.failedSuffix"])
+                                </MudText>
+                            }
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.LastRunAt" Title="@T["testRuns.field.lastRunAt"]" Format="yyyy-MM-dd HH:mm"/>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["common.noResults"]</MudText>
+        </NoRecordsContent>
+    <PagerContent>
+        <MudDataGridPager T="CompetitorTestRunsOverviewDto"/>
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    // Session id selected for filtering. Backed by a query-string parameter so the
+    // selection survives page refreshes and shareable links.
+    [SupplyParameterFromQuery(Name = "session")] public Guid? SessionId { get; set; }
+
+    private List<CompetitorTestRunsOverviewDto> _items = [];
+    private List<SessionDto> _sessions = [];
+    private Guid? _sessionId;
+    private bool _loading;
+    private string? _search;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var sessionsResult = await Mediator.Send(new ListSessionsQuery(null, null));
+        _sessions = sessionsResult.IsSuccess ? sessionsResult.Value : [];
+
+        // Picker default mirrors the handler default: if the URL pinned a session, use
+        // it; otherwise highlight whichever session is currently Active.
+        _sessionId = SessionId ?? _sessions.FirstOrDefault(s => s.Status == SessionStatus.Active)?.Id;
+
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        var result = await Mediator.Send(new ListCompetitorTestRunsOverviewQuery(_sessionId));
+        _items = result.IsSuccess ? result.Value : [];
+        _loading = false;
+    }
+
+    private async Task OnSessionChanged(Guid? sessionId)
+    {
+        _sessionId = sessionId;
+        // Keep the URL in sync so a refresh or back-navigation lands on the same view.
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("session", sessionId?.ToString()), replace: true);
+        await Load();
+    }
+
+    private Func<CompetitorTestRunsOverviewDto, bool> QuickFilter => x =>
+        string.IsNullOrWhiteSpace(_search)
+        || x.Username.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || x.FullName.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    private void OnRowClick(DataGridRowClickEventArgs<CompetitorTestRunsOverviewDto> args)
+    {
+        // Carry the current session selection forward so the per-competitor list shows
+        // runs from the same scope.
+        var url = $"test-runs/competitor/{args.Item.CompetitorId}";
+        if (_sessionId.HasValue)
+            url += $"?session={_sessionId.Value}";
+        Nav.NavigateTo(url);
+    }
+
+    private string SessionLabel(SessionDto s) => s.Status == SessionStatus.Active
+        ? $"★ {s.Name}"
+        : s.Name;
+
+    private Color StatusColor(TestRunStatus status) => status switch
+    {
+        TestRunStatus.Completed => Color.Success,
+        TestRunStatus.Running => Color.Info,
+        TestRunStatus.Cloning => Color.Info,
+        TestRunStatus.Pending => Color.Warning,
+        TestRunStatus.Failed => Color.Error,
+        TestRunStatus.Cancelled => Color.Dark,
+        _ => Color.Default,
+    };
+
+    private string StatusLabel(TestRunStatus status) => T[$"testRuns.status.{status.ToString().ToLowerInvariant()}"];
+}

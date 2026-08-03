@@ -1,0 +1,15 @@
+@page "/Account/AccessDenied"
+@attribute [AllowAnonymous]
+@inject ITranslator T
+
+<PageTitle>@T["auth.accessDenied.title"]</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-16">
+    <MudPaper Class="pa-8" Elevation="3">
+        <MudText Typo="Typo.h5" Class="mb-4">@T["auth.accessDenied.title"]</MudText>
+        <MudText Class="mb-6">@T["auth.accessDenied.body"]</MudText>
+        <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Home">
+            @T["auth.accessDenied.goHome"]
+        </MudButton>
+    </MudPaper>
+</MudContainer>

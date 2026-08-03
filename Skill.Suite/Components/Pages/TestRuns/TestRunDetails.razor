@@ -1,0 +1,480 @@
+@page "/test-runs/{Id:guid}"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using System.Text.Json
+@using Skill.Suite.Application.TestRuns
+@using Skill.Suite.Application.TestRuns.GetTestRun
+@using Skill.Suite.Application.TestRuns.ReprocessTestRunLog
+@using Skill.Suite.Domain.TestRuns
+
+<PageTitle>@T["testRuns.details.title"]</PageTitle>
+
+<style>
+    .json-block {
+        background: var(--mud-palette-background-grey);
+        border: 1px solid var(--mud-palette-divider);
+        border-radius: 4px;
+        padding: 8px 12px;
+        margin: 4px 0 0 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8125rem;
+        line-height: 1.4;
+        white-space: pre;
+        overflow: auto;
+        max-height: 360px;
+    }
+    .json-block-error {
+        color: var(--mud-palette-error);
+        border-color: var(--mud-palette-error);
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+</style>
+
+<PageHeader Title="@T["testRuns.details.title"]" Subtitle="@_subtitle">
+    <Actions>
+        @if (_run is not null)
+        {
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="ReprocessLog"
+                       Disabled="_reprocessing">
+                @(_reprocessing ? T["common.loading"] : T["testRuns.reprocessLog"])
+            </MudButton>
+            <MudButton Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Download"
+                       OnClick="DownloadLog">
+                @T["testRuns.downloadLog"]
+            </MudButton>
+        }
+        @if (_run is not null && _run.CompetitorId.HasValue)
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@($"test-runs/competitor/{_run.CompetitorId.Value}")">
+                @T["testRuns.backToRuns"]
+            </MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack" Href="test-runs">
+                @T["testRuns.backToCompetitors"]
+            </MudButton>
+        }
+    </Actions>
+</PageHeader>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" Class="ma-4"/>
+}
+else if (_run is null)
+{
+    <MudAlert Severity="Severity.Error">@T["common.noResults"]</MudAlert>
+}
+else
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.status"]</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(_run.Status)" Variant="Variant.Filled">
+                        @StatusLabel(_run.Status)
+                    </MudChip>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.score"]</MudText>
+                    <MudText Typo="Typo.body1">
+                        @_passed / @_total
+                        @if (_failed > 0)
+                        {
+                            <MudText Inline="true" Color="Color.Error" Typo="Typo.body1">
+                                (@_failed @T["testRuns.failedSuffix"])
+                            </MudText>
+                        }
+                    </MudText>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.startedAt"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.StartedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.finishedAt"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.FinishedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.branch"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.Branch ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.commit"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.CommitSha ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            @if (!string.IsNullOrWhiteSpace(_run.FailureReason))
+            {
+                <MudItem xs="12">
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_run.FailureReason</MudAlert>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudPaper>
+
+    @* Judge diagnostics: why the run stopped, as opposed to how the submission scored. Shown above the
+       fixtures because when this is populated it is almost always the only thing worth reading. Staff only -
+       the competitor view gets a generic category instead. *@
+    @if (_diagnostics.Count > 0)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">
+            <MudText Typo="Typo.subtitle2" Class="mb-1">@T["testRuns.diagnostics"]</MudText>
+            @foreach (var detail in _diagnostics)
+            {
+                <MudText Typo="Typo.body2" Style="white-space:pre-wrap">@detail</MudText>
+            }
+        </MudAlert>
+    }
+
+    <MudText Typo="Typo.h6" Class="mb-2">@T["testRuns.fixtures"]</MudText>
+
+    @if (_fixtures.Count == 0)
+    {
+        <MudPaper Elevation="1" Class="pa-4">
+            <MudText Color="Color.Secondary">@T["testRuns.fixtures.empty"]</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudExpansionPanels MultiExpansion="true">
+            @foreach (var fixture in _fixtures)
+            {
+                <MudExpansionPanel>
+                    <TitleContent>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="width:100%">
+                            <MudIcon Icon="@FixtureIcon(fixture)" Color="@FixtureColor(fixture)" Size="Size.Small"/>
+                            <MudText Typo="Typo.body1" Style="flex-grow:1">@fixture.Name</MudText>
+                            @if (fixture.Quality.HasValue)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@QualityColor(fixture.Quality.Value)">
+                                    @T["testRuns.field.quality"] @FormatQuality(fixture.Quality.Value)
+                                </MudChip>
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                    @fixture.TestsPassed / @fixture.TestsRun
+                                    @if (fixture.TestsFailed > 0)
+                                    {
+                                        <MudText Inline="true" Color="Color.Error" Typo="Typo.body2">
+                                            (@fixture.TestsFailed @T["testRuns.failedSuffix"])
+                                        </MudText>
+                                    }
+                                </MudText>
+                            }
+                            @if (fixture.DurationMs.HasValue)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@fixture.DurationMs ms</MudText>
+                            }
+                        </MudStack>
+                    </TitleContent>
+                    <ChildContent>
+                        @if (fixture.UnitTests.Count == 0)
+                        {
+                            <MudText Color="Color.Secondary">@T["testRuns.unitTests.empty"]</MudText>
+                        }
+                        else
+                        {
+                            <MudExpansionPanels MultiExpansion="true" Dense="true">
+                                @foreach (var test in fixture.UnitTests)
+                                {
+                                    <MudExpansionPanel>
+                                        <TitleContent>
+                                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="width:100%">
+                                                <MudChip T="string" Size="Size.Small" Color="@OutcomeColor(test.Outcome)" Variant="Variant.Filled">
+                                                    @OutcomeLabel(test.Outcome)
+                                                </MudChip>
+                                                <MudText Typo="Typo.body2" Style="flex-grow:1">@test.Name</MudText>
+                                                @if (test.Events.Count > 0)
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                        @T.Format("testRuns.events.count", test.Events.Count)
+                                                    </MudText>
+                                                }
+                                                @if (test.DurationMs.HasValue)
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@test.DurationMs ms</MudText>
+                                                }
+                                            </MudStack>
+                                        </TitleContent>
+                                        <ChildContent>
+                                            @if (!string.IsNullOrWhiteSpace(test.Error))
+                                            {
+                                                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+                                                    <MudText Typo="Typo.body2" Style="white-space:pre-wrap">@test.Error</MudText>
+                                                </MudAlert>
+                                            }
+
+                                            @if (test.Events.Count == 0)
+                                            {
+                                                <MudText Color="Color.Secondary">@T["testRuns.events.empty"]</MudText>
+                                            }
+                                            else
+                                            {
+                                                <MudTimeline TimelineOrientation="TimelineOrientation.Vertical"
+                                                             TimelinePosition="TimelinePosition.Start"
+                                                             TimelineAlign="TimelineAlign.Start">
+                                                    @foreach (var evt in test.Events)
+                                                    {
+                                                        <MudTimelineItem Color="@EventColor(evt)" Size="Size.Small">
+                                                            <ItemContent>
+                                                                <MudStack Spacing="1">
+                                                                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                                                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@EventColor(evt)">
+                                                                            @EventKindLabel(evt.Kind)
+                                                                        </MudChip>
+                                                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                                            @evt.Timestamp.ToString("HH:mm:ss.fff")
+                                                                        </MudText>
+                                                                    </MudStack>
+
+                                                                    @if (evt.Kind == TestEventKind.Call)
+                                                                    {
+                                                                        var threw = !string.IsNullOrWhiteSpace(evt.Threw);
+                                                                        <MudGrid Spacing="2">
+                                                                            <MudItem xs="12" md="6">
+                                                                                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.events.call"]</MudText>
+                                                                                <pre class="json-block">@FormatCall(evt.Target, evt.Arguments)</pre>
+                                                                            </MudItem>
+                                                                            <MudItem xs="12" md="6">
+                                                                                <MudText Typo="Typo.caption" Color="@(threw ? Color.Error : Color.Secondary)">
+                                                                                    @(threw ? T["testRuns.events.threw"] : T["testRuns.events.returned"])
+                                                                                </MudText>
+                                                                                <pre class="json-block @(threw ? "json-block-error" : null)">@(threw ? evt.Threw : TryPrettyJson(evt.Returned))</pre>
+                                                                            </MudItem>
+                                                                        </MudGrid>
+                                                                    }
+                                                                    else if (evt.Kind == TestEventKind.Metric)
+                                                                    {
+                                                                        <MudText Typo="Typo.body2"><strong>@(evt.Target ?? "—")</strong></MudText>
+                                                                        <pre class="json-block">@TryPrettyJson(evt.Payload)</pre>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <MudText Typo="Typo.body2">
+                                                                            <strong>@(evt.AssertionKind ?? "—")</strong>
+                                                                            @if (!string.IsNullOrWhiteSpace(evt.Target))
+                                                                            {
+                                                                                <MudText Inline="true" Typo="Typo.body2" Color="Color.Secondary">
+                                                                                    @T["testRuns.events.on"] @evt.Target
+                                                                                </MudText>
+                                                                            }
+                                                                        </MudText>
+                                                                        <MudStack Row="true" Spacing="4">
+                                                                            <MudText Typo="Typo.caption">
+                                                                                <strong>@T["testRuns.events.expected"]:</strong>
+                                                                                <span style="white-space:pre-wrap">@(evt.Expected ?? "—")</span>
+                                                                            </MudText>
+                                                                            <MudText Typo="Typo.caption">
+                                                                                <strong>@T["testRuns.events.actual"]:</strong>
+                                                                                <span style="white-space:pre-wrap">@(evt.Actual ?? "—")</span>
+                                                                            </MudText>
+                                                                        </MudStack>
+                                                                    }
+                                                                </MudStack>
+                                                            </ItemContent>
+                                                        </MudTimelineItem>
+                                                    }
+                                                </MudTimeline>
+                                            }
+                                        </ChildContent>
+                                    </MudExpansionPanel>
+                                }
+                            </MudExpansionPanels>
+                        }
+                    </ChildContent>
+                </MudExpansionPanel>
+            }
+        </MudExpansionPanels>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private TestRunDto? _run;
+    private bool _loading = true;
+    private bool _reprocessing;
+    private string _subtitle = string.Empty;
+    private int _passed;
+    private int _failed;
+    private int _total;
+    private List<TestFixtureResultDto> _fixtures = [];
+    private List<string> _diagnostics = [];
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        var result = await Mediator.Send(new GetTestRunQuery(Id));
+        if (result.IsSuccess)
+        {
+            _run = result.Value;
+            _passed = _run.Fixtures.Sum(f => f.TestsPassed);
+            _failed = _run.Fixtures.Sum(f => f.TestsFailed);
+            _total = _run.Fixtures.Sum(f => f.TestsRun);
+            _subtitle = $"{_run.RepositoryUrl}";
+
+            // Diagnostics are surfaced in their own panel above, so they are not listed as a fixture too.
+            _fixtures = _run.Fixtures
+                .Where(f => f.Kind != TestFixtureKind.Diagnostics)
+                .ToList();
+
+            _diagnostics = _run.Fixtures
+                .Where(f => f.Kind == TestFixtureKind.Diagnostics)
+                .SelectMany(f => f.UnitTests)
+                .SelectMany(t => t.Events)
+                .Select(e => e.Detail)
+                .Where(detail => !string.IsNullOrWhiteSpace(detail))
+                .Select(detail => detail!)
+                .ToList();
+        }
+        _loading = false;
+    }
+
+    // forceLoad triggers a real browser navigation; the endpoint responds with
+    // Content-Disposition: attachment so the browser downloads instead of leaving the page.
+    private void DownloadLog() => Nav.NavigateTo($"api/test-runs/{Id}/log", forceLoad: true);
+
+    private async Task ReprocessLog()
+    {
+        _reprocessing = true;
+        try
+        {
+            var result = await Mediator.Send(new ReprocessTestRunLogCommand(Id));
+            if (result.IsSuccess)
+            {
+                Snackbar.Add(T["testRuns.reprocessLog.success"], Severity.Success);
+                await Load();
+            }
+            else
+            {
+                Snackbar.Add(result.Error.Message, Severity.Error);
+            }
+        }
+        finally
+        {
+            _reprocessing = false;
+        }
+    }
+
+    private Color StatusColor(TestRunStatus status) => status switch
+    {
+        TestRunStatus.Completed => Color.Success,
+        TestRunStatus.Running => Color.Info,
+        TestRunStatus.Cloning => Color.Info,
+        TestRunStatus.Pending => Color.Warning,
+        TestRunStatus.Failed => Color.Error,
+        TestRunStatus.Cancelled => Color.Dark,
+        _ => Color.Default,
+    };
+
+    private string StatusLabel(TestRunStatus status) => T[$"testRuns.status.{status.ToString().ToLowerInvariant()}"];
+
+    private Color OutcomeColor(TestOutcome outcome) => outcome switch
+    {
+        TestOutcome.Passed => Color.Success,
+        TestOutcome.Failed => Color.Error,
+        TestOutcome.Errored => Color.Error,
+        TestOutcome.Skipped => Color.Warning,
+        _ => Color.Default,
+    };
+
+    private string OutcomeLabel(TestOutcome outcome) => T[$"testRuns.outcome.{outcome.ToString().ToLowerInvariant()}"];
+
+    private Color EventColor(TestEventDto evt) => evt.Kind switch
+    {
+        TestEventKind.Assertion => evt.Passed == true ? Color.Success : evt.Passed == false ? Color.Error : Color.Default,
+        TestEventKind.Call => !string.IsNullOrWhiteSpace(evt.Threw) ? Color.Error : Color.Info,
+        _ => Color.Default,
+    };
+
+    private string EventKindLabel(TestEventKind kind) => T[$"testRuns.events.kind.{kind.ToString().ToLowerInvariant()}"];
+
+    // Mirrors the 4-segment competitor ScoreBar — kept in sync so the admin chip and
+    // the competitor bar disagree only because of rounding, never because of bucket
+    // boundaries. quality is in [0, 1]. (Avoids the `<` relational pattern because the
+    // Razor source generator misreads it as the start of an HTML tag.)
+    private static Color QualityColor(double quality)
+    {
+        var pct = quality * 100.0;
+        if (pct >= 75.0) return Color.Success;
+        if (pct >= 50.0) return Color.Info;
+        if (pct >= 25.0) return Color.Warning;
+        return Color.Error;
+    }
+
+    private static string FormatQuality(double quality) =>
+        (quality * 100.0).ToString("0.#") + "%";
+
+    private const int MaxFormattedLength = 100_000;
+
+    private static readonly JsonSerializerOptions PrettyOptions = new() { WriteIndented = true };
+
+    private static string FormatCall(string? target, IReadOnlyList<string?>? args)
+    {
+        var name = string.IsNullOrWhiteSpace(target) ? "—" : target;
+        if (args is null || args.Count == 0) return $"{name}()";
+
+        var formatted = args.Select(a => Indent(TryPrettyJson(a) ?? "null", 2));
+        return $"{name}(\n{string.Join(",\n", formatted)}\n)";
+    }
+
+    private static string? TryPrettyJson(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return raw;
+        if (raw.Length > MaxFormattedLength) return raw;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            return JsonSerializer.Serialize(doc.RootElement, PrettyOptions);
+        }
+        catch (JsonException)
+        {
+            return raw;
+        }
+    }
+
+    private static string Indent(string value, int spaces)
+    {
+        var pad = new string(' ', spaces);
+        return pad + value.Replace("\n", "\n" + pad);
+    }
+
+    private string FixtureIcon(TestFixtureResultDto fixture) =>
+        fixture.TestsFailed > 0
+            ? Icons.Material.Filled.Error
+            : fixture.TestsRun > 0
+                ? Icons.Material.Filled.CheckCircle
+                : Icons.Material.Filled.HourglassEmpty;
+
+    private Color FixtureColor(TestFixtureResultDto fixture) =>
+        fixture.TestsFailed > 0
+            ? Color.Error
+            : fixture.TestsRun > 0
+                ? Color.Success
+                : Color.Default;
+}

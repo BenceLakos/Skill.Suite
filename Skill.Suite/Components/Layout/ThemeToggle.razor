@@ -1,0 +1,39 @@
+@implements IDisposable
+@inject ThemeState Theme
+@inject ThemePersistence ThemePersistence
+@inject ITranslator T
+
+<MudButton FullWidth="@FullWidth"
+           StartIcon="@CurrentIcon"
+           Variant="Variant.Text"
+           Color="Color.Default"
+           Class="@($"sidebar-action {Class}".Trim())"
+           OnClick="Toggle">
+    @ButtonLabel
+</MudButton>
+
+@code {
+    /// <summary>Stretches the button to fill its container. True in the sidebar, false in the app bar.</summary>
+    [Parameter] public bool FullWidth { get; set; }
+
+    /// <summary>Extra CSS classes appended to the underlying MudButton.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    protected override void OnInitialized() => Theme.OnChange += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    private string ButtonLabel => Theme.IsDarkMode ? T["theme.light"] : T["theme.dark"];
+
+    private string CurrentIcon => Theme.IsDarkMode
+        ? Icons.Material.Filled.LightMode
+        : Icons.Material.Filled.DarkMode;
+
+    private async Task Toggle()
+    {
+        Theme.Toggle();
+        await ThemePersistence.WriteAsync(Theme.IsDarkMode);
+    }
+
+    public void Dispose() => Theme.OnChange -= OnChanged;
+}

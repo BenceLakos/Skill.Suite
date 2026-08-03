@@ -1,0 +1,329 @@
+@page "/sessions/new"
+@page "/sessions/{Id:guid}"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject ITranslator T
+
+@using System.Text.RegularExpressions
+@using Skill.Suite.Application.Credentials
+@using Skill.Suite.Application.Credentials.ListCredentials
+@using Skill.Suite.Application.DockerImages.ListDockerImageOptions
+@using Skill.Suite.Application.Sessions.CreateSession
+@using Skill.Suite.Application.Sessions.GetSession
+@using Skill.Suite.Application.Sessions.UpdateSession
+@using Skill.Suite.Components.Pages.Sessions.Drafts
+@using Skill.Suite.Domain.Credentials
+@using Skill.Suite.Domain.Sessions
+
+<PageTitle>@(IsEdit ? T["sessions.edit"] : T["sessions.create"])</PageTitle>
+
+<MudStack Spacing="0" Class="mb-3">
+    <MudText Typo="Typo.h5">@(IsEdit ? T["sessions.edit"] : T["sessions.create"])</MudText>
+    <MudText Typo="Typo.body2" Class="text-muted">@T["sessions.edit.subtitle"]</MudText>
+</MudStack>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true"/>
+}
+else
+{
+    <MudForm @ref="_form" Model="_model">
+      <MudPaper Elevation="1" Class="session-edit-card">
+        <MudTabs Elevation="0" Border="false" KeepPanelsAlive="true" MinimumTabWidth="120px" Class="session-edit-tabs">
+            <MudTabPanel Text="@T["sessions.section.general"]" Class="pa-0 pt-4">
+                <MudStack Spacing="3">
+                    <LabeledField Label="@T["sessions.field.name"]">
+                        <MudTextField @bind-Value="_model.Name"
+                                      Variant="Variant.Outlined"
+                                      Required="true" RequiredError="@T["common.required"]" MaxLength="200"/>
+                    </LabeledField>
+
+                    <MudGrid Spacing="3">
+                        <MudItem xs="12" md="6">
+                            <LabeledField Label="@T["sessions.field.startsAt"]">
+                                <MudTextField @bind-Value="_model.StartsAt"
+                                              Variant="Variant.Outlined"
+                                              InputType="InputType.DateTimeLocal" Required="true"/>
+                            </LabeledField>
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <LabeledField Label="@T["sessions.field.endsAt"]">
+                                <MudTextField @bind-Value="_model.EndsAt"
+                                              Variant="Variant.Outlined"
+                                              InputType="InputType.DateTimeLocal" Required="true"/>
+                            </LabeledField>
+                        </MudItem>
+                    </MudGrid>
+
+                    <LabeledField Label="@T["sessions.field.description"]" Help="@T["sessions.help.description"]">
+                        <MarkdownEditor @bind-Value="_model.Description"/>
+                    </LabeledField>
+
+                    @if (IsEdit)
+                    {
+                        <MudGrid Spacing="3">
+                            <MudItem xs="12" md="6">
+                                <LabeledField Label="@T["sessions.field.status"]">
+                                    <MudSelect T="SessionStatus" @bind-Value="_model.Status"
+                                               Variant="Variant.Outlined">
+                                        <MudSelectItem Value="@SessionStatus.Draft">@T["sessions.status.draft"]</MudSelectItem>
+                                        <MudSelectItem Value="@SessionStatus.Active">@T["sessions.status.active"]</MudSelectItem>
+                                        <MudSelectItem Value="@SessionStatus.Closed">@T["sessions.status.closed"]</MudSelectItem>
+                                    </MudSelect>
+                                </LabeledField>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                </MudStack>
+            </MudTabPanel>
+
+            <MudTabPanel Text="@T["sessions.section.resources"]" Class="pa-0 pt-4">
+                <MudStack Spacing="3">
+                    <LabeledField Label="@T["sessions.field.templateFolder"]" Help="@T["sessions.help.templateFolder"]">
+                        <MudTextField @bind-Value="_model.TemplateFolder"
+                                      Variant="Variant.Outlined" MaxLength="1000"/>
+                    </LabeledField>
+                    <LabeledField Label="@T["sessions.field.judgementImage"]">
+                        <MudSelect T="string" @bind-Value="_model.JudgementImage"
+                                   Variant="Variant.Outlined" Clearable="true">
+                            @foreach (var img in _availableImages)
+                            {
+                                <MudSelectItem Value="@img">@img</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </LabeledField>
+
+                    <LabeledField Label="@T["sessions.field.gitCredential"]"
+                                  Help="@T["sessions.help.gitCredential"]">
+                        <MudSelect T="Guid?" @bind-Value="_model.GitCredentialId"
+                                   Variant="Variant.Outlined" Clearable="true">
+                            @foreach (var c in _giteaCredentials)
+                            {
+                                <MudSelectItem T="Guid?" Value="@c.Id">@c.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </LabeledField>
+
+                    <LabeledField Label="@T["sessions.field.judgementImagePullCredential"]"
+                                  Help="@T["sessions.help.judgementImagePullCredential"]">
+                        <MudSelect T="Guid?" @bind-Value="_model.JudgementImagePullCredentialId"
+                                   Variant="Variant.Outlined" Clearable="true">
+                            @foreach (var c in _nexusCredentials)
+                            {
+                                <MudSelectItem T="Guid?" Value="@c.Id">@c.Name</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </LabeledField>
+                </MudStack>
+            </MudTabPanel>
+
+            <MudTabPanel Text="@T["sessions.section.database"]" Class="pa-0 pt-4">
+                <MudStack Spacing="3">
+                    <LabeledField Label="@T["sessions.field.databaseName"]">
+                        <MudTextField @bind-Value="_model.DatabaseName"
+                                      Variant="Variant.Outlined" MaxLength="120"/>
+                    </LabeledField>
+                    <MudStack Row="true" Spacing="6">
+                        <MudCheckBox T="bool" @bind-Value="_model.DatabaseReadAccess"
+                                     Label="@T["sessions.field.databaseRead"]" Dense="true"/>
+                        <MudCheckBox T="bool" @bind-Value="_model.DatabaseWriteAccess"
+                                     Label="@T["sessions.field.databaseWrite"]" Dense="true"/>
+                    </MudStack>
+                </MudStack>
+            </MudTabPanel>
+
+            <MudTabPanel Text="@T["sessions.section.dockerImages"]" Class="pa-0 pt-4">
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        @T.Format("sessions.dockerImages.count", _model.DockerImages.Count)
+                    </MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddDockerImage">
+                        @T["sessions.dockerImages.add"]
+                    </MudButton>
+                </MudStack>
+
+                @if (_model.DockerImages.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                        @T["sessions.dockerImages.empty"]
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudStack Spacing="2">
+                        @for (var i = 0; i < _model.DockerImages.Count; i++)
+                        {
+                            var idx = i;
+                            <DockerImageCard Image="_model.DockerImages[idx]"
+                                             AvailableImages="_availableImages"
+                                             OnRemove="@(() => RemoveDockerImage(idx))"/>
+                        }
+                    </MudStack>
+                }
+            </MudTabPanel>
+        </MudTabs>
+
+        <div class="session-edit-footer">
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+            }
+
+            <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2">
+                <MudButton Variant="Variant.Outlined" Size="Size.Medium" Href="sessions">
+                    @T["common.cancel"]
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Medium"
+                           OnClick="Submit" Disabled="_submitting" StartIcon="@Icons.Material.Filled.Save">
+                    @(IsEdit ? T["sessions.update"] : T["sessions.createConfirm"])
+                </MudButton>
+            </MudStack>
+        </div>
+      </MudPaper>
+    </MudForm>
+}
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+
+    private bool IsEdit => Id.HasValue;
+
+    private MudForm _form = null!;
+    private SessionFormDraft _model = new();
+    private List<string> _availableImages = [];
+    private List<CredentialDto> _giteaCredentials = [];
+    private List<CredentialDto> _nexusCredentials = [];
+    private bool _loading = true;
+    private bool _submitting;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var imageOptions = await Mediator.Send(new ListDockerImageOptionsQuery());
+        _availableImages = imageOptions.IsSuccess ? imageOptions.Value : [];
+
+        var gitea = await Mediator.Send(new ListCredentialsQuery(CredentialKind.Gitea, null));
+        _giteaCredentials = gitea.IsSuccess ? gitea.Value : [];
+
+        // The judgement-image pull credential can be either kind. Session images live in the private Gitea
+        // registry, which serves NuGet and OCI from the same host and the same account, so an operator
+        // reasonably stores that credential as Gitea. Offering only Nexus forced them to file it under a
+        // label that does not describe it.
+        var nexus = await Mediator.Send(new ListCredentialsQuery(CredentialKind.Nexus, null));
+        _nexusCredentials =
+        [
+            .. nexus.IsSuccess ? nexus.Value : [],
+            .. _giteaCredentials,
+        ];
+
+        if (IsEdit)
+        {
+            var result = await Mediator.Send(new GetSessionByIdQuery(Id!.Value));
+            if (result.IsSuccess)
+            {
+                _model = LoadDraftFrom(result.Value);
+            }
+            else
+            {
+                _error = result.Error.Message;
+            }
+        }
+
+        _loading = false;
+    }
+
+    private void AddDockerImage() =>
+        _model.DockerImages.Add(new DockerImageDraft
+        {
+            Image = _availableImages.FirstOrDefault() ?? string.Empty,
+        });
+
+    private void RemoveDockerImage(int index)
+    {
+        if (index >= 0 && index < _model.DockerImages.Count)
+            _model.DockerImages.RemoveAt(index);
+    }
+
+    private async Task Submit()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid) return;
+
+        _submitting = true;
+        _error = null;
+
+        var startsAt = DateTime.SpecifyKind(_model.StartsAt, DateTimeKind.Utc);
+        var endsAt = DateTime.SpecifyKind(_model.EndsAt, DateTimeKind.Utc);
+        var dockerImages = _model.DockerImages.Select(ToDomain).ToList();
+
+        if (IsEdit)
+        {
+            var cmd = new UpdateSessionCommand(
+                Id!.Value, _model.Name, _model.Description, startsAt, endsAt, _model.Status,
+                _model.TemplateFolder, _model.JudgementImage,
+                _model.DatabaseName, _model.DatabaseReadAccess, _model.DatabaseWriteAccess,
+                _model.GitCredentialId, _model.JudgementImagePullCredentialId,
+                dockerImages);
+            var result = await Mediator.Send(cmd);
+            if (result.IsFailure) { _error = result.Error.Message; _submitting = false; return; }
+        }
+        else
+        {
+            var slug = GenerateSlug(_model.Name);
+            var cmd = new CreateSessionCommand(
+                _model.Name, slug, _model.Description, startsAt, endsAt,
+                _model.TemplateFolder, _model.JudgementImage,
+                _model.DatabaseName, _model.DatabaseReadAccess, _model.DatabaseWriteAccess,
+                _model.GitCredentialId, _model.JudgementImagePullCredentialId,
+                dockerImages);
+            var result = await Mediator.Send(cmd);
+            if (result.IsFailure) { _error = result.Error.Message; _submitting = false; return; }
+        }
+
+        Snackbar.Add(T["common.success.saved"], Severity.Success);
+        Nav.NavigateTo("sessions");
+    }
+
+    private static string GenerateSlug(string name)
+    {
+        var slug = Regex.Replace(name.Trim().ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        return string.IsNullOrEmpty(slug) ? Guid.NewGuid().ToString("N")[..8] : slug;
+    }
+
+    private static SessionFormDraft LoadDraftFrom(Skill.Suite.Application.Sessions.SessionDto dto) => new()
+    {
+        Name = dto.Name,
+        Slug = dto.Slug,
+        Description = dto.Description,
+        StartsAt = DateTime.SpecifyKind(dto.StartsAt, DateTimeKind.Unspecified),
+        EndsAt = DateTime.SpecifyKind(dto.EndsAt, DateTimeKind.Unspecified),
+        Status = dto.Status,
+        TemplateFolder = dto.TemplateFolder,
+        JudgementImage = dto.JudgementImage,
+        DatabaseName = dto.DatabaseName,
+        DatabaseReadAccess = dto.DatabaseReadAccess,
+        DatabaseWriteAccess = dto.DatabaseWriteAccess,
+        GitCredentialId = dto.GitCredentialId,
+        JudgementImagePullCredentialId = dto.JudgementImagePullCredentialId,
+        DockerImages = dto.DockerImages.Select(d => new DockerImageDraft
+        {
+            Image = d.Image,
+            Env = d.Env.Select(kv => new KeyValueDraft { Key = kv.Key, Value = kv.Value }).ToList(),
+            Labels = d.Labels.Select(kv => new KeyValueDraft { Key = kv.Key, Value = kv.Value }).ToList(),
+            Volumes = d.Volumes.Select(v => new VolumeDraft { HostPath = v.HostPath, ContainerPath = v.ContainerPath, ReadOnly = v.ReadOnly }).ToList(),
+            PortMappings = d.PortMappings.Select(p => new PortMappingDraft { HostPort = p.HostPort, ContainerPort = p.ContainerPort, Protocol = p.Protocol }).ToList(),
+        }).ToList(),
+    };
+
+    private static SessionDockerImage ToDomain(DockerImageDraft draft) => new(
+        draft.Image.Trim(),
+        draft.Env.Where(kv => !string.IsNullOrWhiteSpace(kv.Key)).ToDictionary(kv => kv.Key.Trim(), kv => kv.Value ?? string.Empty),
+        draft.Labels.Where(kv => !string.IsNullOrWhiteSpace(kv.Key)).ToDictionary(kv => kv.Key.Trim(), kv => kv.Value ?? string.Empty),
+        draft.Volumes.Where(v => !string.IsNullOrWhiteSpace(v.HostPath) && !string.IsNullOrWhiteSpace(v.ContainerPath))
+            .Select(v => new VolumeMount(v.HostPath.Trim(), v.ContainerPath.Trim(), v.ReadOnly)).ToList(),
+        draft.PortMappings.Select(p => new PortMapping(p.HostPort, p.ContainerPort, p.Protocol)).ToList());
+}

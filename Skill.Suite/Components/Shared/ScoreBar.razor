@@ -1,0 +1,21 @@
+@inject ITranslator T
+
+@using Skill.Suite.Application.TestRuns.MyTestRuns
+
+<div class="score-bar-wrap">
+    <div class="score-bar">
+        <div class="score-segment score-1 @(IsFilled(ScoreBucket.VeryLow) ? "filled" : null)"></div>
+        <div class="score-segment score-2 @(IsFilled(ScoreBucket.Low) ? "filled" : null)"></div>
+        <div class="score-segment score-3 @(IsFilled(ScoreBucket.High) ? "filled" : null)"></div>
+        <div class="score-segment score-4 @(IsFilled(ScoreBucket.VeryHigh) ? "filled" : null)"></div>
+    </div>
+    <span class="score-label">@Label</span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ScoreBucket Bucket { get; set; }
+
+    private bool IsFilled(ScoreBucket threshold) => Bucket >= threshold;
+
+    private string Label => T[$"scoreBucket.{Bucket.ToString().ToLowerInvariant()}"];
+}

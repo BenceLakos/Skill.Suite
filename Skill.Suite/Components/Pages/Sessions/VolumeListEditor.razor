@@ -1,0 +1,28 @@
+@using Skill.Suite.Components.Pages.Sessions.Drafts
+@inject ITranslator T
+
+<MudStack Spacing="1">
+    @for (var i = 0; i < Items.Count; i++)
+    {
+        var idx = i;
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+            <MudTextField T="string" @bind-Value="Items[idx].HostPath"
+                          Variant="Variant.Outlined"
+                          Placeholder="@T["sessions.volume.host"]" Style="flex:2;"/>
+            <MudTextField T="string" @bind-Value="Items[idx].ContainerPath"
+                          Variant="Variant.Outlined"
+                          Placeholder="@T["sessions.volume.container"]" Style="flex:2;"/>
+            <MudCheckBox T="bool" @bind-Value="Items[idx].ReadOnly" Label="@T["sessions.volume.readOnly"]" Dense="true"/>
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Items.RemoveAt(idx))"/>
+        </MudStack>
+    }
+    <div>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Items.Add(new VolumeDraft()))">
+            @T["common.add"]
+        </MudButton>
+    </div>
+</MudStack>
+
+@code {
+    [Parameter, EditorRequired] public List<VolumeDraft> Items { get; set; } = [];
+}

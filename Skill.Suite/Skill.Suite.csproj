@@ -10,25 +10,43 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="10.0.0"/>
-        <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.0"/>
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0"/>
-        <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.0"/>
-        <PackageReference Include="Mediator.Abstractions" Version="3.1.0-rc.1"/>
-        <PackageReference Include="MudBlazor" Version="9.0.0"/>
-        <PackageReference Include="Scalar.AspNetCore" Version="2.10.0"/>
+        <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="10.0.0" />
+        <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.0" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.0" />
+        <PackageReference Include="Mediator.Abstractions" Version="3.1.0-rc.1" />
+        <PackageReference Include="MudBlazor" Version="9.4.0" />
+        <PackageReference Include="Scalar.AspNetCore" Version="2.10.0" />
+
+        <!--
+          Direct reference only to lift a transitive dependency off a vulnerable version:
+          GHSA-v5pm-xwqc-g5wc (high, circular schema references can terminate OpenAPI parsing) affects
+          Microsoft.OpenApi >= 2.0.0-preview.11 through 2.7.4, first patched in 2.7.5.
+
+          Microsoft.AspNetCore.OpenApi declares Microsoft.OpenApi >= 2.0.0 and NuGet resolves the lowest
+          match, so it pinned exactly 2.0.0. Every 10.0.x patch up to 10.0.10 still declares that same
+          floor, so upgrading Microsoft.AspNetCore.OpenApi does not help - overriding the transitive
+          version here is the only fix. Kept inside the 2.x line deliberately: 3.x is a major bump against
+          what Microsoft.AspNetCore.OpenApi 10.0.0 was built for.
+
+          Remove this line once Microsoft.AspNetCore.OpenApi raises its own floor past 2.7.5.
+        -->
+        <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     </ItemGroup>
 
     <ItemGroup>
         <Content Include="..\.dockerignore">
             <Link>.dockerignore</Link>
         </Content>
+        <Content Update="Resources\Translations\*.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Skill.Suite.Application\Skill.Suite.Application.csproj"/>
-        <ProjectReference Include="..\Skill.Suite.Infra\Skill.Suite.Infra.csproj"/>
-        <ProjectReference Include="..\Skill.Suite.Domain\Skill.Suite.Domain.csproj"/>
+        <ProjectReference Include="..\Skill.Suite.Application\Skill.Suite.Application.csproj" />
+        <ProjectReference Include="..\Skill.Suite.Infra\Skill.Suite.Infra.csproj" />
+        <ProjectReference Include="..\Skill.Suite.Domain\Skill.Suite.Domain.csproj" />
     </ItemGroup>
 
 </Project>

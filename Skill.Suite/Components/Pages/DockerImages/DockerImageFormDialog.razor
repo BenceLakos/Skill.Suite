@@ -1,0 +1,222 @@
+@inject ISender Mediator
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using Skill.Suite.Application.Credentials
+@using Skill.Suite.Application.Credentials.ListCredentials
+@using Skill.Suite.Application.DockerImages.CreateDockerImage
+@using Skill.Suite.Application.DockerImages.GetDockerImage
+@using Skill.Suite.Application.DockerImages.UpdateDockerImage
+@using Skill.Suite.Domain.Credentials
+@using Skill.Suite.Domain.DockerImages
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true"/>
+        }
+        else
+        {
+            <MudForm @ref="_form" Model="_model" Class="d-flex flex-column gap-3">
+                <MudTextField @bind-Value="_model.Name"
+                              Label="@T["dockerImages.field.name"]"
+                              Variant="Variant.Outlined"
+                              Required="true" RequiredError="@T["common.required"]" MaxLength="120"/>
+
+                <MudSelect T="DockerImageSource" @bind-Value="_model.Source"
+                           Label="@T["dockerImages.field.source"]"
+                           Variant="Variant.Outlined"
+                           HelperText="@T["dockerImages.help.source"]">
+                    <MudSelectItem T="DockerImageSource" Value="DockerImageSource.Build">@T["dockerImages.source.build"]</MudSelectItem>
+                    <MudSelectItem T="DockerImageSource" Value="DockerImageSource.Pull">@T["dockerImages.source.pull"]</MudSelectItem>
+                </MudSelect>
+
+                <MudTextField @bind-Value="_model.ImageName"
+                              Label="@T["dockerImages.field.imageName"]"
+                              Variant="Variant.Outlined"
+                              Required="true" RequiredError="@T["common.required"]"
+                              HelperText="@T["dockerImages.help.imageName"]"
+                              MaxLength="500"/>
+
+                <MudSelect T="Guid?" @bind-Value="_model.NexusCredentialId"
+                           Label="@T["dockerImages.field.nexusCredential"]"
+                           Variant="Variant.Outlined" Clearable="true"
+                           HelperText="@T["dockerImages.help.nexusCredential"]">
+                    @foreach (var nexus in _nexusCredentials)
+                    {
+                        <MudSelectItem T="Guid?" Value="@nexus.Id">@nexus.Name</MudSelectItem>
+                    }
+                </MudSelect>
+
+                @if (_model.Source == DockerImageSource.Build)
+                {
+                    <MudTextField @bind-Value="_model.BuildContext"
+                                  Label="@T["dockerImages.field.buildContext"]"
+                                  Variant="Variant.Outlined"
+                                  Required="true" RequiredError="@T["common.required"]"
+                                  HelperText="@T["dockerImages.help.buildContext"]"
+                                  MaxLength="1000"/>
+
+                    <MudTextField @bind-Value="_model.DockerfilePath"
+                                  Label="@T["dockerImages.field.dockerfile"]"
+                                  Variant="Variant.Outlined"
+                                  HelperText="@T["dockerImages.help.dockerfile"]"
+                                  MaxLength="1000"/>
+
+                    <div>
+                        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-1">
+                            <MudText Typo="Typo.subtitle2">@T["dockerImages.field.buildArgs"]</MudText>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddBuildArgRow">
+                                @T["dockerImages.buildArgs.add"]
+                            </MudButton>
+                        </MudStack>
+
+                        @if (_model.BuildArgs.Count == 0)
+                        {
+                            <MudPaper Class="pa-3" Outlined="true">
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">@T["dockerImages.buildArgs.empty"]</MudText>
+                            </MudPaper>
+                        }
+                        else
+                        {
+                            <MudStack Spacing="2">
+                                @for (var i = 0; i < _model.BuildArgs.Count; i++)
+                                {
+                                    var index = i;
+                                    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                                        <MudTextField T="string"
+                                                      Value="_model.BuildArgs[index].Key"
+                                                      ValueChanged="@(v => _model.BuildArgs[index] = _model.BuildArgs[index] with { Key = v })"
+                                                      Placeholder="@T["dockerImages.buildArgs.key"]"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                      Style="flex:1;"/>
+                                        <MudTextField T="string"
+                                                      Value="_model.BuildArgs[index].Value"
+                                                      ValueChanged="@(v => _model.BuildArgs[index] = _model.BuildArgs[index] with { Value = v })"
+                                                      Placeholder="@T["dockerImages.buildArgs.value"]"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                      Style="flex:2;"/>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => RemoveBuildArg(index))"/>
+                                    </MudStack>
+                                }
+                            </MudStack>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+                }
+            </MudForm>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">@T["common.cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit" Disabled="_submitting">@T["common.save"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Guid? Id { get; set; }
+
+    private MudForm _form = null!;
+    private FormModel _model = new();
+    private List<CredentialDto> _nexusCredentials = [];
+    private bool _loading;
+    private bool _submitting;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+
+        var credResult = await Mediator.Send(new ListCredentialsQuery(CredentialKind.Nexus, null));
+        _nexusCredentials = credResult.IsSuccess ? credResult.Value : [];
+
+        if (Id.HasValue)
+        {
+            var result = await Mediator.Send(new GetDockerImageByIdQuery(Id.Value));
+            if (result.IsSuccess)
+            {
+                var s = result.Value;
+                _model = new FormModel
+                {
+                    Name = s.Name,
+                    ImageName = s.ImageName,
+                    Source = s.Source,
+                    BuildContext = s.BuildContext ?? string.Empty,
+                    DockerfilePath = s.DockerfilePath,
+                    NexusCredentialId = s.NexusCredentialId,
+                    BuildArgs = s.BuildArgs.Select(kv => new BuildArgEntry(kv.Key, kv.Value)).ToList(),
+                };
+            }
+            else
+            {
+                _error = result.Error.Message;
+            }
+        }
+
+        _loading = false;
+    }
+
+    private void AddBuildArgRow() => _model.BuildArgs.Add(new BuildArgEntry(string.Empty, string.Empty));
+
+    private void RemoveBuildArg(int index)
+    {
+        if (index >= 0 && index < _model.BuildArgs.Count)
+            _model.BuildArgs.RemoveAt(index);
+    }
+
+    private async Task Submit()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid) return;
+
+        _submitting = true;
+        _error = null;
+
+        var isPull = _model.Source == DockerImageSource.Pull;
+
+        var buildContext = isPull ? null : _model.BuildContext;
+        var dockerfilePath = isPull ? null : _model.DockerfilePath;
+        var buildArgs = isPull
+            ? null
+            : _model.BuildArgs
+                .Where(e => !string.IsNullOrWhiteSpace(e.Key))
+                .ToDictionary(e => e.Key.Trim(), e => e.Value ?? string.Empty);
+
+        if (Id.HasValue)
+        {
+            var cmd = new UpdateDockerImageCommand(Id.Value, _model.Name, _model.ImageName, _model.Source, buildContext, dockerfilePath, buildArgs, _model.NexusCredentialId);
+            var result = await Mediator.Send(cmd);
+            if (result.IsFailure) { _error = result.Error.Message; _submitting = false; return; }
+        }
+        else
+        {
+            var cmd = new CreateDockerImageCommand(_model.Name, _model.ImageName, _model.Source, buildContext, dockerfilePath, buildArgs, _model.NexusCredentialId);
+            var result = await Mediator.Send(cmd);
+            if (result.IsFailure) { _error = result.Error.Message; _submitting = false; return; }
+        }
+
+        Snackbar.Add(T["common.success.saved"], Severity.Success);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private sealed record BuildArgEntry(string Key, string Value);
+
+    private sealed class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string ImageName { get; set; } = string.Empty;
+        public DockerImageSource Source { get; set; } = DockerImageSource.Build;
+        public string BuildContext { get; set; } = string.Empty;
+        public string? DockerfilePath { get; set; }
+        public Guid? NexusCredentialId { get; set; }
+        public List<BuildArgEntry> BuildArgs { get; set; } = [];
+    }
+}

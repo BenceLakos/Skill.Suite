@@ -1,0 +1,18 @@
+@* A label above a single input, with optional helper text below.
+   Mirrors the Tailwind/shadcn pattern used in admin forms — works around the
+   fact that MudBlazor's outlined Variant always renders the label inside the
+   field's notch. *@
+<div class="labeled-field">
+    <label class="labeled-field-label">@Label</label>
+    @ChildContent
+    @if (!string.IsNullOrEmpty(Help))
+    {
+        <div class="labeled-field-help">@Help</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter] public string? Help { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}
