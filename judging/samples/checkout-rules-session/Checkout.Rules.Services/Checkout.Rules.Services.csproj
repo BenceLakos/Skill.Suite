@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    This csproj is the only file of this project that enters the white-box judge image; the sources are
+    excluded by .dockerignore and supplied by the submission at run time. Contracts arrives as a package,
+    which is the seam that lets the whole folder be swapped.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Checkout.Rules.Contracts" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>

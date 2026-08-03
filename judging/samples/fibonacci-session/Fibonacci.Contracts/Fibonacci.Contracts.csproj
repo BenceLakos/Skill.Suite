@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Required: the call-logging proxy reads nullability off the interface, i.e. from this assembly.
+         Without it the null-return contract check silently disables itself. -->
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <IsPackable>true</IsPackable>
+    <PackageId>Fibonacci.Contracts</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Ingenimind Kft.</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Contracts and test harness for the Fibonacci example session.</Description>
+  </PropertyGroup>
+
+  <!--
+    The harness travels with the contracts, so a competitor adds one package reference and has both the
+    interface they implement and the assertions the graded suite is written in.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Skill.Suite.TestLog" Version="1.0.0" />
+    <PackageReference Include="Skill.Suite.TestLog.Xunit" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>

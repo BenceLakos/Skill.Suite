@@ -1,0 +1,32 @@
+# Answer-key firewall for the WHITE-BOX image. Two things must never enter it:
+#   * Checkout.Rules.Services - the reference implementation; a competitor can pull the image and read it
+#   * _design/ - defect ledgers, model solutions, reference suites
+# The Dockerfile re-checks both and fails the build if either slipped through, because a mistake here is not
+# recoverable once the image is pushed.
+#
+# Unlike earlier versions of this layout, this file is NOT regenerated from a shared template - it is yours.
+# Edit it directly.
+
+**/bin/
+**/obj/
+.idea/
+.vs/
+.vscode/
+*.user
+**/TestResults/
+**/StrykerOutput/
+.git/
+.github/
+
+# Design-team-only material.
+_design/**
+
+# What gets handed to competitors, and any sample submissions kept for local testing. Neither is something
+# the judge runs.
+competitor-start/**
+submissions/**
+
+# The reference implementation. Its csproj stays so the restore graph resolves and the placeholder folder
+# exists for swap_dir to replace.
+Checkout.Rules.Services/**
+!Checkout.Rules.Services/Checkout.Rules.Services.csproj

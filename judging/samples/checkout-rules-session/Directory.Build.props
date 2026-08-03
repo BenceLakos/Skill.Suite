@@ -1,0 +1,12 @@
+<Project>
+
+  <!--
+    Intentionally empty, and intentionally NOT importing a parent.
+
+    MSBuild walks upward from each project and stops at the first Directory.Build.props it finds, so this file
+    severs the module from anything above it. That matters because a session module is its own repository:
+    inheriting a surrounding tree's properties or central package management would make it build under
+    conditions no real session ever sees.
+  -->
+
+</Project>

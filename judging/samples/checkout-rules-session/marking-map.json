@@ -1,0 +1,51 @@
+{
+  "protocol": 1,
+
+  // No declared parts. Routing matches whole namespace/path segments, and this session has one implementation
+  // project, so a part would either duplicate "overall" or route nothing at all. A real multi-component
+  // black-box session declares one per component — ["pricing", "shipping"] — so a competitor can see which
+  // area their suite neglected.
+  "parts": [],
+
+  // Tuned against measured runs, not guessed. Two facts drove these numbers:
+  //
+  //   * The practical coverage MAXIMUM here is ~79%, not 100% - the coverage collector counts every loaded
+  //     assembly, so a suite that covers every branch of DiscountEngine still reports 38/48 lines. A
+  //     coverageCeil of 100 is therefore unreachable and silently caps scaled coverage at 0.58 for everyone,
+  //     compressing the whole band. The shipped 40..80 ramp is right for this session.
+  //   * The mutation ramp is where the tuning matters. submissions/thorough kills 91% and submissions/shallow
+  //     kills 17% while having IDENTICAL line coverage, so the kill rate is the only signal separating them.
+  //     A 25..95 ramp keeps that gap wide: measured 0.97 against 0.29.
+  //
+  // Re-measure after changing the implementation. Coverage ceilings that cannot be reached are invisible in
+  // the score - they just make every competitor look worse than they are.
+  "scoring": {
+    "coverageFloor": 40,
+    "coverageCeil": 80,
+    "mutationFloor": 25,
+    "mutationCeil": 95,
+    "coverageWeight": 0.30,
+    "coreWeight": 0.70
+  },
+
+  // Informational for a black-box session: a competitor chooses their own [Aspect] ids, so the score comes
+  // from coverage and mutation rather than from these rows. Listed because the reference suite uses them, and
+  // `skill-marker report` needs a stable row set when an expert re-marks a downloaded event log by hand.
+  "aspects": [
+    { "id": "A1.1", "label": "LineTotal: below the bulk tier" },
+    { "id": "A1.2", "label": "LineTotal: non-positive quantity" },
+    { "id": "A1.3", "label": "LineTotal: negative unit price" },
+    { "id": "A1.4", "label": "LineTotal: tier boundaries" },
+    { "id": "A1.5", "label": "LineTotal: rounding" },
+
+    { "id": "A2.1", "label": "ApplyCoupon: SAVE10" },
+    { "id": "A2.2", "label": "ApplyCoupon: case insensitivity" },
+    { "id": "A2.3", "label": "ApplyCoupon: SAVE20 minimum" },
+    { "id": "A2.4", "label": "ApplyCoupon: FREESHIP is inert" },
+    { "id": "A2.5", "label": "ApplyCoupon: unknown or missing code" },
+    { "id": "A2.6", "label": "ApplyCoupon: never negative" },
+
+    { "id": "A3.1", "label": "Free shipping: member threshold" },
+    { "id": "A3.2", "label": "Free shipping: non-member threshold" }
+  ]
+}

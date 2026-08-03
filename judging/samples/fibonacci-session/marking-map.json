@@ -1,0 +1,30 @@
+{
+  "protocol": 1,
+
+  // White-box session: the marks come from the aspects below, not from coverage or mutation. The judge
+  // image never runs skill-marker, so this map exists so an expert can re-mark a downloaded event log with
+  // `skill-marker report --map marking-map.json --events events.jsonl`.
+  "parts": [],
+
+  // No "scoring" block: those constants only drive the black-box composite, and nothing here computes one.
+  // Omitting it takes the documented defaults, which are unused on this path.
+
+  // One row per [Aspect] id in Fibonacci.UnitTests. Declaring them all is what makes an aspect nobody
+  // attempted show up as a "no" row instead of silently vanishing from the report.
+  "aspects": [
+    { "id": "A1.1", "label": "At: base cases F(0)=0 and F(1)=1" },
+    { "id": "A1.2", "label": "At: typical indices" },
+    { "id": "A1.3", "label": "At: negative index returns the sentinel" },
+    { "id": "A1.4", "label": "At: beyond long range returns the sentinel" },
+
+    { "id": "A2.1", "label": "Sequence: first N values" },
+    { "id": "A2.2", "label": "Sequence: non-positive count is empty" },
+    { "id": "A2.3", "label": "Sequence: a count of one is just F(0)" },
+
+    { "id": "A3.1", "label": "IsFibonacci: members" },
+    { "id": "A3.2", "label": "IsFibonacci: non-members and negatives" },
+
+    { "id": "A4.1", "label": "Sum: adds the first N values" },
+    { "id": "A4.2", "label": "Sum: non-positive count is zero" }
+  ]
+}

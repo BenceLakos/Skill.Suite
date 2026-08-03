@@ -1,0 +1,15 @@
+{
+  "stryker-config": {
+    "project": "Checkout.Rules.Services/Checkout.Rules.Services.csproj",
+    "test-projects": ["Checkout.Rules.UnitTests/Checkout.Rules.UnitTests.csproj"],
+    "solution": "Checkout.Rules.sln",
+    "reporters": ["json"],
+    "thresholds": { "high": 0, "low": 0, "break": 0 },
+    "mutate": ["**/*.cs"],
+    "mutation-level": "Standard",
+    "concurrency": 2,
+    "additional-timeout": 5000,
+    "verbosity": "info",
+    "disable-bail": false
+  }
+}
