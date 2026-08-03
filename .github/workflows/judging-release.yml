@@ -1,0 +1,129 @@
+name: judging-release
+
+# Publishes the generic judging layer on a judging-v* tag: the four packages to nuget.org, judge-base and
+# judge-smoke to GHCR.
+#
+# Session images are NEVER built here. They bake hidden test suites and, for black-box sessions, the
+# reference implementation itself - so they are built locally or on a private runner and pushed only to the
+# private Gitea registry.
+#
+#   git tag judging-v1.0.0 && git push origin judging-v1.0.0
+
+on:
+  push:
+    tags: ['judging-v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and pack without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  # One place, so switching to a local registry is a one-line change. Lowercase: GHCR requires it.
+  IMAGE_NAMESPACE: ghcr.io/bencelakos
+
+jobs:
+  packages:
+    name: pack and publish to nuget.org
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build and test
+        working-directory: judging
+        run: |
+          dotnet build -c Release -warnaserror
+          dotnet test -c Release --no-build
+
+      - name: Pack
+        working-directory: judging
+        run: |
+          dotnet pack Skill.Suite.TestLog       -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.TestLog.Xunit -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.Marker        -c Release --no-build -o artifacts/nuget
+          # Needed by session modules in their own repositories: make-competitor-start.sh installs it from a
+          # feed when there is no judging checkout to build it from.
+          dotnet pack Skill.Suite.StarterKit    -c Release --no-build -o artifacts/nuget
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: judging/artifacts/nuget/*
+          if-no-files-found: error
+
+      # Publishing is irreversible: nuget.org does not allow re-uploading a version. --skip-duplicate makes a
+      # re-run of the same tag a no-op instead of a failure.
+      - name: Publish to nuget.org
+        if: github.event_name == 'push' || inputs.dry_run == false
+        working-directory: judging
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "${NUGET_API_KEY}" ]; then
+            echo "::error::NUGET_API_KEY is not configured" && exit 1
+          fi
+          dotnet nuget push 'artifacts/nuget/*.nupkg' \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "${NUGET_API_KEY}" \
+            --skip-duplicate
+
+  images:
+    name: build and publish generic images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Derive tags from the git tag
+        id: meta
+        run: |
+          ref='${{ github.ref_name }}'
+          version="${ref#judging-v}"
+          if [ "${ref}" = "${version}" ]; then version="dev-${GITHUB_SHA::7}"; fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' || inputs.dry_run == false
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Multi-arch because production is amd64 while local verification on Apple Silicon is arm64. A
+      # single-arch image fails one of the two, or runs under emulation slowly enough to trip the wall clocks.
+      #
+      # Both a moving :9.0 tag for session images to FROM, and an immutable :9.0-<version> to pin: `docker run`
+      # passes no --pull, so a re-pushed mutable tag keeps judging with whatever stale image the host has.
+      - name: judge-base
+        uses: docker/build-push-action@v6
+        with:
+          context: judging/docker/judge-base
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/skill-suite-judge-base:9.0
+            ${{ env.IMAGE_NAMESPACE }}/skill-suite-judge-base:9.0-${{ steps.meta.outputs.version }}
+
+      - name: judge-smoke
+        uses: docker/build-push-action@v6
+        with:
+          context: judging
+          file: judging/docker/judge-smoke/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/skill-suite-judge-smoke:1
+            ${{ env.IMAGE_NAMESPACE }}/skill-suite-judge-smoke:1-${{ steps.meta.outputs.version }}
