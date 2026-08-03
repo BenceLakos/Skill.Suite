@@ -51,6 +51,17 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   uncapped: `compose.override.yaml` now sets memory/cpu/pids, and they are documented as **required** in
   production. The arg builder already honoured them and has 9 assertions covering it.
 
+- **B7 (part) — the repair action was itself a mark-loss event.** Start rotated the webhook secret immediately
+  but reinstalled the hook carrying it only at the very end, so re-pressing Start on a live session — the
+  documented repair — rejected every other competitor's pushes as unsigned for the whole provisioning window.
+  The secret is now **reused** when the session already has one, so installed hooks stay valid and Start is
+  genuinely idempotent. Enrolment rows are also saved per competitor instead of once at the end: a throw partway
+  used to leave an Active session with repositories on the git host and zero rows in the database, so every push
+  was rejected as `CompetitorNotFound` while the UI showed the session as live.
+  *Verified by inspection and a green build/test/E2E, not by a live re-Start* — the only session carrying a
+  secret was Closed, and Closed correctly refuses to start. Re-test this on the next provisioning run.
+  Still open in B7: surfacing provisioning errors in the Blazor UI.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
@@ -60,7 +71,7 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 | B4 | Remainder: marker's `EventSink.Flush()` truncate-then-rewrite can destroy the event stream on kill/ENOSPC; the stdout fallback can never fire because `LOG_DIRECTORY` is always set | the last line of defence for a lost save | S |
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
-| B7 | `StartSession` rotates the secret before installing the hook, and saves enrolments last — so the documented repair action 400s everyone's pushes, and a mid-way failure leaves Active-with-zero-enrolments | the only operator repair is itself a mark-loss event | M |
+| B7 | Remainder: provisioning errors are swallowed by the Blazor page instead of shown | an operator cannot tell a partial Start from a clean one | S |
 | B9 | Shipped compose is `Development` with a published admin password, `RequiredLength=1`, no lockout; Production does not boot (no admin, no `GitInternalBaseUrl`, no starter-packages mount, no container limits) | any competitor logs in as administrator | S |
 | B10 | No backup or restore for Postgres or the DataProtection key ring | one volume loss loses the competition, with no procedure | M |
 

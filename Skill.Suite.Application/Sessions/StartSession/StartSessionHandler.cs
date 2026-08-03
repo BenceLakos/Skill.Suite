@@ -51,7 +51,15 @@ public sealed class StartSessionHandler(
 
         // Held in plaintext only for the duration of this call: the git host needs the literal key to sign
         // deliveries with, while what is persisted is protected the same way a credential secret is.
-        var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(WebhookSecretBytes));
+        //
+        // REUSED when the session already has one, rather than rotated. Rotating made the documented repair
+        // action a mark-loss event: re-pressing Start on a live session replaced the secret immediately but
+        // reinstalled the hook carrying it only at the very end, so for the whole provisioning window every
+        // other competitor's pushes were rejected as unsigned. Reusing keeps the installed hooks valid
+        // throughout, and Start stays idempotent.
+        var secret = session.WebhookSecret is { Length: > 0 } existing
+            ? vault.Unprotect(existing)
+            : Convert.ToHexString(RandomNumberGenerator.GetBytes(WebhookSecretBytes));
 
         // Flip the status first so a provisioning failure leaves an Active session with some repositories
         // rather than a Draft session with repositories nobody can push to. Re-running Start then retries.
@@ -215,6 +223,13 @@ public sealed class StartSessionHandler(
                 enrolment.MarkFailed(ex.Message);
                 failures.Add(new StartSessionFailure(competitor.Username, ex.Message));
             }
+
+            // Saved per competitor, not once at the end. The enrolment row is what the webhook resolves a push
+            // through, so a throw partway used to leave an Active session with repositories on the git host and
+            // zero rows in the database — every push then rejected as CompetitorNotFound, with the session
+            // looking perfectly live in the UI. Committing each row as it is decided means an interrupted Start
+            // leaves exactly the competitors it got to, which is also what makes re-running it a real retry.
+            await db.SaveChangesAsync(cancellationToken);
         }
 
         return failures;
