@@ -93,13 +93,23 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   image already running. And the workdir volume is opt-in, because nothing prunes it: archiving every clone ever
   made on a 15-minute timer is not viable.
 
+- **B4 (remainder) — a kill mid-write destroyed the whole event stream.** The marker's `EventSink.Flush()` read
+  the file, appended, then overwrote it — and between opening the destination and finishing the write the file is
+  truncated. A SIGKILL from the run's wall clock, or an `ENOSPC` on a workdir that nothing prunes, lands in that
+  window and takes out *every* test result the submission produced, not just the metrics being appended. The
+  platform then sees an existing-but-empty `events.jsonl`, which yields zero results and also suppresses its
+  stdout fallback. Now written to a sibling `.tmp` and renamed into place: a same-directory rename is atomic, so
+  a reader sees either the old complete file or the new one. Flushed to disk before the rename, because a durable
+  rename over non-durable data is how you get a file of the right length full of NULs — the exact symptom this
+  sink already existed to prevent.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
 |---|---|---|---|
 | B1 | No durability, no operator recovery: in-memory `Channel` queue, `Pending` never re-scanned, no re-run/cancel, no `restart:` policy | a redeploy or crash freezes accepted submissions forever with no button to fix them | M |
 | B2 | A submission is judged only if its single webhook delivery succeeds; nothing reconciles an unjudged HEAD | one failed delivery loses a mark silently and irrecoverably | M |
-| B4 | Remainder: marker's `EventSink.Flush()` truncate-then-rewrite can destroy the event stream on kill/ENOSPC; the stdout fallback can never fire because `LOG_DIRECTORY` is always set | the last line of defence for a lost save | S |
+| B4 | Remainder: the stdout fallback in `ExecuteTestRunHandler` can never fire, because the platform always sets `LOG_DIRECTORY` — dead code promising a safety net that does not exist | misleading rather than dangerous; delete it or make it real | S |
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
 | B7 | Remainder: provisioning errors are swallowed by the Blazor page instead of shown | an operator cannot tell a partial Start from a clean one | S |

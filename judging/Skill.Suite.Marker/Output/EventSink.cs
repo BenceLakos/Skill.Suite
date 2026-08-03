@@ -72,7 +72,28 @@ public sealed class EventSink : IDisposable
         foreach (var line in _pending)
             builder.Append(line).Append('\n');
 
-        File.WriteAllText(_path, builder.ToString(), Utf8NoBom);
+        // Written to a sibling file and moved into place, never over the original.
+        //
+        // The read-then-overwrite above has a window: between opening the destination for writing and finishing
+        // the write, the file is truncated. A SIGKILL from the run's wall clock, or an ENOSPC on a workdir that
+        // nothing prunes, lands in that window and destroys the ENTIRE event stream — every test result the
+        // submission produced, not just the metrics being appended. The platform then sees an existing but
+        // empty events.jsonl, which yields zero results and also suppresses its stdout fallback.
+        //
+        // A rename within the same directory is atomic on both Linux and macOS, so a reader either sees the old
+        // complete file or the new complete file. The temp file is flushed to disk first: without that, a rename
+        // can be durable while the data behind it is not, which on a crash gives a file of the right length
+        // filled with NULs — the exact symptom this sink already exists to prevent.
+        var temp = _path + ".tmp";
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var writer = new StreamWriter(stream, Utf8NoBom))
+        {
+            writer.Write(builder.ToString());
+            writer.Flush();
+            stream.Flush(flushToDisk: true);
+        }
+
+        File.Move(temp, _path, overwrite: true);
         _pending.Clear();
     }
 
