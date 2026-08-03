@@ -67,22 +67,47 @@ else
     exit 1
 fi
 
-# The starter kit is what a competitor compiles first, so it has to compile. A skeleton that does not build is
-# worse than no skeleton: it costs every competitor the same confused ten minutes.
-printf '\nverifying the starter kit compiles\n'
+# ---------------------------------------------------------------------------- make it self-contained
+#
+# The generated project carries a PackageReference to this session's Contracts package, which a competitor
+# cannot resolve from a bare folder. Ship the feed with it: a nuget.config and the packages it names.
+#
+# Safe to include, because swap_dir excludes nuget.config and Directory.Build.* when it copies a submission
+# into the image — so these help the competitor locally and cannot influence how they are judged.
+KIT="${DIR}/competitor-start"
+
+[[ -d "${DIR}/local-nuget" ]] || { printf 'make-competitor-start: run ./pack-contracts.sh first.\n' >&2; exit 1; }
+
+mkdir -p "${KIT}/local-nuget"
+cp "${DIR}/local-nuget"/*.nupkg "${KIT}/local-nuget/" 2>/dev/null || true
+
+cat >"${KIT}/nuget.config" <<'NUGET'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <!-- Everything this project needs is in local-nuget/, so it restores with no network. -->
+    <clear />
+    <add key="session-local" value="./local-nuget" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+</configuration>
+NUGET
+
+# ---------------------------------------------------------------------------- verify
+#
+# Built WHERE THE COMPETITOR WILL BUILD IT — a copy of the kit alone, nothing else. The previous version copied
+# the kit back into the full module, so it was really re-testing the module and printed ok for a kit that
+# failed NU1101/MSB1003 in a competitor's hands. Verifying the wrong artifact is worse than not verifying.
+printf '\nverifying the starter kit compiles the way a competitor will\n'
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT
-cp -R "${DIR}/." "${WORK}/"
-rm -rf "${WORK}/${SWAPPED}"
-cp -R "${OUTPUT}" "${WORK}/${SWAPPED}"
-# Build output from the original location is copied along with everything else, and its absolute paths no
-# longer resolve here. Clearing it is cheaper than reasoning about which stale artifact bit.
+cp -R "${KIT}/." "${WORK}/"
 find "${WORK}" -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} + 2>/dev/null || true
 
-if dotnet build "${WORK}/SkillSuite.Session.sln" -c Release --nologo >"${WORK}/build.log" 2>&1; then
-    printf 'ok - the generated starter kit builds against the current contract\n'
+if dotnet build "${WORK}/${SWAPPED}" -c Release --nologo >"${WORK}/build.log" 2>&1; then
+    printf 'ok - a competitor can restore and build this offline\n'
 else
-    printf 'FAIL - the generated starter kit does not compile:\n\n' >&2
+    printf 'FAIL - the starter kit does not compile in isolation:\n\n' >&2
     grep -E 'error|Error' "${WORK}/build.log" | head -10 >&2 || tail -20 "${WORK}/build.log" >&2
     printf '\nfull log: %s/build.log\n' "${WORK}" >&2
     trap - EXIT

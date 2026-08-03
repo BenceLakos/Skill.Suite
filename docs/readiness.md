@@ -30,6 +30,20 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   was the absence of results; a compile failure, cancellation or timeout keeps its reason. `MarkCompleted`
   clears `FailureReason`, which it never did.
 
+- **B8 — unsigned pushes accepted, and the edit form could set `Status=Active`.** The endpoint is anonymous by
+  necessity, so the HMAC is the only authentication — and a session with no secret accepted anything, making it
+  an open judging trigger for anyone who could reach the port. Now fails closed behind
+  `Webhook:AllowUnsignedPushes` (default **off**), which only the local harness opts into, because `run-e2e.sh`
+  inserts its session with SQL and cannot produce DataProtection ciphertext. Verified both directions live: 202
+  with the opt-in, 400 `InvalidSignature` on production defaults. Status is now displayed, not editable —
+  picking Active provisioned nothing and picking Closed cancelled nothing.
+- **B12 — the starter kit could not be compiled by a competitor.** It shipped a `PackageReference` to the
+  session's Contracts package with no `nuget.config` and no feed, so `dotnet build` failed. Worse, the
+  generator's own check copied the kit *back into the full module*, so it was re-testing the module and printed
+  ok. The kit now bundles a `nuget.config` and the packages it names — safe, because `swap_dir` strips
+  `nuget.config` from a submission, so it helps locally and cannot affect judging — and the check builds the
+  kit **alone**, the way a competitor will. Verified standalone: restores and builds offline.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
@@ -40,11 +54,9 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
 | B7 | `StartSession` rotates the secret before installing the hook, and saves enrolments last — so the documented repair action 400s everyone's pushes, and a mid-way failure leaves Active-with-zero-enrolments | the only operator repair is itself a mark-loss event | M |
-| B8 | The edit form can set `Status=Active` with no guard; a session with no secret accepts unsigned pushes | an anonymous judging trigger, and sessions that provision nothing | S |
 | B9 | Shipped compose is `Development` with a published admin password, `RequiredLength=1`, no lockout; Production does not boot (no admin, no `GitInternalBaseUrl`, no starter-packages mount, no container limits) | any competitor logs in as administrator | S |
 | B10 | No backup or restore for Postgres or the DataProtection key ring | one volume loss loses the competition, with no procedure | M |
 | B11 | Container memory/cpu/pids limits are null by default; container output buffered unboundedly into `FailureReason` | one competitor printing to stderr kills the platform and every concurrent run | M |
-| B12 | The starter kit a competitor receives has no solution, `nuget.config` or `local-nuget` — verified `dotnet build` fails `MSB1003`. The generator's own check copies it back into the full module, so it prints ok | every competitor's first action fails | M |
 
 ## Then
 
