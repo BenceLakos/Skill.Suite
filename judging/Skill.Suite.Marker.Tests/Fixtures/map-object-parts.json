@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "parts": [
+    { "id": "aqi", "segments": ["AirWatch.Aqi.Services", "Services"] },
+    { "id": "cli", "segments": "Program" }
+  ],
+  "aspects": []
+}

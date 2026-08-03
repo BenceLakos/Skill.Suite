@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="11111111-1111-1111-1111-111111111111" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <!--
+    Deliberately covers every outcome bucket:
+      Passed      -> passed
+      Failed      -> failed
+      Timeout     -> failed  (the original implementation dropped these entirely)
+      NotExecuted -> skipped (an xUnit Skip: not a verdict, so out of the pass-rate denominator)
+    Class names route to parts by whole namespace segment: Services, Program, and one unrouted.
+  -->
+  <TestDefinitions>
+    <UnitTest id="00000000-0000-0000-0000-000000000001" name="Widget_Valid_Works">
+      <TestMethod codeBase="Acme.Tests.dll" className="Acme.Services.WidgetTests" name="Widget_Valid_Works" />
+    </UnitTest>
+    <UnitTest id="00000000-0000-0000-0000-000000000002" name="Widget_Invalid_Fails">
+      <TestMethod codeBase="Acme.Tests.dll" className="Acme.Services.WidgetTests" name="Widget_Invalid_Fails" />
+    </UnitTest>
+    <UnitTest id="00000000-0000-0000-0000-000000000003" name="Smoke_Boots_Timeout">
+      <TestMethod codeBase="Acme.Tests.dll" className="Acme.Program.SmokeTests" name="Smoke_Boots_Timeout" />
+    </UnitTest>
+    <UnitTest id="00000000-0000-0000-0000-000000000004" name="Widget_Pending_Skipped">
+      <TestMethod codeBase="Acme.Tests.dll" className="Acme.Services.WidgetTests" name="Widget_Pending_Skipped" />
+    </UnitTest>
+    <UnitTest id="00000000-0000-0000-0000-000000000005" name="Misc_Unrouted_Works">
+      <TestMethod codeBase="Acme.Tests.dll" className="Acme.Other.MiscTests" name="Misc_Unrouted_Works" />
+    </UnitTest>
+  </TestDefinitions>
+  <Results>
+    <UnitTestResult testId="00000000-0000-0000-0000-000000000001" outcome="Passed" duration="00:00:00.0100000" />
+    <UnitTestResult testId="00000000-0000-0000-0000-000000000002" outcome="Failed" duration="00:00:00.0200000" />
+    <UnitTestResult testId="00000000-0000-0000-0000-000000000003" outcome="Timeout" duration="00:00:30.0000000" />
+    <UnitTestResult testId="00000000-0000-0000-0000-000000000004" outcome="NotExecuted" duration="00:00:00.0000000" />
+    <UnitTestResult testId="00000000-0000-0000-0000-000000000005" outcome="Passed" duration="00:00:00.0050000" />
+  </Results>
+</TestRun>

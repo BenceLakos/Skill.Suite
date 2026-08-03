@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Skill.Suite.TestLog</RootNamespace>
+    <AssemblyName>Skill.Suite.TestLog</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Skill.Suite.TestLog</PackageId>
+    <Description>JSON-Lines test-event producer for Skill Suite judgement containers (protocol v1). No test-framework dependency.</Description>
+  </PropertyGroup>
+
+  <!--
+    Zero PackageReference and zero ProjectReference: that emptiness is the deliverable. A plain
+    console app must be able to reference this one package and nothing else.
+  -->
+
+</Project>

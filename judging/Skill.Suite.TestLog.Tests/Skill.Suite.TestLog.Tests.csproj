@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Skill.Suite.TestLog.Tests</RootNamespace>
+    <AssemblyName>Skill.Suite.TestLog.Tests</AssemblyName>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Skill.Suite.TestLog\Skill.Suite.TestLog.csproj" />
+    <ProjectReference Include="..\Skill.Suite.TestLog.Xunit\Skill.Suite.TestLog.Xunit.csproj" />
+
+    <!--
+      Built but not referenced: FileSinkTests launches it as a child process, because the sink is
+      captured once per process and LOG_DIRECTORY cannot be retargeted in-process.
+    -->
+    <ProjectReference Include="..\samples\console-quickstart\ConsoleQuickstart.csproj"
+                     ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="QuickstartDirectory"
+                      Value="$(MSBuildThisFileDirectory)..\samples\console-quickstart\bin\$(Configuration)\$(TargetFramework)" />
+  </ItemGroup>
+
+  <!--
+    Golden files are compared as text at runtime and are also consumed by the platform-side
+    conformance tests, so they must be next to the test binary.
+  -->
+  <ItemGroup>
+    <Content Include="Golden\**\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

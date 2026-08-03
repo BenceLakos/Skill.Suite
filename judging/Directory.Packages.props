@@ -1,0 +1,24 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <!--
+    Frozen set - these are the versions competitors' session projects use, so the judge images and
+    these packages must agree with them exactly. Bumping one means re-testing every session image.
+    With central package management active, PackageReference elements must NOT carry Version (NU1008).
+  -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="coverlet.collector" Version="10.0.0" />
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <!-- Roslyn, for skill-starter: it rewrites the reference implementation into a competitor skeleton by
+         replacing member bodies, which needs a real C# parser rather than reflection or regex. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+
+</Project>

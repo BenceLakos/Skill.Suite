@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Skill.Suite.Marker.Tests</RootNamespace>
+    <AssemblyName>Skill.Suite.Marker.Tests</AssemblyName>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Skill.Suite.Marker\Skill.Suite.Marker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    ToolProcessTests runs the marker as a child process, because the bug it guards against - a static
+    initializer opening and truncating events.jsonl - only exists at process startup.
+  -->
+  <ItemGroup>
+    <AssemblyMetadata Include="MarkerDirectory"
+                      Value="$(MSBuildThisFileDirectory)..\Skill.Suite.Marker\bin\$(Configuration)\$(TargetFramework)" />
+  </ItemGroup>
+
+</Project>

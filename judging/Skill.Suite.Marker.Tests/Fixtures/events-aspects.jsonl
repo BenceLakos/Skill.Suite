@@ -1,0 +1,19 @@
+{"timestamp":"2026-07-30T10:00:00.000Z","event":"start-fixture","fixture":"WidgetTests"}
+{"timestamp":"2026-07-30T10:00:00.100Z","event":"start-unit-test","fixture":"WidgetTests","test":"Validate_WellFormed_Passes","aspect":"A1.1","aspect_visible":true}
+{"timestamp":"2026-07-30T10:00:00.150Z","event":"assertion","fixture":"WidgetTests","test":"Validate_WellFormed_Passes","kind":"equal","expected":true,"actual":true,"passed":true}
+{"timestamp":"2026-07-30T10:00:00.200Z","event":"finish-unit-test","fixture":"WidgetTests","test":"Validate_WellFormed_Passes","outcome":"passed","duration_ms":100,"error":null,"aspect":"A1.1","aspect_visible":true}
+{"timestamp":"2026-07-30T10:00:00.300Z","event":"start-unit-test","fixture":"WidgetTests","test":"Validate_Empty_AlsoPasses","aspect":"A1.1","aspect_visible":true}
+{"timestamp":"2026-07-30T10:00:00.350Z","event":"finish-unit-test","fixture":"WidgetTests","test":"Validate_Empty_AlsoPasses","outcome":"passed","duration_ms":50,"error":null,"aspect":"A1.1","aspect_visible":true}
+{"timestamp":"2026-07-30T10:00:00.400Z","event":"start-unit-test","fixture":"WidgetTests","test":"Validate_Unknown_Fails","aspect":"A1.2","aspect_visible":false}
+{"timestamp":"2026-07-30T10:00:00.450Z","event":"assertion","fixture":"WidgetTests","test":"Validate_Unknown_Fails","kind":"equal","expected":"issue","actual":"none","passed":false}
+{"timestamp":"2026-07-30T10:00:00.500Z","event":"finish-unit-test","fixture":"WidgetTests","test":"Validate_Unknown_Fails","outcome":"failed","duration_ms":100,"error":"Assert.Equal() Failure","aspect":"A1.2","aspect_visible":false}
+{"timestamp":"2026-07-30T10:00:00.600Z","event":"start-unit-test","fixture":"WidgetTests","test":"Optimize_Tie_LowestIndexWins","aspect":"C2.3","aspect_visible":true}
+{"timestamp":"2026-07-30T10:00:00.650Z","event":"call","fixture":"WidgetTests","test":"Optimize_Tie_LowestIndexWins","target":"IOptimizer.Optimize","arguments":[],"returned":null,"threw":"NullReferenceException"}
+{"timestamp":"2026-07-30T10:00:00.700Z","event":"finish-unit-test","fixture":"WidgetTests","test":"Optimize_Tie_LowestIndexWins","outcome":"passed","duration_ms":100,"error":null,"aspect":"C2.3","aspect_visible":true}
+{"timestamp":"2026-07-30T10:00:00.800Z","event":"start-unit-test","fixture":"WidgetTests","test":"Diagnostics_Smoke_Runs"}
+{"timestamp":"2026-07-30T10:00:00.850Z","event":"finish-unit-test","fixture":"WidgetTests","test":"Diagnostics_Smoke_Runs","outcome":"passed","duration_ms":50,"error":null}
+{"timestamp":"2026-07-30T10:00:00.900Z","event":"start-unit-test","fixture":"WidgetTests","test":"Legacy_Undeclared_Passes","aspect":"Q1.1","aspect_visible":false}
+{"timestamp":"2026-07-30T10:00:00.950Z","event":"finish-unit-test","fixture":"WidgetTests","test":"Legacy_Undeclared_Passes","outcome":"passed","duration_ms":50,"error":null,"aspect":"Q1.1","aspect_visible":false}
+{"timestamp":"2026-07-30T10:00:01.000Z","event":"finish-unit-test","fixture":"WidgetTests","test":"Never_Started_Ghost","outcome":"passed","duration_ms":1,"error":null,"aspect":"A1.1","aspect_visible":true}
+not json at all
+{"timestamp":"2026-07-30T10:00:01.100Z","event":"finish-fixture","fixture":"WidgetTests","tests_run":6,"tests_passed":4,"tests_failed":2,"duration_ms":1100}

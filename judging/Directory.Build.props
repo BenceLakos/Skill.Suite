@@ -1,0 +1,39 @@
+<Project>
+
+  <!--
+    Scoped to judging/ on purpose. The four platform projects at the repo root target net10.0;
+    MSBuild only walks *upward* from a project, so nothing here reaches them. Never add a
+    Directory.Build.props or global.json at the repo root - it would apply to both sides of the
+    net9/net10 split.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- Packages opt in individually; tests and samples must never be packed. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <Version>1.0.0</Version>
+    <Authors>Ingenimind Kft.</Authors>
+    <Company>Ingenimind Kft.</Company>
+    <Product>Skill Suite Judging</Product>
+    <Copyright>Copyright (c) 2026 Ingenimind Kft.</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>skill-suite;judging;testing;jsonl;xunit</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/BenceLakos/Skill.Suite</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/BenceLakos/Skill.Suite</PackageProjectUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+</Project>

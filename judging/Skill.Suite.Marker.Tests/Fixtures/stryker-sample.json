@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1",
+  "thresholds": { "high": 80, "low": 60 },
+  "files": {
+    "/src/Services/DefaultDiagnosticDataProcessor.cs": {
+      "language": "cs",
+      "source": "// elided",
+      "mutants": [
+        { "id": "1", "status": "Killed", "mutatorName": "Arithmetic" },
+        { "id": "2", "status": "Killed", "mutatorName": "Equality" },
+        { "id": "3", "status": "Killed", "mutatorName": "Boolean" },
+        { "id": "4", "status": "Survived", "mutatorName": "String" },
+        { "id": "5", "status": "Timeout", "mutatorName": "Linq" },
+        { "id": "6", "status": "NoCoverage", "mutatorName": "Statement" },
+        { "id": "7", "status": "NoCoverage", "mutatorName": "Statement" },
+        { "id": "8", "status": "CompileError", "mutatorName": "Assignment" }
+      ]
+    },
+    "/src/Program.cs": {
+      "language": "cs",
+      "source": "// elided",
+      "mutants": [
+        { "id": "9", "status": "Killed", "mutatorName": "Equality" },
+        { "id": "10", "status": "Survived", "mutatorName": "Boolean" }
+      ]
+    },
+    "/src/Unmutated.cs": {
+      "language": "cs",
+      "source": "// elided"
+    }
+  }
+}

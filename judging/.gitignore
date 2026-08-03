@@ -1,0 +1,18 @@
+artifacts/
+TestResults/
+StrykerOutput/
+verification/out/
+
+# The repo-root .gitignore excludes coverage*.xml and coverage*.json, which would silently eat committed
+# Marker test fixtures. Those are named cobertura-*.xml / stryker-*.json to dodge the patterns; this
+# un-ignores the folders as a second line of defence. Both spellings, because gitignore patterns are
+# case-sensitive even on a case-insensitive filesystem.
+!**/Fixtures/**
+!**/fixtures/**
+
+# Packed packages are build output, never committed: a session's Contracts package carries hidden tests.
+# The leading **/ matters - a pattern containing a slash is anchored to the directory holding this file, so
+# plain `local-nuget/*.nupkg` would only match judging/local-nuget and miss every nested module.
+**/local-nuget/*.nupkg
+**/local-nuget/*.snupkg
+

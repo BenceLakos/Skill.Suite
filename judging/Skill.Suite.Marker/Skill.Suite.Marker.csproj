@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Skill.Suite.Marker</RootNamespace>
+    <AssemblyName>Skill.Suite.Marker</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Skill.Suite.Marker</PackageId>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>skill-marker</ToolCommandName>
+    <Description>Post-processing marker for Skill Suite judgement runs: reads TRX, Cobertura and Stryker reports, appends test-summary/coverage/mutation/score events, and emits the per-aspect CIS report.</Description>
+
+    <!--
+      A symbol package for a tool has no consumers, but embedded PDBs give line numbers in container
+      stderr - which is the only diagnostic channel a judge run has.
+    -->
+    <IncludeSymbols>false</IncludeSymbols>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Skill.Suite.TestLog\Skill.Suite.TestLog.csproj" />
+  </ItemGroup>
+
+</Project>

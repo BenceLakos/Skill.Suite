@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Skill.Suite.StarterKit</RootNamespace>
+    <AssemblyName>Skill.Suite.StarterKit</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Skill.Suite.StarterKit</PackageId>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>skill-starter</ToolCommandName>
+    <Description>Generates a competitor starter kit from a session's reference implementation: keeps the public shape, removes the answer.</Description>
+
+    <IncludeSymbols>false</IncludeSymbols>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Roslyn rather than reflection or regex. Reflection would mean reconstructing every signature - nullable
+      annotations, generics, ref/out, default parameter values - and getting any of them wrong produces a
+      starter kit that does not compile. Roslyn keeps the declaration text verbatim and only replaces bodies,
+      so there is nothing to reconstruct.
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+</Project>
