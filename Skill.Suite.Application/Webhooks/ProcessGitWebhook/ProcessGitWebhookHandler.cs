@@ -121,10 +121,25 @@ public sealed class ProcessGitWebhookHandler(
     {
         if (session.WebhookSecret is null || session.WebhookSecret.Length == 0)
         {
+            // Fails closed. A session started through the UI always has a secret, so reaching here means the
+            // session was inserted directly into the database — and accepting the push anyway turned the
+            // endpoint into an anonymous judging trigger for anyone who could reach the port.
+            if (!options.Value.AllowUnsignedPushes)
+            {
+                logger.LogWarning(
+                    "Rejected a push to {Owner}: session {SessionId} has no webhook secret. Start the session " +
+                    "through the UI to install a signed hook, or set Webhook:AllowUnsignedPushes for a local " +
+                    "harness only.",
+                    request.Owner, session.Id);
+
+                return Result.Failure(TestRunErrors.InvalidSignature);
+            }
+
             logger.LogWarning(
-                "Session {SessionId} has no webhook secret, so the push to {Owner} was accepted unsigned. " +
-                "Start the session through the UI to install a signed hook.",
+                "Session {SessionId} has no webhook secret and Webhook:AllowUnsignedPushes is on, so the push " +
+                "to {Owner} was accepted unsigned. This must never be enabled in production.",
                 session.Id, request.Owner);
+
             return Result.Success();
         }
 

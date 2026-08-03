@@ -26,5 +26,10 @@ services:
     environment:
       # Two slots is the shipped default; raise it locally to observe parallel judging.
       Webhook__MaxConcurrentRuns: "2"
+      # LOCAL ONLY, and the reason it is in the override rather than compose.yaml: run-e2e.sh inserts its
+      # session with SQL, so that session has no webhook secret and its pushes are unsigned. Production fails
+      # those closed - an unsigned push is otherwise an anonymous judging trigger for anyone who can reach the
+      # port.
+      Webhook__AllowUnsignedPushes: "true"
       # A shorter backstop than the 20-minute default, so a hung judge surfaces quickly in a local run.
       Webhook__RunTimeout: "00:10:00"

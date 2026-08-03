@@ -83,6 +83,23 @@ public sealed class WebhookOptions
     /// </remarks>
     public string PublicWebhookUrl { get; set; } = "http://skill-suite:8080/webhooks/git";
 
+    /// <summary>
+    /// Accept a push whose session carries no webhook secret. <b>Off by default; never turn it on in
+    /// production.</b>
+    /// </summary>
+    /// <remarks>
+    /// A session started through the UI always gets a secret, so the only sessions this affects are ones
+    /// inserted straight into the database — which is exactly what the scripted end-to-end harness does,
+    /// because a secret is DataProtection-encrypted and only the running application can produce one.
+    /// <para>
+    /// It exists as an explicit switch rather than an implicit fallback because the implicit version was a hole:
+    /// with no secret the endpoint accepted anonymous pushes, so anyone who could reach the port could create
+    /// runs, supersede a competitor's in-flight submission, and make the server clone an arbitrary repository
+    /// with the stored credential. Failing closed is the only safe default; the harness opts in deliberately.
+    /// </para>
+    /// </remarks>
+    public bool AllowUnsignedPushes { get; set; }
+
     /// <summary>How many judgement runs may execute at once.</summary>
     /// <remarks>
     /// <para>

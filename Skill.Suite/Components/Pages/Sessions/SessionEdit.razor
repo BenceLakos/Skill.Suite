@@ -64,15 +64,26 @@ else
 
                     @if (IsEdit)
                     {
+                        @*
+                            Status is shown, not edited. Setting it here bypassed both guarded transitions:
+                            picking Active provisioned nothing — no organisation, no repositories, no webhook,
+                            no secret — leaving a session that looks live and judges nothing, and picking Closed
+                            cancelled no in-flight run. Start and Close on the sessions list are the only ways
+                            in, because they are the only ones that do the work the status implies.
+                        *@
                         <MudGrid Spacing="3">
                             <MudItem xs="12" md="6">
                                 <LabeledField Label="@T["sessions.field.status"]">
-                                    <MudSelect T="SessionStatus" @bind-Value="_model.Status"
-                                               Variant="Variant.Outlined">
-                                        <MudSelectItem Value="@SessionStatus.Draft">@T["sessions.status.draft"]</MudSelectItem>
-                                        <MudSelectItem Value="@SessionStatus.Active">@T["sessions.status.active"]</MudSelectItem>
-                                        <MudSelectItem Value="@SessionStatus.Closed">@T["sessions.status.closed"]</MudSelectItem>
-                                    </MudSelect>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                             Color="@(_model.Status switch {
+                                                 SessionStatus.Active => Color.Success,
+                                                 SessionStatus.Draft => Color.Warning,
+                                                 _ => Color.Dark })">
+                                        @T[$"sessions.status.{_model.Status.ToString().ToLowerInvariant()}"]
+                                    </MudChip>
+                                    <MudText Typo="Typo.caption" Class="d-block mt-1" Color="Color.Secondary">
+                                        @T["sessions.help.statusReadOnly"]
+                                    </MudText>
                                 </LabeledField>
                             </MudItem>
                         </MudGrid>
