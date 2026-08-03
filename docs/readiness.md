@@ -114,9 +114,17 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 |---|---|---|---|
 | B1 | No durability, no operator recovery: in-memory `Channel` queue, `Pending` never re-scanned, no re-run/cancel, no `restart:` policy | a redeploy or crash freezes accepted submissions forever with no button to fix them | M |
 | B2 | A submission is judged only if its single webhook delivery succeeds; nothing reconciles an unjudged HEAD | one failed delivery loses a mark silently and irrecoverably | M |
-| B4 | Remainder: the stdout fallback in `ExecuteTestRunHandler` can never fire, because the platform always sets `LOG_DIRECTORY` — dead code promising a safety net that does not exist | misleading rather than dangerous; delete it or make it real | S |
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
+
+## Audit findings that did not survive verification
+
+- **"The stdout fallback can never fire because `LOG_DIRECTORY` is always set."** Wrong, and acting on it would
+  have deleted a live safety net. Setting `LOG_DIRECTORY` tells the judge *where* to write; it does not mean the
+  file was written. The fallback has three reachable branches — the file was never created (a third-party image
+  that ignores the convention, or a judge that died before writing), the file exists but is empty (exactly what
+  the historical NUL-fill incident produced), and the file is unreadable. `stdoutFallback` is populated because
+  `ProcessContainerRunner` streams both stdout and stderr through the line handler. Left in place.
 
 ## Then
 
