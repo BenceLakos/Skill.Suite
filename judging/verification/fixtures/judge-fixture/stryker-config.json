@@ -1,0 +1,15 @@
+{
+  "stryker-config": {
+    "project": "JudgeFixture.Services/JudgeFixture.Services.csproj",
+    "test-projects": ["JudgeFixture.UnitTests/JudgeFixture.UnitTests.csproj"],
+    "solution": "JudgeFixture.sln",
+    "reporters": ["json"],
+    "thresholds": { "high": 0, "low": 0, "break": 0 },
+    "mutate": ["**/*.cs"],
+    "mutation-level": "Standard",
+    "concurrency": 2,
+    "additional-timeout": 5000,
+    "verbosity": "info",
+    "disable-bail": false
+  }
+}

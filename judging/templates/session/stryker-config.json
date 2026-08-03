@@ -1,0 +1,15 @@
+{
+  "stryker-config": {
+    "project": "SkillSuite.Session.Services/SkillSuite.Session.Services.csproj",
+    "test-projects": ["SkillSuite.Session.UnitTests/SkillSuite.Session.UnitTests.csproj"],
+    "solution": "SkillSuite.Session.sln",
+    "reporters": ["json"],
+    "thresholds": { "high": 0, "low": 0, "break": 0 },
+    "mutate": ["**/*.cs"],
+    "mutation-level": "Standard",
+    "concurrency": 2,
+    "additional-timeout": 5000,
+    "verbosity": "info",
+    "disable-bail": false
+  }
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>Skill.Suite.JudgeSmoke</RootNamespace>
+    <AssemblyName>Skill.Suite.JudgeSmoke</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    Deliberately a ProjectReference: the smoke image is how we find out whether Skill.Suite.TestLog itself
+    still produces a stream the platform can parse. Dogfooding it is the point.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\Skill.Suite.TestLog\Skill.Suite.TestLog.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,71 @@
+{
+  "session": "judge-fixture",
+  "image": "judge-fixture:1",
+  "comment": [
+    "The acceptance matrix for judge-base and the white-box template. Every row is a failure mode the judge",
+    "must report distinguishably, because the platform only sees an exit code and an event stream.",
+    "exit codes: 0 ok, 2 misconfigured image, 3 swap folder missing, 4 offline restore refused,",
+    "5 wall clock exceeded, 6 does not compile."
+  ],
+  "personas": [
+    {
+      "name": "happy",
+      "comment": "Reference implementation. Everything green.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 5,
+      "passed": 5,
+      "failed": 0,
+      "errored": 0,
+      "markerError": false
+    },
+    {
+      "name": "red",
+      "comment": "Compiles, two aspects wrong. Red tests are a result, not a failed run - this is what makes partial credit possible.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 5,
+      "passed": 3,
+      "failed": 2,
+      "errored": 0,
+      "markerError": false
+    },
+    {
+      "name": "broken-code",
+      "comment": "Does not compile. Must be Failed with a diagnostic, never Completed-with-no-results.",
+      "exit": 6,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "does not compile"
+    },
+    {
+      "name": "missing-folder",
+      "comment": "No JudgeFixture.Services folder. Reported without having deleted the placeholder first.",
+      "exit": 3,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "no JudgeFixture.Services folder"
+    },
+    {
+      "name": "adds-package",
+      "comment": "Adds a package reference absent from the baked feed. The offline restore must refuse it.",
+      "exit": 4,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "offline restore failed"
+    },
+    {
+      "name": "slow",
+      "comment": "Endless loop. The image's own wall clock must cut it off; the platform has none, and its worker is serial.",
+      "exit": 5,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "exceeded",
+      "env": { "JUDGE_TIMEOUT_SECONDS": "45" }
+    }
+  ]
+}

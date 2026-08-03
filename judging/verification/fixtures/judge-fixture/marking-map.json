@@ -1,0 +1,25 @@
+{
+  "protocol": 1,
+
+  // No parts: this module is small enough that one "overall" rollup is the whole story. A real black-box
+  // session declares a part per component so a competitor can see which area their suite neglected.
+  "parts": [],
+
+  // Tuned for this fixture rather than copied from the defaults, which is the point of the exercise: the
+  // reference suite should land in honest-headroom territory (roughly 0.8-0.9) and an empty suite near 0.
+  // Its five tests cover the implementation well but do not kill every mutant, so a 40..80 coverage ramp and
+  // a 30..80 mutation ramp would both saturate and hide the difference between suites.
+  "scoring": {
+    "coverageFloor": 30,
+    "coverageCeil": 95,
+    "mutationFloor": 20,
+    "mutationCeil": 90,
+    "coverageWeight": 0.30,
+    "coreWeight": 0.70
+  },
+
+  // Declared so `skill-marker report` has a stable row set. A competitor-written suite chooses its own
+  // [Aspect] ids, so for a pure measurement session these are informational - the score comes from coverage
+  // and mutation, not from aspects.
+  "aspects": []
+}

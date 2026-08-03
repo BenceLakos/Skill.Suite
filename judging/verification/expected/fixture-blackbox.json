@@ -1,0 +1,59 @@
+{
+  "session": "judge-fixture-blackbox",
+  "image": "judge-fixture-blackbox:1",
+  "comment": [
+    "Acceptance matrix for the black-box template. Unlike white-box, nothing here is checked against fixed",
+    "expectations - the competitor's suite is measured, so the assertions are quality bands.",
+    "",
+    "The row that matters is 'weak': it has the same line coverage as the reference suite but asserts nothing",
+    "meaningful, so it must score clearly lower. If it ever scores close to 'reference', the mutation ramp in",
+    "marking-map.json has stopped doing any work and the constants need retuning.",
+    "",
+    "Observed at the time of writing, with coverage 30..95 and mutation 20..90:",
+    "  reference  coverage 1.00  kill 0.83  quality 0.97",
+    "  weak       coverage 1.00  kill 0.33  quality 0.61",
+    "  empty      coverage 0     kill 0     quality 0",
+    "The reference sits above the 0.8-0.9 headroom a real session should aim for; this fixture is a six-mutant",
+    "toy, so it is not worth over-tuning. Calibrate per session against the real reference suite."
+  ],
+  "personas": [
+    {
+      "name": "reference",
+      "comment": "The suite the module ships with. The calibration target.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 5,
+      "passed": 5,
+      "markerError": false,
+      "coverageMin": 0.9,
+      "qualityMin": 0.9,
+      "qualityMax": 1.0,
+      "env": { "JUDGE_MUTATION_TIMEOUT_SECONDS": "600" }
+    },
+    {
+      "name": "weak",
+      "comment": "Calls everything, asserts nothing. Same coverage as the reference, far fewer mutants killed.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 4,
+      "passed": 4,
+      "markerError": false,
+      "coverageMin": 0.9,
+      "qualityMin": 0.4,
+      "qualityMax": 0.75,
+      "env": { "JUDGE_MUTATION_TIMEOUT_SECONDS": "600" }
+    },
+    {
+      "name": "empty",
+      "comment": "One trivial test. Must run and score ~0 rather than fail the run.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 1,
+      "passed": 1,
+      "markerError": false,
+      "qualityMin": 0.0,
+      "qualityMax": 0.1,
+      "env": { "JUDGE_MUTATION_TIMEOUT_SECONDS": "600" }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JudgeFixture.Contracts" Version="1.0.0" />
+    <!--
+      Persona "adds-package": reaches for a package that is in neither the baked feed nor the warmed cache.
+      The offline restore must refuse it - this is the main anti-gaming boundary, since a submission must not
+      be able to pull in a library that does the work for it.
+
+      Deliberately NOT Newtonsoft.Json: the test SDK drags that in transitively, so it sits in the warmed
+      cache and the restore resolves it quite legitimately. Dapper is in neither place.
+    -->
+    <PackageReference Include="Dapper" Version="2.1.66" />
+  </ItemGroup>
+
+</Project>

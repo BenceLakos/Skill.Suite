@@ -1,0 +1,26 @@
+# Answer-key firewall for the BLACK-BOX image. Not generated - this file is yours, edit it directly.
+#
+# The firewall for a black-box session. What must never enter the image:
+#   * the shipped sample test suite - it would survive as a fallback and inflate an empty submission
+#   * _design/ - the reference test suite used for calibration, which is the answer key here
+#
+# Note the reference *implementation* IS baked in on purpose: Stryker mutates it. That is why a black-box
+# image is even more sensitive than a white-box one and must stay in the private registry.
+
+**/bin/
+**/obj/
+.idea/
+.vs/
+.vscode/
+*.user
+**/TestResults/
+**/StrykerOutput/
+.git/
+.github/
+
+# Design-team-only: reference suite, calibration notes, model solutions.
+_design/**
+
+# The competitor supplies this at run time. Keep the csproj so restore resolves and swap_dir has a target.
+SkillSuite.Session.UnitTests/**
+!SkillSuite.Session.UnitTests/SkillSuite.Session.UnitTests.csproj

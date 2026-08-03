@@ -1,0 +1,16 @@
+{"event":"start-fixture","fixture":"SmokeChecks","timestamp":"<ts>"}
+{"event":"start-unit-test","fixture":"SmokeChecks","test":"Smoke_PassingCase_Passes","aspect":"S1.1","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"call","fixture":"SmokeChecks","test":"Smoke_PassingCase_Passes","target":"ISmokeService.Add","arguments":[2,2],"returned":4,"timestamp":"<ts>"}
+{"event":"assertion","fixture":"SmokeChecks","test":"Smoke_PassingCase_Passes","kind":"equal","expected":4,"actual":4,"passed":true,"timestamp":"<ts>"}
+{"event":"finish-unit-test","fixture":"SmokeChecks","test":"Smoke_PassingCase_Passes","outcome":"passed","durationMs":"<ms>","aspect":"S1.1","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"start-unit-test","fixture":"SmokeChecks","test":"Smoke_FailingCase_Fails","aspect":"S1.2","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"assertion","fixture":"SmokeChecks","test":"Smoke_FailingCase_Fails","kind":"equal","expected":42,"actual":41,"passed":false,"timestamp":"<ts>"}
+{"event":"finish-unit-test","fixture":"SmokeChecks","test":"Smoke_FailingCase_Fails","outcome":"failed","durationMs":"<ms>","error":"Assert.Equal() Failure: expected 42, got 41","aspect":"S1.2","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"finish-fixture","fixture":"SmokeChecks","testsRun":2,"testsPassed":1,"testsFailed":1,"durationMs":"<ms>","timestamp":"<ts>"}
+{"event":"start-fixture","fixture":"SmokeErrors","timestamp":"<ts>"}
+{"event":"start-unit-test","fixture":"SmokeErrors","test":"Smoke_ErroredCase_Throws","aspect":"S1.3","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"call","fixture":"SmokeErrors","test":"Smoke_ErroredCase_Throws","target":"ISmokeService.Divide","arguments":[1,0],"threw":"DivideByZeroException: Attempted to divide by zero.","timestamp":"<ts>"}
+{"event":"finish-unit-test","fixture":"SmokeErrors","test":"Smoke_ErroredCase_Throws","outcome":"errored","durationMs":"<ms>","error":"DivideByZeroException: Attempted to divide by zero.","aspect":"S1.3","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"finish-fixture","fixture":"SmokeErrors","testsRun":1,"testsPassed":0,"testsFailed":1,"durationMs":"<ms>","timestamp":"<ts>"}
+{"event":"test-summary","total":3,"passed":1,"failed":2,"skipped":0,"value":0.3333,"timestamp":"<ts>"}
+{"event":"score","part":"overall","value":0.5,"timestamp":"<ts>"}

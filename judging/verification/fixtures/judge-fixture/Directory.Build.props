@@ -1,0 +1,13 @@
+<Project>
+
+  <!--
+    Intentionally empty, and intentionally NOT importing the parent.
+
+    MSBuild walks upward from each project and stops at the first Directory.Build.props it finds, so this
+    file severs the fixture module from judging/Directory.Build.props. That matters because a real session
+    module is its own repository with nothing above it: if this module inherited the judging subtree's
+    properties and central package management, it would build under conditions no session ever sees, and
+    the fixture would stop being a faithful rehearsal of the judge pipeline.
+  -->
+
+</Project>
