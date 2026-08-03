@@ -108,11 +108,23 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   rename over non-durable data is how you get a file of the right length full of NULs — the exact symptom this
   sink already existed to prevent.
 
+- **B1 (durability) — a restart froze accepted submissions forever.** The queue is in-process, so a redeploy,
+  OOM kill or crash discarded it and the rows it pointed at sat on Pending or Running with nothing that would
+  ever judge them and no operator action available. `TestRunWorker` now re-enqueues unfinished runs on startup —
+  Running rows too, not just Pending, because a Running row has no container behind it once the process that
+  started it is gone. Re-judging is idempotent: the handler rebuilds the run's fixtures from scratch. Recovery
+  failure cannot block startup, since refusing to start would turn a recoverable situation into a total outage.
+  `compose.yaml` gains `restart: unless-stopped`, without which nothing restarts the process to run the pass.
+  *Verified live:* planted a Pending run, restarted the app, saw
+  `Found 1 run(s) left unfinished by a previous process; re-enqueueing them`, and the run re-judged to
+  **Completed**.
+  Still open in B1: an admin **Re-run** / **Cancel** action, which is also what B2's recovery depends on.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
 |---|---|---|---|
-| B1 | No durability, no operator recovery: in-memory `Channel` queue, `Pending` never re-scanned, no re-run/cancel, no `restart:` policy | a redeploy or crash freezes accepted submissions forever with no button to fix them | M |
+| B1 | Remainder: no admin **Re-run** or **Cancel** action on a run | a stuck or mis-judged run can only be fixed by a new push | M |
 | B2 | A submission is judged only if its single webhook delivery succeeds; nothing reconciles an unjudged HEAD | one failed delivery loses a mark silently and irrecoverably | M |
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |

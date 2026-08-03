@@ -6,6 +6,10 @@ services:
     build:
       context: .
       dockerfile: Skill.Suite/Dockerfile
+    # Survive a crash, an OOM kill and a host reboot. Without it an app restart is a manual step nobody is
+    # watching for mid-competition — and every submission the in-process queue was holding is lost with the
+    # process. The worker's startup pass re-enqueues them, but only if something restarts the process.
+    restart: unless-stopped
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=skillsuite;Username=skillsuite;Password=skillsuite"
       ASPNETCORE_ENVIRONMENT: Development
