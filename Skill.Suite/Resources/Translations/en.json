@@ -79,6 +79,7 @@
   "sessions.startConfirmTitle": "Start session?",
   "sessions.startConfirm": "This creates the organisation '{0}' on the git server, pushes the template folder into a template repository, and copies it into one repository per competitor. Existing repositories are left alone.",
   "sessions.started": "Session started. {0} competitor repositories are ready in '{1}'.",
+  "sessions.startFailed": "Provisioning stopped: {0} — fix the cause and start the session again; competitors already provisioned are kept.",
   "sessions.startedPartially": "Session started with {0} repositories ready and {1} failed: {2}. Fix the cause and start it again to retry only those.",
   "sessions.help.statusReadOnly": "Use Start or Close on the sessions list — those provision repositories and cancel runs; setting the status alone does neither.",
   "sessions.help.slug": "URL-safe identifier — lowercase letters, numbers and dashes.",

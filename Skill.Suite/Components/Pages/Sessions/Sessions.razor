@@ -182,6 +182,16 @@
 
             await Load();
         }
+        catch (Exception ex)
+        {
+            // Provisioning talks to a git host, and only the per-competitor step returns a Result — creating the
+            // organisation, seeding the template repository and installing the webhook all throw. An unhandled
+            // exception here tears down the Blazor circuit, so the operator saw the page die with no message and
+            // no way to tell a partial Start from a clean one. Enrolment rows are saved as each competitor is
+            // decided, so re-running Start after fixing the cause retries only what did not get through.
+            Snackbar.Add(string.Format(T["sessions.startFailed"], ex.Message), Severity.Error);
+            await Load();
+        }
         finally
         {
             _starting = false;

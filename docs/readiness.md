@@ -60,7 +60,12 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   was rejected as `CompetitorNotFound` while the UI showed the session as live.
   *Verified by inspection and a green build/test/E2E, not by a live re-Start* — the only session carrying a
   secret was Closed, and Closed correctly refuses to start. Re-test this on the next provisioning run.
-  Still open in B7: surfacing provisioning errors in the Blazor UI.
+  **B7 completed:** provisioning errors are now surfaced. Only the per-competitor step returned a `Result` —
+  creating the organisation, seeding the template repository and installing the webhook all throw — so an
+  exception tore down the Blazor circuit and the operator saw the page die with no message, unable to tell a
+  partial Start from a clean one. Now caught and shown, with the grid reloaded so the enrolment state is
+  visible. Combined with per-competitor saving, re-running Start after fixing the cause retries only what did
+  not get through.
 
 - **B9 — the shipped deployment handed admin to the venue LAN, and Production did not boot.** `compose.yaml`
   set `ASPNETCORE_ENVIRONMENT: Development`, which seeded the published `admin`/`Admin1234!` pair, with
@@ -112,7 +117,6 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 | B4 | Remainder: the stdout fallback in `ExecuteTestRunHandler` can never fire, because the platform always sets `LOG_DIRECTORY` — dead code promising a safety net that does not exist | misleading rather than dangerous; delete it or make it real | S |
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
-| B7 | Remainder: provisioning errors are swallowed by the Blazor page instead of shown | an operator cannot tell a partial Start from a clean one | S |
 
 ## Then
 
