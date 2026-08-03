@@ -1,0 +1,30 @@
+# Local development overrides. Automatically applied by `docker compose` alongside compose.yaml; production
+# deployments use compose.yaml on its own.
+#
+# The only thing this changes is dropping `platform: linux/amd64`. That pin is right for the deployment
+# target, but on an Apple Silicon machine it means building and running a .NET application under QEMU
+# emulation - slow enough to distort timings, and an occasional source of failures that look like application
+# bugs. Without the pin the image builds for the host architecture.
+#
+# This is safe on an amd64 host too: dropping the pin there resolves to amd64 anyway.
+#
+# The judgement containers the app spawns are unaffected - they run on the host daemon and are built natively.
+
+services:
+  skill.suite:
+    # Deliberately blank rather than absent: an empty value removes the inherited pin.
+    platform: ""
+    build:
+      context: .
+      dockerfile: Skill.Suite/Dockerfile
+    volumes:
+      # Starter packages, read-only. Session.TemplateFolder is read by this process, not by the host, so a
+      # host path typed into that field is invisible to it - the session would start and every competitor
+      # would get an empty repository. Mounting them makes the field usable locally:
+      #   /starter-packages/fibonacci-session/competitor-start
+      - ./judging/samples:/starter-packages:ro
+    environment:
+      # Two slots is the shipped default; raise it locally to observe parallel judging.
+      Webhook__MaxConcurrentRuns: "2"
+      # A shorter backstop than the 20-minute default, so a hung judge surfaces quickly in a local run.
+      Webhook__RunTimeout: "00:10:00"

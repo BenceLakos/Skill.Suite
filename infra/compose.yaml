@@ -1,0 +1,64 @@
+name: skill-suite-infra
+
+services:
+  postgres:
+    container_name: skill-suite-postgres
+    image: postgres:18.4
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=skillsuite
+      - POSTGRES_USER=skillsuite
+      - POSTGRES_PASSWORD=skillsuite
+      - POSTGRES_INITDB_ARGS=--locale-provider=icu --icu-locale=hu-HU --auth-host=scram-sha-256
+      - TZ=Europe/Budapest
+      - PGTZ=Europe/Budapest
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - '5432:5432'
+    stop_grace_period: 60s
+    healthcheck:
+      test: pg_isready -q -U skillsuite -d skillsuite || exit 1
+      interval: 10s
+      timeout: 15s
+      start_period: 10s
+      retries: 3
+    networks:
+      - skill-suite
+
+  gitea:
+    container_name: skill-suite-gitea
+    image: gitea/gitea:1.26
+    restart: unless-stopped
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=postgres
+      - GITEA__database__HOST=postgres:5432
+      - GITEA__database__NAME=gitea
+      - GITEA__database__USER=gitea
+      - GITEA__database__PASSWD=gitea
+      - GITEA__server__DOMAIN=localhost
+      - GITEA__server__SSH_DOMAIN=localhost
+      - GITEA__server__ROOT_URL=http://localhost:3000/
+      - GITEA__server__SSH_PORT=2222
+      - GITEA__webhook__ALLOWED_HOST_LIST=skill-suite,*
+    volumes:
+      - gitea-data:/data
+    ports:
+      - '3000:3000'
+      - '2222:22'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - skill-suite
+
+volumes:
+  postgres-data:
+  gitea-data:
+
+networks:
+  skill-suite:
+    name: skill-suite

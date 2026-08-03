@@ -23,3 +23,19 @@
 **/values.dev.yaml
 LICENSE
 README.md
+
+# The judging subtree is never part of the platform image. Skill.Suite/Dockerfile does `COPY . .` from the
+# repo root, so without this the whole judging layer is baked into a publicly published image - and once a
+# session module lives here, that means hidden test suites, reference solutions and local-nuget/*.nupkg.
+# Secret hygiene, not build speed.
+judging
+**/local-nuget
+
+# ...with one exception. Skill.Suite.Application compiles the event protocol in from judging/ as shared source,
+# so those .cs files must reach the build. Docker applies an exception by re-including matched paths, so this
+# keeps the rest of judging/ excluded while letting the contract through.
+#
+# Keep this pinned to Protocol/. The rule above exists for secret hygiene, and widening it any further would
+# put hidden test suites and reference solutions into a published image.
+!judging/Skill.Suite.TestLog/Protocol
+!judging/Skill.Suite.TestLog/Protocol/**

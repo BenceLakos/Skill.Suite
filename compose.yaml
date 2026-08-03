@@ -1,35 +1,51 @@
 services:
-  postgres:
-    image: postgres:17
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: skillsuite
-      POSTGRES_USER: skillsuite
-      POSTGRES_PASSWORD: skillsuite
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U skillsuite -d skillsuite" ]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   skill.suite:
-    image: skill.suite
+    container_name: skill-suite
+    image: ghcr.io/blz-it/skill.suite:latest
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Skill.Suite/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=skillsuite;Username=skillsuite;Password=skillsuite"
       ASPNETCORE_ENVIRONMENT: Development
+      # Webhook: cloned submissions live on a docker-managed volume so the deployment
+      # doesn't depend on a host path. The judgement container the app spawns receives
+      # only its own submission via --mount volume-subpath, keeping submissions isolated.
+      Webhook__WorkingDirectory: /workdir
+      Webhook__WorkdirVolumeName: skill-suite-workdir
+      Webhook__ContainerWorkdir: /workspace
+      Webhook__FolderTemplate: "submission-{competitor}-{random}"
+      # Gitea exposes itself externally as http://localhost:3000 in the webhook
+      # payload, but the app talks to it over the docker network. This base URL
+      # replaces the scheme/host/port of every clone URL before git clone runs.
+      Webhook__GitInternalBaseUrl: "http://gitea:3000"
+      # Persist ASP.NET data-protection keys so cookies + encrypted secrets survive
+      # container restarts. Without this the key ring is regenerated on every boot
+      # and the app fails with "The key {…} was not found in the key ring".
+      DataProtection__KeyRingPath: /var/skill-suite/keys
+    volumes:
+      # /var/run/docker.sock lets the app spawn judgement containers via the host daemon.
+      # `workdir` is a docker-managed volume — the same volume is mounted by the daemon
+      # into each judgement container at /workspace.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - workdir:/workdir
+      - keys:/var/skill-suite/keys
     ports:
       - "8080:8080"
       - "8081:8081"
+    networks:
+      - skill-suite
 
+# Network and database services live in infra/compose.yaml. Bring infra up first
+# (`docker compose -f infra/compose.yaml up -d`), then this stack.
 volumes:
-  postgres-data:
+  workdir:
+    name: skill-suite-workdir
+  keys:
+    name: skill-suite-keys
+
+networks:
+  skill-suite:
+    name: skill-suite
+    external: true
