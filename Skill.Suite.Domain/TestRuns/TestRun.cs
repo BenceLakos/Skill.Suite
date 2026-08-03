@@ -85,6 +85,10 @@ public sealed class TestRun : AuditableEntity<Guid>
     {
         Status = TestRunStatus.Completed;
         FinishedAt = finishedAt;
+        // A completed run has no failure reason by definition. Clearing it matters on the recovery path: a run
+        // that failed with "produced no test results" and is later promoted by reprocessing its log would
+        // otherwise read Completed while still displaying the failure that reprocessing just disproved.
+        FailureReason = null;
         RaiseDomainEvent(new TestRunCompletedEvent(Id));
     }
 

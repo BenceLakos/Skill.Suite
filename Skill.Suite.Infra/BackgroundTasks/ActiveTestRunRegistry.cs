@@ -52,9 +52,31 @@ internal sealed class ActiveTestRunRegistry : IActiveTestRunRegistry
         }
     }
 
+    /// <summary>
+    /// Signals cancellation without waiting for the callbacks to run.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CancellationTokenSource.Cancel()"/> runs registered callbacks <b>inline on the calling
+    /// thread</b>, and the executing run's callback stops a container — up to a 10-second SIGTERM grace. That
+    /// put the whole of `docker stop` on the webhook request thread, so a competitor's second push could
+    /// outlive Gitea's delivery timeout and the new run would never be written. <c>CancelAsync</c> hands the
+    /// callbacks to the thread pool instead.
+    /// <para>
+    /// Deliberately not awaited: the caller only needs the older run to be told to stop, not to have finished
+    /// stopping. Faults are observed so an <see cref="ObjectDisposedException"/> racing with
+    /// <see cref="Unregister"/> cannot surface as an unobserved task exception.
+    /// </para>
+    /// </remarks>
     private static void SignalCancel(CancellationTokenSource cts)
     {
-        try { cts.Cancel(); }
+        try
+        {
+            _ = cts.CancelAsync().ContinueWith(
+                static t => _ = t.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
         catch (ObjectDisposedException) { /* race with Unregister; nothing to cancel */ }
     }
 

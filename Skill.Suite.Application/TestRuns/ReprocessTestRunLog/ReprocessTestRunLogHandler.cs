@@ -65,11 +65,32 @@ public sealed class ReprocessTestRunLogHandler(
                 db.Add(unit);
         }
 
+        // Restore the terminal state to match what was just parsed. Without this the recovery is illusory: the
+        // whole reason to reprocess is that the original save failed *after* the container ran, which left the
+        // run Failed with "produced no test results" — or stuck Running if the process died. Rebuilding the
+        // fixtures while leaving that verdict in place puts a red run on top of correct marks, and the marks
+        // are then invisible to every query that filters on Status.
+        //
+        // Deliberately only promotes a run whose recorded failure was the absence of results. A run that failed
+        // because the submission did not compile, or was cancelled, or timed out, keeps its reason: those are
+        // real outcomes, and the events log for them is legitimately thin.
+        var recovered = run.Fixtures.Count > 0
+                        && run.Status != TestRunStatus.Completed
+                        && (run.Status == TestRunStatus.Running
+                            || run.Status == TestRunStatus.Cloning
+                            || run.Status == TestRunStatus.Pending
+                            || run.FailureReason == TestRunReasons.NoResults);
+
+        if (recovered)
+            run.MarkCompleted(run.FinishedAt ?? DateTime.UtcNow);
+
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Reprocessed {LineCount} log lines into {FixtureCount} fixtures for run {TestRunId}.",
-            lines.Length, run.Fixtures.Count, run.Id);
+            "Reprocessed {LineCount} log lines into {FixtureCount} fixtures for run {TestRunId}. " +
+            "Terminal state {Action}.",
+            lines.Length, run.Fixtures.Count, run.Id,
+            recovered ? $"promoted to {TestRunStatus.Completed}" : $"left as {run.Status}");
 
         return Result.Success();
     }

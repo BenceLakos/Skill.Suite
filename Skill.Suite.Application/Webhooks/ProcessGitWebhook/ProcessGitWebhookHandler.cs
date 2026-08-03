@@ -60,9 +60,6 @@ public sealed class ProcessGitWebhookHandler(
             return TestRunErrors.CompetitorNotFound;
         }
 
-        var supersededPrevious = await SupersedePreviousRunsAsync(
-            session.Id, enrolment.CompetitorId, cancellationToken);
-
         var competitorUsername = await db.Competitors
             .Where(c => c.Id == enrolment.CompetitorId)
             .Select(c => c.Username)
@@ -81,10 +78,22 @@ public sealed class ProcessGitWebhookHandler(
             folderName,
             session.JudgementImage);
 
+        // Everything from here runs with CancellationToken.None, and the accepted submission is persisted
+        // BEFORE the older run is superseded. Both halves of that matter, and both were wrong:
+        //
+        //   * The request token is Gitea's. Its delivery times out after a few seconds, and a superseded run's
+        //     `docker stop` used to burn up to ten of them on this thread — so the token was often already
+        //     cancelled by the time the new run was saved. The old run ended Cancelled, the new one was never
+        //     written, and the competitor's latest work had no result at all. Gitea does not retry.
+        //   * Superseding first left a window with nothing recorded. Recording first means the worst case is a
+        //     duplicate run, which supersede then resolves, rather than a lost one.
         db.TestRuns.Add(run);
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(CancellationToken.None);
 
-        await queue.EnqueueAsync(new TestRunWorkItem(run.Id), cancellationToken);
+        var supersededPrevious = await SupersedePreviousRunsAsync(
+            session.Id, enrolment.CompetitorId, run.Id, CancellationToken.None);
+
+        await queue.EnqueueAsync(new TestRunWorkItem(run.Id), CancellationToken.None);
 
         return new TestRunAcceptedDto(
             TestRunId: run.Id,
@@ -157,11 +166,14 @@ public sealed class ProcessGitWebhookHandler(
     /// another.
     /// </remarks>
     private async Task<bool> SupersedePreviousRunsAsync(
-        Guid sessionId, Guid competitorId, CancellationToken cancellationToken)
+        Guid sessionId, Guid competitorId, Guid keepRunId, CancellationToken cancellationToken)
     {
         var affected = await db.TestRuns
             .Where(r => r.SessionId == sessionId &&
                         r.CompetitorId == competitorId &&
+                        // The run this push just created is persisted first, so it has to be excluded or the
+                        // very submission being accepted would be cancelled as its own predecessor.
+                        r.Id != keepRunId &&
                         (r.Status == TestRunStatus.Pending ||
                          r.Status == TestRunStatus.Cloning ||
                          r.Status == TestRunStatus.Running))
