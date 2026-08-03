@@ -20,7 +20,34 @@
         </PackageReference>
         <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0"/>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0"/>
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0"/>
+        <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0"/>
         <PackageReference Include="Riok.Mapperly" Version="4.3.1"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- ScoreBucketCalculator is internal; its rules are worth testing directly. -->
+        <InternalsVisibleTo Include="Skill.Suite.Application.Tests"/>
+    </ItemGroup>
+
+    <!--
+        The event protocol, compiled in from the judging subtree rather than duplicated.
+
+        These are the only sources shared between the two solutions, and sharing them is the point: the wire
+        format used to be string literals declared independently on each side, so a rename compiled fine on
+        both and silently produced runs with missing results.
+
+        Shared *source* rather than a project or package reference, because judging/ targets net9.0 under its
+        own SDK pin and, more importantly, is excluded from this application's Docker build context. A
+        ProjectReference would fail restore inside the image with MSB3202; a Compile glob is invisible to
+        restore and only needs the files present at build time. `.dockerignore` therefore carries a matching
+        exception for this one folder - if that is ever removed, the image build fails with a confusing CS0246
+        rather than a missing-file error, because a glob that matches nothing is not an error.
+
+        These files must stay C# 13: the judging solution compiles them under SDK 9.
+    -->
+    <ItemGroup>
+        <Compile Include="..\judging\Skill.Suite.TestLog\Protocol\**\*.cs" LinkBase="Protocol"/>
     </ItemGroup>
 
 </Project>

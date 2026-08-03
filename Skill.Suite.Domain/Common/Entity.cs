@@ -1,6 +1,6 @@
 namespace Skill.Suite.Domain.Common;
 
-public abstract class Entity<TId> where TId : notnull
+public abstract class Entity<TId> : IHasDomainEvents where TId : notnull
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
