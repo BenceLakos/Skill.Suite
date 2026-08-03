@@ -62,6 +62,22 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   secret was Closed, and Closed correctly refuses to start. Re-test this on the next provisioning run.
   Still open in B7: surfacing provisioning errors in the Blazor UI.
 
+- **B9 — the shipped deployment handed admin to the venue LAN, and Production did not boot.** `compose.yaml`
+  set `ASPNETCORE_ENVIRONMENT: Development`, which seeded the published `admin`/`Admin1234!` pair, with
+  `RequiredLength = 1`, every character class off, and `lockoutOnFailure: false` so brute force was free.
+  Now: the Identity policy is bound to configuration with a hard floor of 10 characters that configuration
+  cannot lower, production defaults are 12 characters with all classes and 5-attempt lockout, and sign-in counts
+  failures. `compose.production.yaml` is a real overlay — Production env, first-boot admin from `.env` (which is
+  gitignored, with `.env.example` committed), `GitInternalBaseUrl`, `PublicWebhookUrl`, the starter-packages
+  mount, judge memory/cpu/pids caps, `restart: unless-stopped`, a healthcheck, log rotation, and 8080 only.
+  It refuses to start without the admin secret, and it must be named explicitly so `compose.override.yaml`'s
+  local weakening cannot leak in.
+  *Verified live:* Production booted, seeded its admin from the environment, returned 200 on the login page,
+  and rejected an unsigned push with 400 `InvalidSignature`.
+  **Operational gotcha found while testing:** the Development `admin` user survives in the database, because
+  seeding is first-boot-only and the volume persists. A production deployment must start from a **fresh
+  database**, or delete that account — otherwise the published dev credential still works.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
@@ -72,7 +88,6 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
 | B7 | Remainder: provisioning errors are swallowed by the Blazor page instead of shown | an operator cannot tell a partial Start from a clean one | S |
-| B9 | Shipped compose is `Development` with a published admin password, `RequiredLength=1`, no lockout; Production does not boot (no admin, no `GitInternalBaseUrl`, no starter-packages mount, no container limits) | any competitor logs in as administrator | S |
 | B10 | No backup or restore for Postgres or the DataProtection key ring | one volume loss loses the competition, with no procedure | M |
 
 ## Then

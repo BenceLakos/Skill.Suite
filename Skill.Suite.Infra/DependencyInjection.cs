@@ -18,6 +18,16 @@ namespace Skill.Suite.Infra;
 
 public static class DependencyInjection
 {
+    /// <summary>
+    /// Floor on <c>Identity:Password:RequiredLength</c>, applied even if configuration asks for less.
+    /// </summary>
+    /// <remarks>
+    /// Configuration can tune the policy but not disable it. A competition runs on a venue network where every
+    /// competitor can reach the login page, and the administrator account is the one that can rewrite marks —
+    /// so a deployment that forgets to set a policy must still get a usable one rather than the weakest one.
+    /// </remarks>
+    private const int MinimumPasswordLength = 10;
+
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection")
@@ -52,15 +62,23 @@ public static class DependencyInjection
 
         services.AddSingleton<IPasswordVault, DataProtectionPasswordVault>();
 
+        // Bound to configuration rather than hardcoded, because the two audiences genuinely differ: competitor
+        // logins are handed out on paper and typed under time pressure, while an administrator account is the
+        // one that can rewrite marks. The shipped defaults below are the SAFE end — a competition machine sits
+        // on a venue network where anyone can reach the login page. Relax them in Development if you want, not
+        // in the code.
+        //
+        // The previous values were RequiredLength = 1 with every character class off, i.e. a one-character
+        // password was acceptable for an administrator.
         services.AddIdentityCore<ApplicationUser>(options =>
             {
                 options.SignIn.RequireConfirmedAccount = false;
-                options.Password.RequiredLength = 1;
-                options.Password.RequiredUniqueChars = 0;
-                options.Password.RequireDigit = false;
-                options.Password.RequireLowercase = false;
-                options.Password.RequireUppercase = false;
-                options.Password.RequireNonAlphanumeric = false;
+
+                configuration.GetSection("Identity:Password").Bind(options.Password);
+                configuration.GetSection("Identity:Lockout").Bind(options.Lockout);
+
+                if (options.Password.RequiredLength < MinimumPasswordLength)
+                    options.Password.RequiredLength = MinimumPasswordLength;
             })
             .AddRoles<ApplicationRole>()
             .AddEntityFrameworkStores<AppDbContext>()

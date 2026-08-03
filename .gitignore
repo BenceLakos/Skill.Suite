@@ -797,3 +797,6 @@ FodyWeavers.xsd
 
 # Webhook submission checkouts (bind-mounted into the app container at runtime).
 /workdir/
+
+# Production secrets for compose.production.yaml. The admin credential must never be committed.
+.env
