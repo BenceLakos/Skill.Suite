@@ -78,6 +78,21 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   seeding is first-boot-only and the volume persists. A production deployment must start from a **fresh
   database**, or delete that account — otherwise the published dev credential still works.
 
+- **B10 — no backup or restore.** One volume loss lost the competition with no procedure. Added
+  `scripts/backup.sh` and `scripts/restore.sh`, covering the three things that are useless without each other:
+  Postgres (the marks), the DataProtection key ring (without it every credential is unwrappable and every
+  session's webhook secret undecryptable, so a database-only restore gives you a competition where no push can
+  be verified), and optionally the workdir (dispute evidence). Restore refuses to run with the app up, demands
+  the database name typed out, and empties the key-ring volume before extracting — a leftover key is worse than
+  a missing one, because it decrypts some rows and not others.
+  *Verified by a real drill:* backed up, deleted all 6 test runs, restored, and got 6 runs / 5 fixtures /
+  3 enrolments back with the app booting and **zero key-ring errors**.
+  Two things the drill itself found: the helper container used `alpine:3`, which is not present locally — the
+  pull hung on a credential helper, so the backup script's first act was a network round trip it did not need,
+  and a backup tool that requires the internet is no use on a competition machine. It now uses the Postgres
+  image already running. And the workdir volume is opt-in, because nothing prunes it: archiving every clone ever
+  made on a 15-minute timer is not viable.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
@@ -88,7 +103,6 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
 | B7 | Remainder: provisioning errors are swallowed by the Blazor page instead of shown | an operator cannot tell a partial Start from a clean one | S |
-| B10 | No backup or restore for Postgres or the DataProtection key ring | one volume loss loses the competition, with no procedure | M |
 
 ## Then
 
