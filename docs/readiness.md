@@ -44,6 +44,13 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   `nuget.config` from a submission, so it helps locally and cannot affect judging — and the check builds the
   kit **alone**, the way a competitor will. Verified standalone: restores and builds offline.
 
+- **B11 — one competitor could kill the platform.** The raw stderr copy that becomes `FailureReason` was
+  unbounded and competitor code decides what goes into it, so `while(true) Console.Error.WriteLine(...)` grew it
+  until the application process died — taking every concurrently judged competitor with it. Now capped at 64 KB,
+  head-retained, with an explicit truncation marker. Separately the container resource caps were all null, i.e.
+  uncapped: `compose.override.yaml` now sets memory/cpu/pids, and they are documented as **required** in
+  production. The arg builder already honoured them and has 9 assertions covering it.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
@@ -56,7 +63,6 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 | B7 | `StartSession` rotates the secret before installing the hook, and saves enrolments last — so the documented repair action 400s everyone's pushes, and a mid-way failure leaves Active-with-zero-enrolments | the only operator repair is itself a mark-loss event | M |
 | B9 | Shipped compose is `Development` with a published admin password, `RequiredLength=1`, no lockout; Production does not boot (no admin, no `GitInternalBaseUrl`, no starter-packages mount, no container limits) | any competitor logs in as administrator | S |
 | B10 | No backup or restore for Postgres or the DataProtection key ring | one volume loss loses the competition, with no procedure | M |
-| B11 | Container memory/cpu/pids limits are null by default; container output buffered unboundedly into `FailureReason` | one competitor printing to stderr kills the platform and every concurrent run | M |
 
 ## Then
 

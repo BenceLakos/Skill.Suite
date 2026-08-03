@@ -33,3 +33,10 @@ services:
       Webhook__AllowUnsignedPushes: "true"
       # A shorter backstop than the 20-minute default, so a hung judge surfaces quickly in a local run.
       Webhook__RunTimeout: "00:10:00"
+      # Resource caps on the judgement container. Unset by default in the application, which means uncapped -
+      # one competitor allocating in a loop can then take the host down with every concurrent run on it. These
+      # are local values; size them for the competition machine and treat them as REQUIRED in production.
+      # Generous enough for a black-box session, where Stryker re-runs the whole suite once per mutant.
+      Webhook__JudgeMemoryLimit: "4g"
+      Webhook__JudgeCpuLimit: "2"
+      Webhook__JudgePidsLimit: "512"

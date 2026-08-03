@@ -9,6 +9,16 @@ namespace Skill.Suite.Infra.Containers;
 
 internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> logger) : IContainerRunner
 {
+    /// <summary>
+    /// Cap on the raw stderr copy kept for <c>FailureReason</c>.
+    /// </summary>
+    /// <remarks>
+    /// Generous enough for a full MSBuild error list or a stack trace, small enough that a competitor cannot
+    /// use it to exhaust the application's memory. Judgement containers that need to say more than this are
+    /// misusing stderr — the event stream is the channel for detail.
+    /// </remarks>
+    private const int MaxStderrCharacters = 64 * 1024;
+
     private const int StopGraceSeconds = 5;
 
     public async Task<ContainerRunResult> RunAsync(
@@ -93,10 +103,27 @@ internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> log
         // Mirror stderr through the same parser — some judgement images emit JSON events
         // on stderr (e.g. when they redirect logger output) — and keep a raw copy so we
         // can surface it if the container exits non-zero.
+        //
+        // The raw copy is CAPPED. It ends up in TestRun.FailureReason, and competitor code chooses what goes
+        // into it: a `while(true) Console.Error.WriteLine(...)` grew this buffer until the application process
+        // died, which killed every other competitor being judged at the same time. The first bytes are the
+        // diagnostic ones — a compiler error, a stack trace — so keeping the head and dropping the tail loses
+        // nothing an expert needs.
+        var stderrTruncated = false;
         process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data is null) return;
-            stderr.AppendLine(e.Data);
+
+            if (stderr.Length < MaxStderrCharacters)
+            {
+                stderr.AppendLine(e.Data);
+            }
+            else if (!stderrTruncated)
+            {
+                stderrTruncated = true;
+                stderr.AppendLine($"[truncated at {MaxStderrCharacters} characters]");
+            }
+
             lines.Writer.TryWrite(e.Data);
         };
 
