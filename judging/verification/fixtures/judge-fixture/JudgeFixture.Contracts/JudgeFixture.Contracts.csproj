@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Required: the proxy's null-return contract check reads nullability off the interface, i.e. from
+         this assembly. Without it that anti-gaming check silently disables itself. -->
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Packed into local-nuget/ by pack-contracts.sh. Services and UnitTests consume it as a package, not
+         a project reference - that is the seam that lets a whole folder be swapped at run time. -->
+    <IsPackable>true</IsPackable>
+    <PackageId>JudgeFixture.Contracts</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Skill Suite</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Skill.Suite.TestLog" Version="1.0.0" />
+    <PackageReference Include="Skill.Suite.TestLog.Xunit" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>

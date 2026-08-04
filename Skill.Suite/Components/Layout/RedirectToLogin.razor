@@ -1,0 +1,20 @@
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+
+        if (state.User.Identity?.IsAuthenticated == true)
+        {
+            NavigationManager.NavigateTo("/Account/AccessDenied", forceLoad: true);
+            return;
+        }
+
+        var returnUrl = "/" + NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.NavigateTo(
+            $"/Account/Login?returnUrl={Uri.EscapeDataString(returnUrl)}",
+            forceLoad: true);
+    }
+}

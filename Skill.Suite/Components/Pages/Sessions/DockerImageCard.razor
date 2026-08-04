@@ -1,0 +1,39 @@
+@using Skill.Suite.Components.Pages.Sessions.Drafts
+@inject ITranslator T
+
+<MudPaper Outlined="true" Class="pa-3">
+    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudSelect T="string" @bind-Value="Image.Image"
+                   Variant="Variant.Outlined"
+                   Label="@T["sessions.dockerImage.image"]" Style="flex:1;">
+            @foreach (var img in AvailableImages)
+            {
+                <MudSelectItem Value="@img">@img</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTooltip Text="@T["common.delete"]">
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small" OnClick="OnRemove"/>
+        </MudTooltip>
+    </MudStack>
+
+    <MudExpansionPanels MultiExpansion="true" Elevation="0" Dense="true">
+        <MudExpansionPanel Text="@($"{T["sessions.dockerImage.env"]} ({Image.Env.Count})")">
+            <KeyValueListEditor Items="Image.Env" KeyLabel="@T["sessions.env.key"]" ValueLabel="@T["sessions.env.value"]"/>
+        </MudExpansionPanel>
+        <MudExpansionPanel Text="@($"{T["sessions.dockerImage.labels"]} ({Image.Labels.Count})")">
+            <KeyValueListEditor Items="Image.Labels" KeyLabel="@T["sessions.label.key"]" ValueLabel="@T["sessions.label.value"]"/>
+        </MudExpansionPanel>
+        <MudExpansionPanel Text="@($"{T["sessions.dockerImage.volumes"]} ({Image.Volumes.Count})")">
+            <VolumeListEditor Items="Image.Volumes"/>
+        </MudExpansionPanel>
+        <MudExpansionPanel Text="@($"{T["sessions.dockerImage.portMappings"]} ({Image.PortMappings.Count})")">
+            <PortMappingListEditor Items="Image.PortMappings"/>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public DockerImageDraft Image { get; set; } = null!;
+    [Parameter, EditorRequired] public List<string> AvailableImages { get; set; } = [];
+    [Parameter, EditorRequired] public EventCallback OnRemove { get; set; }
+}

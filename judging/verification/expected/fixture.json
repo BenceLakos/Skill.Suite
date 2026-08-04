@@ -1,0 +1,93 @@
+{
+  "session": "judge-fixture",
+  "image": "judge-fixture:1",
+  "comment": [
+    "The acceptance matrix for judge-base and the white-box template. Every row is a failure mode the judge",
+    "must report distinguishably, because the platform only sees an exit code and an event stream.",
+    "exit codes: 0 ok, 2 misconfigured image, 3 swap folder missing, 4 offline restore refused,",
+    "5 wall clock exceeded, 6 does not compile."
+  ],
+  "personas": [
+    {
+      "name": "happy",
+      "comment": "Reference implementation. Everything green.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 7,
+      "passed": 7,
+      "failed": 0,
+      "errored": 0,
+      "markerError": false
+    },
+    {
+      "name": "red",
+      "comment": "Compiles, two aspects wrong. Red tests are a result, not a failed run - this is what makes partial credit possible.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 7,
+      "passed": 5,
+      "failed": 2,
+      "errored": 0,
+      "markerError": false
+    },
+    {
+      "name": "broken-code",
+      "comment": "Does not compile. Must be Failed with a diagnostic, never Completed-with-no-results.",
+      "exit": 6,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "does not compile"
+    },
+    {
+      "name": "missing-folder",
+      "comment": "No JudgeFixture.Services folder. Reported without having deleted the placeholder first.",
+      "exit": 3,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "no JudgeFixture.Services folder"
+    },
+    {
+      "name": "adds-package",
+      "comment": "Adds a package reference absent from the baked feed. The submission's project file is discarded in favour of the session's, so the reference never reaches the restore.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 7,
+      "markerError": true,
+      "markerErrorContains": "was ignored and the session's own project file was used instead",
+      "note": "Was exit 4 / Failed / 0 units, asserting that the offline restore refused the added package. Now the attempt cannot be made at all: a .csproj is executable code, so swap_dir restores the authored one and the reference disappears with it. The run proceeds normally and a marker-error tells the competitor their project file was ignored - a clear message instead of an unresolved type. Stronger than refusing the restore, because nothing reaches NuGet."
+    },
+    {
+      "name": "slow",
+      "comment": "Endless loop. The image's own wall clock must cut it off; the platform has none, and its worker is serial.",
+      "exit": 5,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "exceeded",
+      "env": {
+        "JUDGE_TIMEOUT_SECONDS": "45"
+      }
+    },
+    {
+      "name": "msbuild-exec",
+      "exit": 0,
+      "note": "The wrong implementation must fail on its merits rather than pass via the injected target. If this persona ever reports 5 passed, the substitution regressed and a submission has arbitrary code execution inside the judge.",
+      "comment": "Attack: an MSBuild <Target> in the competitor's csproj tries to overwrite the hidden suite before it compiles, as root. swap_dir must restore the authored project file.",
+      "status": "Completed",
+      "units": 7,
+      "markerError": true,
+      "markerErrorContains": "was ignored and the session's own project file was used instead"
+    },
+    {
+      "name": "forge-events",
+      "comment": "Attack: fabricates 12 passing events at process exit, from inside the test process where the harness itself runs. Permissions cannot stop this - anything the harness can write, the competitor can. The TRX cross-check must catch it.",
+      "exit": 7,
+      "status": "Failed",
+      "markerError": true,
+      "markerErrorContains": "RESULT INTEGRITY",
+      "note": "Exit 7 is the integrity code, distinct from a plain failure: this is not a bad submission, it is a fabricated one, and an expert must look before any mark from the run is used. An append DURING the run is overwritten by TestLogger's own stream, so the realistic attack is at process exit - the naive version failing told us nothing."
+    }
+  ]
+}

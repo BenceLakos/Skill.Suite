@@ -1,0 +1,119 @@
+@page "/experts"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using Skill.Suite.Application.Experts
+@using Skill.Suite.Application.Experts.DeleteExpert
+@using Skill.Suite.Application.Experts.ListExperts
+
+<PageTitle>@T["experts.title"]</PageTitle>
+
+<PageHeader Title="@T["experts.title"]" Subtitle="@T["experts.subtitle"]">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">
+            @T["experts.create"]
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+<MudDataGrid T="ExpertDto"
+             Elevation="1"
+             Items="_items"
+             Loading="_loading"
+             QuickFilter="QuickFilter"
+             Hover="true"
+             SortMode="SortMode.Multiple"
+             Filterable="false">
+        <ToolBarContent>
+            <MudTextField @bind-Value="_search"
+                          Placeholder="@T["common.search"]"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          IconSize="Size.Medium"
+                          Immediate="true"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Class="mt-0" Style="max-width:320px;"/>
+        </ToolBarContent>
+        <Columns>
+            <PropertyColumn Property="x => x.DisplayName" Title="@T["experts.field.displayName"]"/>
+            <PropertyColumn Property="x => x.CreatedAt" Title="@T["common.audit.created"]" Format="yyyy-MM-dd HH:mm"/>
+            <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
+                <CellTemplate>
+                    <MudTooltip Text="@T["common.edit"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context.Item))"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@T["common.delete"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Delete(context.Item))"/>
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["common.noResults"]</MudText>
+        </NoRecordsContent>
+    <PagerContent>
+        <MudDataGridPager T="ExpertDto"/>
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    private List<ExpertDto> _items = [];
+    private bool _loading;
+    private string? _search;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        var result = await Mediator.Send(new ListExpertsQuery(null));
+        _items = result.IsSuccess ? result.Value : [];
+        _loading = false;
+    }
+
+    private Func<ExpertDto, bool> QuickFilter => x =>
+        string.IsNullOrWhiteSpace(_search)
+        || x.DisplayName.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    private async Task OpenCreate()
+    {
+        var dialog = await Dialogs.ShowAsync<ExpertFormDialog>(T["experts.create"]);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Load();
+    }
+
+    private async Task OpenEdit(ExpertDto item)
+    {
+        var parameters = new DialogParameters { ["Id"] = item.Id };
+        var dialog = await Dialogs.ShowAsync<ExpertFormDialog>(T["experts.edit"], parameters);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Load();
+    }
+
+    private async Task Delete(ExpertDto item)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["experts.deleteConfirmTitle"],
+            Message = T.Format("experts.deleteConfirm", item.DisplayName),
+            YesText = T["common.delete"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        var result = await Mediator.Send(new DeleteExpertCommand(item.Id));
+        if (result.IsSuccess)
+        {
+            Snackbar.Add(T["common.success.deleted"], Severity.Success);
+            await Load();
+        }
+        else
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+        }
+    }
+}

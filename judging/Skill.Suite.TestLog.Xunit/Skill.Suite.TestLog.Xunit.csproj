@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Skill.Suite.TestLog.Xunit</RootNamespace>
+    <AssemblyName>Skill.Suite.TestLog.Xunit</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Skill.Suite.TestLog.Xunit</PackageId>
+
+    <!--
+      It references xunit but is a library, not a test project. Without this a solution-wide `dotnet test`
+      tries to launch a test host against it and reports a spurious failure.
+    -->
+    <IsTestProject>false</IsTestProject>
+    <Description>xUnit harness for Skill Suite judgement suites: LoggedTest, FixtureScope, TestLog assert wrappers, call-logging proxy and ServiceResolver.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Skill.Suite.TestLog\Skill.Suite.TestLog.csproj" />
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

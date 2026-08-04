@@ -1,0 +1,17 @@
+{
+  "name": "session-authoring",
+  "description": "Author, calibrate and publish Skill Suite judging sessions — white-box and black-box — from the dotnet new template.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Ingenimind Kft.",
+    "email": "zsolt.nagy@ingenimind.com"
+  },
+  "homepage": "https://github.com/BenceLakos/Skill.Suite",
+  "keywords": [
+    "skill-suite",
+    "competition",
+    "judging",
+    "session",
+    "dotnet"
+  ]
+}

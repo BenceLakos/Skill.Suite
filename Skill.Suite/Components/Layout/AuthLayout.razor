@@ -1,0 +1,60 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ThemeState Theme
+@using Skill.Suite.Services.Theme
+
+<MudThemeProvider @bind-IsDarkMode="_isDarkMode" Theme="_theme"/>
+<MudPopoverProvider/>
+<MudDialogProvider/>
+<MudSnackbarProvider/>
+<ThemeBootstrapper/>
+
+<div class="auth-layout">
+    <div class="auth-layout__toolbar">
+        <ThemeToggle/>
+    </div>
+    <main class="auth-layout__main">
+        @Body
+    </main>
+</div>
+
+<style>
+    .auth-layout {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--mud-palette-background);
+        color: var(--mud-palette-text-primary);
+    }
+    .auth-layout__toolbar {
+        display: flex;
+        justify-content: flex-end;
+        padding: 1rem;
+    }
+    .auth-layout__main {
+        flex: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+    }
+</style>
+
+@code {
+    private bool _isDarkMode;
+    private readonly MudTheme _theme = WorldSkillsTheme.Build();
+
+    protected override void OnInitialized()
+    {
+        _isDarkMode = Theme.IsDarkMode;
+        Theme.OnChange += OnChanged;
+    }
+
+    private void OnChanged()
+    {
+        if (_isDarkMode == Theme.IsDarkMode) return;
+        _isDarkMode = Theme.IsDarkMode;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Theme.OnChange -= OnChanged;
+}

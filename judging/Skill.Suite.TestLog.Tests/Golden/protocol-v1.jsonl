@@ -1,0 +1,17 @@
+{"event":"start-fixture","fixture":"DemoTests","timestamp":"<ts>"}
+{"event":"start-unit-test","fixture":"DemoTests","test":"Compute_TwoPlusTwo_ReturnsFour","aspect":"A1.1","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"call","fixture":"DemoTests","test":"Compute_TwoPlusTwo_ReturnsFour","target":"ICalculator.Compute","arguments":[2,2],"returned":4,"timestamp":"<ts>"}
+{"event":"assertion","fixture":"DemoTests","test":"Compute_TwoPlusTwo_ReturnsFour","kind":"equal","expected":4,"actual":4,"passed":true,"timestamp":"<ts>"}
+{"event":"finish-unit-test","fixture":"DemoTests","test":"Compute_TwoPlusTwo_ReturnsFour","outcome":"passed","durationMs":"<ms>","aspect":"A1.1","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"start-unit-test","fixture":"DemoTests","test":"Compute_Overflow_Saturates","aspect":"A1.2","aspectVisible":false,"timestamp":"<ts>"}
+{"event":"assertion","fixture":"DemoTests","test":"Compute_Overflow_Saturates","kind":"equal","expected":2147483647,"actual":-1,"passed":false,"timestamp":"<ts>"}
+{"event":"finish-unit-test","fixture":"DemoTests","test":"Compute_Overflow_Saturates","outcome":"failed","durationMs":"<ms>","error":"Assert.Equal() Failure: Values differ","aspect":"A1.2","aspectVisible":false,"timestamp":"<ts>"}
+{"event":"start-unit-test","fixture":"DemoTests","test":"Compute_NullInput_Throws","aspect":"A1.3","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"call","fixture":"DemoTests","test":"Compute_NullInput_Throws","target":"ICalculator.Compute","arguments":[null,2],"threw":"ArgumentNullException: Value cannot be null. (Parameter 'left')","timestamp":"<ts>"}
+{"event":"finish-unit-test","fixture":"DemoTests","test":"Compute_NullInput_Throws","outcome":"errored","durationMs":"<ms>","error":"ArgumentNullException: Value cannot be null. (Parameter 'left')","aspect":"A1.3","aspectVisible":true,"timestamp":"<ts>"}
+{"event":"start-unit-test","fixture":"DemoTests","test":"Diagnostics_Smoke_DoesNotThrow","timestamp":"<ts>"}
+{"event":"assertion","fixture":"DemoTests","test":"Diagnostics_Smoke_DoesNotThrow","kind":"not-null","expected":"<non-null>","actual":"ok","passed":true,"timestamp":"<ts>"}
+{"event":"finish-unit-test","fixture":"DemoTests","test":"Diagnostics_Smoke_DoesNotThrow","outcome":"passed","durationMs":"<ms>","timestamp":"<ts>"}
+{"event":"finish-fixture","fixture":"DemoTests","testsRun":4,"testsPassed":2,"testsFailed":2,"durationMs":"<ms>","timestamp":"<ts>"}
+{"event":"test-summary","total":4,"passed":2,"failed":2,"skipped":0,"value":0.5,"timestamp":"<ts>"}
+{"event":"score","part":"overall","value":0.5,"timestamp":"<ts>"}

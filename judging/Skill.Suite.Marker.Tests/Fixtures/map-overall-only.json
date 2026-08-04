@@ -1,0 +1,13 @@
+{
+  "protocol": 1,
+  "parts": [],
+  "scoring": {
+    "coverageFloor": 50,
+    "coverageCeil": 90,
+    "mutationFloor": 20,
+    "mutationCeil": 70,
+    "coverageWeight": 0.5,
+    "coreWeight": 0.5
+  },
+  "aspects": []
+}

@@ -1,0 +1,11 @@
+<Project>
+
+  <!--
+    Explicitly off. A session module pins versions in its own csproj files, the way a competitor's checkout
+    does, so it must not inherit central package versions from a surrounding tree.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+</Project>

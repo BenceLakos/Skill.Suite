@@ -1,0 +1,17 @@
+{
+  "name": "skill-suite",
+  "owner": {
+    "name": "Ingenimind Kft.",
+    "email": "zsolt.nagy@ingenimind.com"
+  },
+  "metadata": {
+    "description": "Claude Code plugins for working with Skill Suite competition judging.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "source": "./plugins/session-authoring",
+      "description": "Author, calibrate and publish a judging session: contracts, reference implementation, hidden graded suite, competitor starter kit, and the white-box or black-box judge images."
+    }
+  ]
+}

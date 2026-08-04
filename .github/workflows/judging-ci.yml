@@ -1,0 +1,222 @@
+name: judging-ci
+
+# Builds and tests both halves of the repo, plus every generic judge image. Nothing is pushed.
+#
+# Two SDKs, deliberately: the judging subtree is net9.0 (competitors work on .NET 9 and the judge images are
+# sdk:9.0), the platform is net10.0. SDK 9 cannot build net10.0, so they cannot share a job.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: judging-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  judging:
+    name: judging solution (net9.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # judging/global.json pins 9.0.x, and it resolves from the working directory - which is why every step
+      # below runs with working-directory: judging.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore
+        working-directory: judging
+        run: dotnet restore
+
+      - name: Build
+        working-directory: judging
+        run: dotnet build -c Release --no-restore -warnaserror
+
+      - name: Test
+        working-directory: judging
+        run: dotnet test -c Release --no-build
+
+      - name: Pack
+        working-directory: judging
+        run: |
+          dotnet pack Skill.Suite.TestLog       -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.TestLog.Xunit -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.Marker        -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.StarterKit    -c Release --no-build -o artifacts/nuget
+
+      # The tool is installed into every black-box judge image, so a broken tool package is a broken session.
+      - name: Verify the tool installs and runs
+        working-directory: judging
+        run: |
+          dotnet tool install --tool-path artifacts/tools --add-source artifacts/nuget \
+            Skill.Suite.Marker --version 1.0.0
+          artifacts/tools/skill-marker version
+          artifacts/tools/skill-marker help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: judging-packages
+          path: judging/artifacts/nuget/*.nupkg
+          if-no-files-found: error
+
+  platform:
+    name: platform solution (net10.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      # NU1903 and friends are build warnings; a known vulnerability should not merge quietly.
+      - name: Build
+        run: dotnet build -c Release --no-restore -warnaserror
+
+      # Includes the conformance tests, which replay the judging layer's golden event streams through the
+      # real TestLogParser. That is the only thing tying producer and consumer together across the
+      # net9/net10 boundary, and it lives here because net9.0 cannot reference net10.0.
+      - name: Test
+        run: dotnet test -c Release --no-build
+
+  images:
+    name: judge images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build judge-base
+        uses: docker/build-push-action@v6
+        with:
+          context: judging/docker/judge-base
+          tags: skill-suite-judge-base:ci
+          push: false
+          load: true
+
+      # The shell layer carries real logic - JSON escaping with no jq, event staging, the never-empty rule -
+      # that no xUnit test can reach. This is its test suite.
+      - name: judge-base self-test
+        run: docker run --rm --entrypoint /usr/local/bin/judge-selftest.sh skill-suite-judge-base:ci
+
+      - name: Build judge-smoke
+        uses: docker/build-push-action@v6
+        with:
+          context: judging
+          file: judging/docker/judge-smoke/Dockerfile
+          tags: skill-suite-judge-smoke:ci
+          push: false
+          load: true
+
+      - name: Smoke image emits its golden stream
+        run: |
+          mkdir -p /tmp/smoke-out /tmp/smoke-repo
+          docker run --rm \
+            -v /tmp/smoke-repo:/workspace:ro \
+            -v /tmp/smoke-out:/var/log/skill-suite \
+            -w /workspace \
+            -e COMPETITOR_DIRECTORY=/workspace \
+            -e LOG_DIRECTORY=/var/log/skill-suite \
+            skill-suite-judge-smoke:ci
+          sed -E 's/"timestamp":"[^"]*"/"timestamp":"<ts>"/; s/"durationMs":[0-9]+/"durationMs":"<ms>"/' \
+            /tmp/smoke-out/events.jsonl > /tmp/smoke-actual.jsonl
+          diff -u judging/docker/judge-smoke/expected-events.jsonl /tmp/smoke-actual.jsonl
+
+  verification:
+    name: persona acceptance matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build judge-base
+        uses: docker/build-push-action@v6
+        with:
+          context: judging/docker/judge-base
+          tags: skill-suite-judge-base:9.0
+          push: false
+          load: true
+
+      - name: Pack the fixture module
+        working-directory: judging/verification/fixtures/judge-fixture
+        run: ./pack-contracts.sh
+
+      # Built through the module's own script, which is the same command a session author runs. Nothing
+      # session-specific is passed: the judge contract is ENV in the module's Dockerfile.
+      - name: Build the fixture judge image
+        working-directory: judging/verification/fixtures/judge-fixture
+        run: BASE_IMAGE=skill-suite-judge-base:9.0 ./build-image.sh
+
+      # Asserts each failure mode is reported distinguishably: 0 green, 0 red-but-compiling, 3 missing
+      # folder, 4 offline restore refused, 5 wall clock, 6 does not compile.
+      - name: White-box persona matrix
+        run: bash judging/verification/verify.sh fixture
+
+      # The session template is how every future session gets built, so a template that no longer produces a
+      # working module is a silent blocker for the next session author. Generating and building one is the
+      # only check that catches a broken sourceName, a stale ENV name or a dockerignore that stopped matching.
+      - name: Session template generates a module that builds and judges
+        run: |
+          cd judging
+          dotnet new install ./templates/session
+          cd "$(mktemp -d)"
+          dotnet new skillsuite-session -n Ci.Template --judge-base skill-suite-judge-base:9.0
+          cd Ci.Template
+          chmod +x pack-contracts.sh build-image.sh make-competitor-start.sh docker-entrypoint.sh
+          JUDGING_ROOT="${GITHUB_WORKSPACE}/judging" ./pack-contracts.sh
+          # The hidden suite must pass against the reference implementation, or the template ships a session
+          # that marks every competitor down for its own bug.
+          dotnet test Ci.Template.sln -c Release
+          # Generates competitor-start/ and compiles it. A starter kit that does not build against the
+          # current contract costs every competitor the same confused ten minutes.
+          JUDGING_ROOT="${GITHUB_WORKSPACE}/judging" ./make-competitor-start.sh
+          # Both modes, because they are inverses and only one of them is the default: a black-box starter that
+          # keeps the reference suite's tests hands out the marks.
+          JUDGING_ROOT="${GITHUB_WORKSPACE}/judging" ./make-competitor-start.sh blackbox
+          BASE_IMAGE=skill-suite-judge-base:9.0 ./build-image.sh
+          mkdir -p /tmp/sub && cp -R competitor-start/. /tmp/sub/
+          bash "${GITHUB_WORKSPACE}/judging/tools/judge-run.sh" ci-template-judge:1.0.0 /tmp/sub
+
+      - name: Build the fixture black-box image
+        working-directory: judging/verification/fixtures/judge-fixture
+        run: BASE_IMAGE=skill-suite-judge-base:9.0 ./build-image.sh blackbox
+
+      - name: Black-box persona matrix
+        run: bash judging/verification/verify.sh fixture-blackbox
+
+  secrets-guard:
+    name: no credentials or session secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject credential-shaped files and baked packages
+        run: |
+          if git ls-files | grep -nEi '(^|/)(\.nexus-credentials|\.npmrc|.*\.pfx|.*\.p12|id_rsa|.*\.pem)$'; then
+            echo "::error::credential-shaped file is tracked" && exit 1
+          fi
+          # Session Contracts packages carry hidden tests; they must never be committed.
+          if git ls-files | grep -nE 'local-nuget/.*\.(nupkg|snupkg)$'; then
+            echo "::error::a .nupkg is committed under local-nuget" && exit 1
+          fi
+          # Session images embed hidden tests and reference solutions, so they are built out of band only.
+          if git ls-files '.github/workflows/*' | xargs grep -lE 'whitebox|blackbox' | grep -v judging-ci; then
+            echo "::error::a workflow appears to build a session image" && exit 1
+          fi
+          echo "no credential-shaped files tracked"

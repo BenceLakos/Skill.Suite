@@ -1,0 +1,152 @@
+@page "/test-runs/competitor/{CompetitorId:guid}"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject NavigationManager Nav
+@inject ITranslator T
+
+@using Skill.Suite.Application.Competitors
+@using Skill.Suite.Application.Competitors.GetCompetitor
+@using Skill.Suite.Application.Sessions
+@using Skill.Suite.Application.Sessions.ListSessions
+@using Skill.Suite.Application.TestRuns
+@using Skill.Suite.Application.TestRuns.ListTestRuns
+@using Skill.Suite.Domain.Sessions
+@using Skill.Suite.Domain.TestRuns
+
+<PageTitle>@_title</PageTitle>
+
+<PageHeader Title="@_title" Subtitle="@T["testRuns.competitor.subtitle"]">
+    <Actions>
+        <MudSelect T="Guid?"
+                   Value="_sessionId"
+                   ValueChanged="OnSessionChanged"
+                   Label="@T["testRuns.field.session"]"
+                   Variant="Variant.Outlined"
+                   Margin="Margin.Dense"
+                   Style="min-width:240px;">
+            @foreach (var s in _sessions)
+            {
+                <MudSelectItem T="Guid?" Value="@((Guid?)s.Id)">@SessionLabel(s)</MudSelectItem>
+            }
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack" Href="@BackHref">
+            @T["testRuns.backToCompetitors"]
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+<MudDataGrid T="TestRunSummaryDto"
+             Elevation="1"
+             Items="_items"
+             Loading="_loading"
+             Hover="true"
+             SortMode="SortMode.Multiple"
+             Filterable="false"
+             RowClick="OnRowClick"
+             RowStyle="cursor:pointer">
+        <Columns>
+            <PropertyColumn Property="x => x.CreatedAt" Title="@T["testRuns.field.startedAt"]" Format="yyyy-MM-dd HH:mm:ss"/>
+            <TemplateColumn Title="@T["testRuns.field.status"]" Sortable="false">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)" Variant="Variant.Filled">
+                        @StatusLabel(context.Item.Status)
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["testRuns.field.score"]" Sortable="false">
+                <CellTemplate>
+                    @if (context.Item.TestsRun > 0)
+                    {
+                        <MudText Typo="Typo.body2">
+                            @context.Item.TestsPassed / @context.Item.TestsRun
+                            @if (context.Item.TestsFailed > 0)
+                            {
+                                <MudText Inline="true" Color="Color.Error" Typo="Typo.body2">
+                                    (@context.Item.TestsFailed @T["testRuns.failedSuffix"])
+                                </MudText>
+                            }
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.Branch" Title="@T["testRuns.field.branch"]"/>
+            <PropertyColumn Property="x => x.CommitSha" Title="@T["testRuns.field.commit"]"/>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["common.noResults"]</MudText>
+        </NoRecordsContent>
+    <PagerContent>
+        <MudDataGridPager T="TestRunSummaryDto"/>
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    [Parameter] public Guid CompetitorId { get; set; }
+    [SupplyParameterFromQuery(Name = "session")] public Guid? SessionId { get; set; }
+
+    private List<TestRunSummaryDto> _items = [];
+    private List<SessionDto> _sessions = [];
+    private Guid? _sessionId;
+    private bool _loading;
+    private string _title = string.Empty;
+
+    private string BackHref => _sessionId.HasValue
+        ? $"test-runs?session={_sessionId.Value}"
+        : "test-runs";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _title = T["testRuns.competitor.title"];
+
+        var sessionsResult = await Mediator.Send(new ListSessionsQuery(null, null));
+        _sessions = sessionsResult.IsSuccess ? sessionsResult.Value : [];
+        _sessionId = SessionId ?? _sessions.FirstOrDefault(s => s.Status == SessionStatus.Active)?.Id;
+
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        var competitor = await Mediator.Send(new GetCompetitorByIdQuery(CompetitorId));
+        if (competitor.IsSuccess)
+            _title = T.Format("testRuns.competitor.titleWithName", competitor.Value.Username);
+
+        // Pass the selected session through to the handler. When null the handler
+        // falls back to the active session — same default as the admin overview.
+        var result = await Mediator.Send(new ListTestRunsQuery(_sessionId, CompetitorId, null));
+        _items = result.IsSuccess ? result.Value : [];
+        _loading = false;
+    }
+
+    private async Task OnSessionChanged(Guid? sessionId)
+    {
+        _sessionId = sessionId;
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("session", sessionId?.ToString()), replace: true);
+        await Load();
+    }
+
+    private void OnRowClick(DataGridRowClickEventArgs<TestRunSummaryDto> args) =>
+        Nav.NavigateTo($"test-runs/{args.Item.Id}");
+
+    private string SessionLabel(SessionDto s) => s.Status == SessionStatus.Active
+        ? $"★ {s.Name}"
+        : s.Name;
+
+    private Color StatusColor(TestRunStatus status) => status switch
+    {
+        TestRunStatus.Completed => Color.Success,
+        TestRunStatus.Running => Color.Info,
+        TestRunStatus.Cloning => Color.Info,
+        TestRunStatus.Pending => Color.Warning,
+        TestRunStatus.Failed => Color.Error,
+        TestRunStatus.Cancelled => Color.Dark,
+        _ => Color.Default,
+    };
+
+    private string StatusLabel(TestRunStatus status) => T[$"testRuns.status.{status.ToString().ToLowerInvariant()}"];
+}

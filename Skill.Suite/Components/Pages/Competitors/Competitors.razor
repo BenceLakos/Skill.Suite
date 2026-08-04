@@ -1,0 +1,124 @@
+@page "/competitors"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using Skill.Suite.Application.Competitors
+@using Skill.Suite.Application.Competitors.DeleteCompetitor
+@using Skill.Suite.Application.Competitors.ListCompetitors
+
+<PageTitle>@T["competitors.title"]</PageTitle>
+
+<PageHeader Title="@T["competitors.title"]" Subtitle="@T["competitors.subtitle"]">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">
+            @T["competitors.create"]
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+<MudDataGrid T="CompetitorDto"
+             Elevation="1"
+             Items="_items"
+             Loading="_loading"
+             QuickFilter="QuickFilter"
+             Hover="true"
+             SortMode="SortMode.Multiple"
+             Filterable="false">
+        <ToolBarContent>
+            <MudTextField @bind-Value="_search"
+                          Placeholder="@T["common.search"]"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          IconSize="Size.Medium"
+                          Immediate="true"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Class="mt-0" Style="max-width:320px;"/>
+        </ToolBarContent>
+        <Columns>
+            <PropertyColumn Property="x => x.Username" Title="@T["competitors.field.username"]"/>
+            <PropertyColumn Property="x => x.FullName" Title="@T["competitors.field.fullName"]"/>
+            <PropertyColumn Property="x => x.IpAddress" Title="@T["competitors.field.ipAddress"]"/>
+            <PropertyColumn Property="x => x.CountryCode" Title="@T["competitors.field.countryCode"]"/>
+            <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
+                <CellTemplate>
+                    <MudTooltip Text="@T["common.edit"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context.Item))"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@T["common.delete"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Delete(context.Item))"/>
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["common.noResults"]</MudText>
+        </NoRecordsContent>
+    <PagerContent>
+        <MudDataGridPager T="CompetitorDto"/>
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    private List<CompetitorDto> _items = [];
+    private bool _loading;
+    private string? _search;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        var result = await Mediator.Send(new ListCompetitorsQuery(null));
+        _items = result.IsSuccess ? result.Value : [];
+        _loading = false;
+    }
+
+    private Func<CompetitorDto, bool> QuickFilter => x =>
+        string.IsNullOrWhiteSpace(_search)
+        || x.Username.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || x.FullName.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || x.IpAddress.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || x.CountryCode.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    private async Task OpenCreate()
+    {
+        var dialog = await Dialogs.ShowAsync<CompetitorFormDialog>(T["competitors.create"]);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Load();
+    }
+
+    private async Task OpenEdit(CompetitorDto item)
+    {
+        var parameters = new DialogParameters { ["Id"] = item.Id };
+        var dialog = await Dialogs.ShowAsync<CompetitorFormDialog>(T["competitors.edit"], parameters);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Load();
+    }
+
+    private async Task Delete(CompetitorDto item)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["competitors.deleteConfirmTitle"],
+            Message = T.Format("competitors.deleteConfirm", item.Username),
+            YesText = T["common.delete"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        var result = await Mediator.Send(new DeleteCompetitorCommand(item.Id));
+        if (result.IsSuccess)
+        {
+            Snackbar.Add(T["common.success.deleted"], Severity.Success);
+            await Load();
+        }
+        else
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+        }
+    }
+}

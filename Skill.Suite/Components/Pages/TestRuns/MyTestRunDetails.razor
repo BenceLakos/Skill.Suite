@@ -1,0 +1,172 @@
+@page "/my-test-runs/{Id:guid}"
+@attribute [Authorize(Roles = "Competitor")]
+@implements IDisposable
+@inject ISender Mediator
+@inject NavigationManager Nav
+@inject ITranslator T
+@inject ITestRunChangeNotifier Notifier
+
+@using Skill.Suite.Application.TestRuns
+@using Skill.Suite.Application.TestRuns.MyTestRuns
+@using Skill.Suite.Domain.TestRuns
+
+<PageTitle>@T["myTestRuns.details.title"]</PageTitle>
+
+<PageHeader Title="@T["myTestRuns.details.title"]" Subtitle="@_subtitle">
+    <Actions>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack" Href="my-test-runs">
+            @T["myTestRuns.backToList"]
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+@if (_initialLoading)
+{
+    <MudProgressCircular Indeterminate="true" Class="ma-4"/>
+}
+else if (_run is null)
+{
+    <MudAlert Severity="Severity.Error">@T["common.noResults"]</MudAlert>
+}
+else
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.status"]</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(_run.Status)" Variant="Variant.Filled">
+                        @StatusLabel(_run.Status)
+                    </MudChip>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.startedAt"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.StartedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.finishedAt"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.FinishedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.branch"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.Branch ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudStack Spacing="1">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@T["testRuns.field.commit"]</MudText>
+                    <MudText Typo="Typo.body2">@(_run.CommitSha ?? "—")</MudText>
+                </MudStack>
+            </MudItem>
+            @* A category, never the reason. The run's FailureReason is the judgement container's raw stderr,
+               which for a white-box session names hidden tests and quotes reference-implementation stack
+               traces. Staff see the detail on the admin run page. *@
+            @if (_run.HasJudgeError)
+            {
+                <MudItem xs="12">
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                        @T["myTestRuns.judgeError"]
+                    </MudAlert>
+                </MudItem>
+            }
+        </MudGrid>
+    </MudPaper>
+
+    <MudText Typo="Typo.h6" Class="mb-2">@T["testRuns.fixtures"]</MudText>
+
+    @if (_run.Fixtures.Count == 0)
+    {
+        <MudPaper Elevation="1" Class="pa-4">
+            <MudText Color="Color.Secondary">@T["testRuns.fixtures.empty"]</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudStack Spacing="2">
+            @foreach (var fixture in _run.Fixtures)
+            {
+                <MudPaper Elevation="1" Class="pa-3">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Style="width:100%">
+                        <MudIcon Icon="@Icons.Material.Filled.Science" Size="Size.Small" Color="Color.Secondary"/>
+                        <MudText Typo="Typo.body1" Style="flex-grow:1">@fixture.Name</MudText>
+                        <ScoreBar Bucket="fixture.Score"/>
+                        @if (fixture.DurationMs.HasValue)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@fixture.DurationMs ms</MudText>
+                        }
+                    </MudStack>
+                </MudPaper>
+            }
+        </MudStack>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private MyTestRunDto? _run;
+    private bool _initialLoading = true;
+    private string _subtitle = string.Empty;
+
+    // Same guard as MyTestRuns: the id filter below narrows the window but does not close it, because one run
+    // raises several change events of its own. Two overlapping refreshes would put two queries on the circuit's
+    // single scoped DbContext and throw "A second operation was started on this context instance".
+    private bool _refreshing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        _initialLoading = false;
+        Notifier.Changed += OnTestRunChanged;
+    }
+
+    private void OnTestRunChanged(Guid testRunId)
+    {
+        if (testRunId != Id) return;
+        _ = InvokeAsync(async () =>
+        {
+            if (_refreshing) return;
+            _refreshing = true;
+            try
+            {
+                await Load();
+                StateHasChanged();
+            }
+            finally
+            {
+                _refreshing = false;
+            }
+        });
+    }
+
+    private async Task Load()
+    {
+        var result = await Mediator.Send(new GetMyTestRunQuery(Id));
+        if (result.IsSuccess)
+        {
+            _run = result.Value;
+            _subtitle = _run.Branch ?? string.Empty;
+        }
+    }
+
+    private Color StatusColor(TestRunStatus status) => status switch
+    {
+        TestRunStatus.Completed => Color.Success,
+        TestRunStatus.Running => Color.Info,
+        TestRunStatus.Cloning => Color.Info,
+        TestRunStatus.Pending => Color.Warning,
+        TestRunStatus.Failed => Color.Error,
+        TestRunStatus.Cancelled => Color.Dark,
+        _ => Color.Default,
+    };
+
+    private string StatusLabel(TestRunStatus status) => T[$"testRuns.status.{status.ToString().ToLowerInvariant()}"];
+
+    public void Dispose() => Notifier.Changed -= OnTestRunChanged;
+}

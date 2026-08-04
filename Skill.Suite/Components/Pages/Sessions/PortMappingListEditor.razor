@@ -1,0 +1,34 @@
+@using Skill.Suite.Components.Pages.Sessions.Drafts
+@using Skill.Suite.Domain.Sessions
+@inject ITranslator T
+
+<MudStack Spacing="1">
+    @for (var i = 0; i < Items.Count; i++)
+    {
+        var idx = i;
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+            <MudNumericField T="int" @bind-Value="Items[idx].HostPort"
+                             Variant="Variant.Outlined"
+                             Label="@T["sessions.port.host"]" Min="1" Max="65535" Style="flex:1;"/>
+            <MudNumericField T="int" @bind-Value="Items[idx].ContainerPort"
+                             Variant="Variant.Outlined"
+                             Label="@T["sessions.port.container"]" Min="1" Max="65535" Style="flex:1;"/>
+            <MudSelect T="PortProtocol" @bind-Value="Items[idx].Protocol"
+                       Variant="Variant.Outlined"
+                       Label="@T["sessions.port.protocol"]" Style="flex:1;">
+                <MudSelectItem Value="@PortProtocol.Tcp">TCP</MudSelectItem>
+                <MudSelectItem Value="@PortProtocol.Udp">UDP</MudSelectItem>
+            </MudSelect>
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Items.RemoveAt(idx))"/>
+        </MudStack>
+    }
+    <div>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Items.Add(new PortMappingDraft()))">
+            @T["common.add"]
+        </MudButton>
+    </div>
+</MudStack>
+
+@code {
+    [Parameter, EditorRequired] public List<PortMappingDraft> Items { get; set; } = [];
+}

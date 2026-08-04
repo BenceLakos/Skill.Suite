@@ -1,0 +1,11 @@
+<Project>
+
+  <!--
+    Explicitly off. Session modules pin versions in their own csproj files, the way a competitor's checkout
+    does, so this module must not inherit judging/Directory.Packages.props and its central versions.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+</Project>

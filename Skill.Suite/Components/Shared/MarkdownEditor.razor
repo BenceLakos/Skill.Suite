@@ -1,0 +1,52 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<textarea @ref="_textarea"></textarea>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    private ElementReference _textarea;
+    private IJSObjectReference? _editor;
+    private DotNetObjectReference<MarkdownEditor>? _selfRef;
+    private string? _lastValue;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            _editor = await JS.InvokeAsync<IJSObjectReference>(
+                "skillSuite.markdown.init", _textarea, _selfRef, Value ?? string.Empty);
+            _lastValue = Value;
+            return;
+        }
+
+        if (_editor is not null && !string.Equals(_lastValue, Value, StringComparison.Ordinal))
+        {
+            _lastValue = Value;
+            await _editor.InvokeVoidAsync("setValue", Value ?? string.Empty);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnContentChanged(string content)
+    {
+        _lastValue = content;
+        if (ValueChanged.HasDelegate)
+            await ValueChanged.InvokeAsync(content);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_editor is not null)
+        {
+            try { await _editor.InvokeVoidAsync("destroy"); }
+            catch (JSDisconnectedException) { }
+            catch (TaskCanceledException) { }
+            await _editor.DisposeAsync();
+        }
+        _selfRef?.Dispose();
+    }
+}

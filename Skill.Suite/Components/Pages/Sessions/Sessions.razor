@@ -1,0 +1,216 @@
+@page "/sessions"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject ITranslator T
+
+@using Skill.Suite.Application.Sessions
+@using Skill.Suite.Application.Sessions.CloseSession
+@using Skill.Suite.Application.Sessions.StartSession
+@using Skill.Suite.Application.Sessions.ListSessions
+@using Skill.Suite.Domain.Sessions
+
+<PageTitle>@T["sessions.title"]</PageTitle>
+
+<PageHeader Title="@T["sessions.title"]" Subtitle="@T["sessions.subtitle"]">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" Href="sessions/new">
+            @T["sessions.create"]
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+<MudDataGrid T="SessionDto"
+             Elevation="1"
+             Items="_items"
+             Loading="_loading"
+             QuickFilter="QuickFilter"
+             Hover="true"
+             SortMode="SortMode.Multiple"
+             Filterable="false">
+        <ToolBarContent>
+            <MudTextField @bind-Value="_search"
+                          Placeholder="@T["common.search"]"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          IconSize="Size.Medium"
+                          Immediate="true"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Class="mt-0" Style="max-width:320px;"/>
+        </ToolBarContent>
+        <Columns>
+            <PropertyColumn Property="x => x.Name" Title="@T["sessions.field.name"]"/>
+            <PropertyColumn Property="x => x.Slug" Title="@T["sessions.field.slug"]"/>
+            <PropertyColumn Property="x => x.StartsAt" Title="@T["sessions.field.startsAt"]" Format="yyyy-MM-dd HH:mm"/>
+            <PropertyColumn Property="x => x.EndsAt" Title="@T["sessions.field.endsAt"]" Format="yyyy-MM-dd HH:mm"/>
+            <TemplateColumn Title="@T["sessions.field.status"]" Sortable="false">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)" Variant="Variant.Filled">
+                        @StatusLabel(context.Item.Status)
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
+                <CellTemplate>
+                    <MudTooltip Text="@T["common.edit"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Href="@($"sessions/{context.Item.Id}")"/>
+                    </MudTooltip>
+                    @if (context.Item.Status != SessionStatus.Closed)
+                    {
+                        @* Shown for Active too: provisioning is a network conversation per competitor, so a
+                           partial failure has to be resumable without rebuilding the session. *@
+                        <MudTooltip Text="@(context.Item.Status == SessionStatus.Draft
+                                              ? T["sessions.action.start"]
+                                              : T["sessions.action.reprovision"])">
+                            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
+                                           Color="Color.Success" Disabled="@_starting"
+                                           OnClick="@(() => Start(context.Item))"/>
+                        </MudTooltip>
+                        <MudTooltip Text="@T["sessions.action.close"]">
+                            <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" OnClick="@(() => Close(context.Item))"/>
+                        </MudTooltip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["common.noResults"]</MudText>
+        </NoRecordsContent>
+    <PagerContent>
+        <MudDataGridPager T="SessionDto"/>
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    private List<SessionDto> _items = [];
+    private bool _loading;
+    private bool _starting;
+    private string? _search;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        var result = await Mediator.Send(new ListSessionsQuery(null, null));
+        _items = result.IsSuccess ? result.Value : [];
+        _loading = false;
+    }
+
+    private Func<SessionDto, bool> QuickFilter => x =>
+        string.IsNullOrWhiteSpace(_search)
+        || x.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || x.Slug.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    private async Task Close(SessionDto session)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["sessions.closeConfirmTitle"],
+            Message = T["sessions.closeConfirm"],
+            YesText = T["common.confirm"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        var result = await Mediator.Send(new CloseSessionCommand(session.Id));
+        if (result.IsSuccess)
+        {
+            Snackbar.Add(T["common.success.closed"], Severity.Success);
+            await Load();
+        }
+        else
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// Starts a session: opens it for submissions and provisions a repository per competitor.
+    /// </summary>
+    /// <remarks>
+    /// Provisioning runs inside this request rather than on a background queue, so the button stays busy for
+    /// as long as the git host takes — a few seconds per competitor. That is deliberate for now: the admin
+    /// finds out here whether every repository was created, instead of discovering at the start of the
+    /// competition that a queued job failed silently. It is the piece to move to a worker first if a
+    /// session ever has enough competitors to outlast the request.
+    /// </remarks>
+    private async Task Start(SessionDto session)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["sessions.startConfirmTitle"],
+            Message = string.Format(T["sessions.startConfirm"], session.GitOrganization),
+            YesText = T["common.confirm"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        _starting = true;
+        try
+        {
+            var result = await Mediator.Send(new StartSessionCommand(session.Id));
+            if (result.IsFailure)
+            {
+                Snackbar.Add(result.Error.Message, Severity.Error);
+                return;
+            }
+
+            var outcome = result.Value;
+            if (outcome.FullySucceeded)
+            {
+                Snackbar.Add(
+                    string.Format(T["sessions.started"], outcome.Provisioned, outcome.Organization),
+                    Severity.Success);
+            }
+            else
+            {
+                // Partial success is the interesting case and must not read as failure: the competitors who
+                // did get a repository can start work while the rest are fixed and Start is re-run.
+                Snackbar.Add(
+                    string.Format(T["sessions.startedPartially"],
+                        outcome.Provisioned, outcome.Failed.Count,
+                        string.Join(", ", outcome.Failed.Select(f => f.Username))),
+                    Severity.Warning);
+
+                foreach (var failure in outcome.Failed)
+                    Snackbar.Add($"{failure.Username}: {failure.Error}", Severity.Error);
+            }
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            // Provisioning talks to a git host, and only the per-competitor step returns a Result — creating the
+            // organisation, seeding the template repository and installing the webhook all throw. An unhandled
+            // exception here tears down the Blazor circuit, so the operator saw the page die with no message and
+            // no way to tell a partial Start from a clean one. Enrolment rows are saved as each competitor is
+            // decided, so re-running Start after fixing the cause retries only what did not get through.
+            Snackbar.Add(string.Format(T["sessions.startFailed"], ex.Message), Severity.Error);
+            await Load();
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    private Color StatusColor(SessionStatus status) => status switch
+    {
+        SessionStatus.Active => Color.Success,
+        SessionStatus.Draft => Color.Warning,
+        SessionStatus.Closed => Color.Dark,
+        _ => Color.Default,
+    };
+
+    private string StatusLabel(SessionStatus status) => status switch
+    {
+        SessionStatus.Draft => T["sessions.status.draft"],
+        SessionStatus.Active => T["sessions.status.active"],
+        SessionStatus.Closed => T["sessions.status.closed"],
+        _ => status.ToString(),
+    };
+}

@@ -1,0 +1,157 @@
+@page "/docker-images"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using Skill.Suite.Application.DockerImages
+@using Skill.Suite.Application.DockerImages.DeleteDockerImage
+@using Skill.Suite.Application.DockerImages.ListDockerImages
+@using Skill.Suite.Domain.DockerImages
+
+<PageTitle>@T["dockerImages.title"]</PageTitle>
+
+<PageHeader Title="@T["dockerImages.title"]" Subtitle="@T["dockerImages.subtitle"]">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">
+            @T["dockerImages.create"]
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+<MudDataGrid T="DockerImageDto"
+             Elevation="1"
+             Items="_items"
+             Loading="_loading"
+             QuickFilter="QuickFilter"
+             Hover="true"
+             SortMode="SortMode.Multiple"
+             Filterable="false">
+        <ToolBarContent>
+            <MudTextField @bind-Value="_search"
+                          Placeholder="@T["common.search"]"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          IconSize="Size.Medium"
+                          Immediate="true"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Class="mt-0" Style="max-width:320px;"/>
+        </ToolBarContent>
+        <Columns>
+            <PropertyColumn Property="x => x.Name" Title="@T["dockerImages.field.name"]"/>
+            <PropertyColumn Property="x => x.ImageName" Title="@T["dockerImages.field.imageName"]"/>
+            <TemplateColumn Title="@T["dockerImages.field.source"]" Sortable="false">
+                <CellTemplate>
+                    <MudChip T="string"
+                             Size="Size.Small"
+                             Color="@(context.Item.Source == DockerImageSource.Pull ? Color.Info : Color.Default)">
+                        @(context.Item.Source == DockerImageSource.Pull
+                            ? T["dockerImages.source.pull"]
+                            : T["dockerImages.source.build"])
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.BuildContext" Title="@T["dockerImages.field.buildContext"]"/>
+            <TemplateColumn Title="@T["dockerImages.field.buildArgs"]" Sortable="false">
+                <CellTemplate>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@context.Item.BuildArgs.Count</MudText>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
+                <CellTemplate>
+                    <MudTooltip Text="@T["dockerImages.action.push"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Color="Color.Primary"
+                                       OnClick="@(() => OpenPush(context.Item))"
+                                       Disabled="@(context.Item.Source != DockerImageSource.Build || context.Item.NexusCredentialId is null)"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@T["common.edit"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context.Item))"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@T["common.delete"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Delete(context.Item))"/>
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["common.noResults"]</MudText>
+        </NoRecordsContent>
+    <PagerContent>
+        <MudDataGridPager T="DockerImageDto"/>
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    private List<DockerImageDto> _items = [];
+    private bool _loading;
+    private string? _search;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        var result = await Mediator.Send(new ListDockerImagesQuery(null));
+        _items = result.IsSuccess ? result.Value : [];
+        _loading = false;
+    }
+
+    private Func<DockerImageDto, bool> QuickFilter => x =>
+        string.IsNullOrWhiteSpace(_search)
+        || x.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || x.ImageName.Contains(_search, StringComparison.OrdinalIgnoreCase);
+
+    private async Task OpenCreate()
+    {
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await Dialogs.ShowAsync<DockerImageFormDialog>(T["dockerImages.create"], options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Load();
+    }
+
+    private async Task OpenEdit(DockerImageDto item)
+    {
+        var parameters = new DialogParameters { ["Id"] = item.Id };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true };
+        var dialog = await Dialogs.ShowAsync<DockerImageFormDialog>(T["dockerImages.edit"], parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await Load();
+    }
+
+    private async Task OpenPush(DockerImageDto item)
+    {
+        var parameters = new DialogParameters
+        {
+            ["Id"] = item.Id,
+            ["ImageName"] = item.ImageName,
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+        var dialog = await Dialogs.ShowAsync<DockerImagePushDialog>(T["dockerImages.push.title"], parameters, options);
+        await dialog.Result;
+    }
+
+    private async Task Delete(DockerImageDto item)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["dockerImages.deleteConfirmTitle"],
+            Message = T.Format("dockerImages.deleteConfirm", item.Name),
+            YesText = T["common.delete"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        var result = await Mediator.Send(new DeleteDockerImageCommand(item.Id));
+        if (result.IsSuccess)
+        {
+            Snackbar.Add(T["common.success.deleted"], Severity.Success);
+            await Load();
+        }
+        else
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+        }
+    }
+}

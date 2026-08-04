@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Ingenimind Kft.",
+  "classifications": [ "Skill Suite", "Competition", "Judging" ],
+  "identity": "SkillSuite.Session.Module",
+  "name": "Skill Suite judging session",
+  "description": "A complete session module: contracts, reference implementation, hidden graded suite, and self-contained white-box and black-box judge images.",
+  "shortName": "skillsuite-session",
+  "sourceName": "SkillSuite.Session",
+  "preferNameDirectory": true,
+  "defaultName": "MySession",
+  "tags": {
+    "language": "C#",
+    "type": "solution"
+  },
+  "symbols": {
+    "judgeBase": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "ghcr.io/bencelakos/skill-suite-judge-base:9.0",
+      "replaces": "JUDGE_BASE_IMAGE_DEFAULT",
+      "description": "Base image the judge images build FROM. Use skill-suite-judge-base:9.0 for a locally built base."
+    },
+    "imageTag": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "1.0.0",
+      "replaces": "SESSION_IMAGE_TAG_DEFAULT",
+      "description": "Immutable tag for the built judge images. Never use a mutable tag: the platform runs docker run with no --pull."
+    }
+  },
+  "sources": [
+    {
+      "modifiers": [
+        {
+          "exclude": [
+            "**/bin/**",
+            "**/obj/**",
+            "**/local-nuget/**",
+            "**/TestResults/**",
+            "**/StrykerOutput/**"
+          ]
+        }
+      ]
+    }
+  ],
+  "sourceName_comment": "No postActions on purpose: a RunScript action would restore the execute bit on the shell scripts, but it makes dotnet new prompt for --allow-scripts and hang in any non-interactive context. The README's first step is a single chmod instead."
+}

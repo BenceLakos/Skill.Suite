@@ -794,3 +794,9 @@ FodyWeavers.xsd
 # Additional files built by Visual Studio
 
 # End of https://www.toptal.com/developers/gitignore/api/dotnetcore,aspnetcore,macos,linux,windows,intellij,rider,visualstudio,visualstudiocode,git
+
+# Webhook submission checkouts (bind-mounted into the app container at runtime).
+/workdir/
+
+# Production secrets for compose.production.yaml. The admin credential must never be committed.
+.env

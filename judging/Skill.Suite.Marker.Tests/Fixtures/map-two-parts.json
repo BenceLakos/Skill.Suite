@@ -1,0 +1,10 @@
+{
+  // Bare strings: the part id doubles as the namespace/path segment to match.
+  "parts": ["services", "program"],
+  "aspects": [
+    { "id": "A1.1", "label": "Validates a well-formed program" },
+    { "id": "A1.2" },
+    { "id": "C2.3" },
+    { "id": "Z9.9", "label": "Declared but never tested" }
+  ]
+}

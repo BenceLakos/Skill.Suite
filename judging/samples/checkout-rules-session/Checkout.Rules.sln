@@ -1,0 +1,27 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Checkout.Rules.Contracts", "Checkout.Rules.Contracts\Checkout.Rules.Contracts.csproj", "{C0C0C0C0-1111-1111-1111-111111111111}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Checkout.Rules.Services", "Checkout.Rules.Services\Checkout.Rules.Services.csproj", "{50505050-2222-2222-2222-222222222222}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Checkout.Rules.UnitTests", "Checkout.Rules.UnitTests\Checkout.Rules.UnitTests.csproj", "{7E7E7E7E-3333-3333-3333-333333333333}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C0C0C0C0-1111-1111-1111-111111111111}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C0C0C0C0-1111-1111-1111-111111111111}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C0C0C0C0-1111-1111-1111-111111111111}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C0C0C0C0-1111-1111-1111-111111111111}.Release|Any CPU.Build.0 = Release|Any CPU
+		{50505050-2222-2222-2222-222222222222}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{50505050-2222-2222-2222-222222222222}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{50505050-2222-2222-2222-222222222222}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{50505050-2222-2222-2222-222222222222}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E7E7E7E-3333-3333-3333-333333333333}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7E7E7E7E-3333-3333-3333-333333333333}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7E7E7E7E-3333-3333-3333-333333333333}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E7E7E7E-3333-3333-3333-333333333333}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

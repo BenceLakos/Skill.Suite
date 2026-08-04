@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.5.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="10.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Skill.Suite.Application\Skill.Suite.Application.csproj" />
+    <ProjectReference Include="..\Skill.Suite.Domain\Skill.Suite.Domain.csproj" />
+    <!-- For DockerRunArguments: the judgement container's isolation flags are asserted here. -->
+    <ProjectReference Include="..\Skill.Suite.Infra\Skill.Suite.Infra.csproj" />
+  </ItemGroup>
+
+  <!--
+    The golden event streams are owned by the producer side (judging/, net9.0) and consumed here, rather than
+    copied. A net9.0 project cannot be referenced from net10.0, so a shared file is the only way producer and
+    consumer can be pinned to one artifact instead of two that drift apart.
+
+    A glob that matches nothing is not an error, so this solution still builds before judging/ exists.
+  -->
+  <ItemGroup>
+    <Content Include="..\judging\Skill.Suite.TestLog.Tests\Golden\*.jsonl"
+             LinkBase="Golden" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\judging\docker\judge-smoke\expected-events.jsonl"
+             LinkBase="Golden" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

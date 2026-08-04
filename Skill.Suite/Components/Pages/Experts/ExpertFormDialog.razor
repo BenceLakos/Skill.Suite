@@ -1,0 +1,90 @@
+@inject ISender Mediator
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using Skill.Suite.Application.Experts.CreateExpert
+@using Skill.Suite.Application.Experts.GetExpert
+@using Skill.Suite.Application.Experts.UpdateExpert
+
+<MudDialog>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true"/>
+        }
+        else
+        {
+            <MudForm @ref="_form" Model="_model" Class="d-flex flex-column gap-3">
+                <MudTextField @bind-Value="_model.DisplayName"
+                              Label="@T["experts.field.displayName"]"
+                              Variant="Variant.Outlined"
+                              Required="true"
+                              RequiredError="@T["common.required"]"
+                              MaxLength="200"/>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+                }
+            </MudForm>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">@T["common.cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit" Disabled="_submitting">@T["common.save"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public Guid? Id { get; set; }
+
+    private MudForm _form = null!;
+    private FormModel _model = new();
+    private bool _loading;
+    private bool _submitting;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Id.HasValue) return;
+
+        _loading = true;
+        var result = await Mediator.Send(new GetExpertByIdQuery(Id.Value));
+        if (result.IsSuccess)
+            _model = new FormModel { DisplayName = result.Value.DisplayName };
+        else
+            _error = result.Error.Message;
+        _loading = false;
+    }
+
+    private async Task Submit()
+    {
+        await _form.ValidateAsync();
+        if (!_form.IsValid) return;
+
+        _submitting = true;
+        _error = null;
+
+        if (Id.HasValue)
+        {
+            var result = await Mediator.Send(new UpdateExpertCommand(Id.Value, _model.DisplayName));
+            if (result.IsFailure) { _error = result.Error.Message; _submitting = false; return; }
+        }
+        else
+        {
+            var result = await Mediator.Send(new CreateExpertCommand(_model.DisplayName));
+            if (result.IsFailure) { _error = result.Error.Message; _submitting = false; return; }
+        }
+
+        Snackbar.Add(T["common.success.saved"], Severity.Success);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private sealed class FormModel
+    {
+        public string DisplayName { get; set; } = string.Empty;
+    }
+}

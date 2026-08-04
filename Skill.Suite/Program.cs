@@ -4,8 +4,11 @@ using Scalar.AspNetCore;
 using Skill.Suite.Application;
 using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Components;
+using Skill.Suite.Endpoints;
 using Skill.Suite.Infra;
 using Skill.Suite.Services;
+using Skill.Suite.Services.Theme;
+using Skill.Suite.Services.Translation;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,6 +30,13 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddSingleton<Skill.Suite.Application.TestRuns.ITestRunChangeNotifier, TestRunChangeNotifier>();
+
+// --- Translation + Theme -------------------------------------------------------------
+builder.Services.AddSingleton<TranslationStore>();
+builder.Services.AddScoped<ITranslator, JsonTranslator>();
+builder.Services.AddScoped<ThemeState>();
+builder.Services.AddScoped<ThemePersistence>();
 
 // --- Application & Infrastructure ----------------------------------------------------
 builder.Services.AddApplication();
@@ -63,5 +73,9 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+app.MapAccountEndpoints();
+app.MapWebhookEndpoints();
+app.MapTestRunEndpoints();
 
 app.Run();

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>ConsoleQuickstart</RootNamespace>
+    <AssemblyName>ConsoleQuickstart</AssemblyName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    A ProjectReference, because inside this repo the package is not published yet and the sample has
+    to build and be executed by FileSinkTests. Outside the repo the equivalent single step is:
+
+        dotnet add package Skill.Suite.TestLog
+
+    See README.md - that is the form to copy.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\Skill.Suite.TestLog\Skill.Suite.TestLog.csproj" />
+  </ItemGroup>
+
+</Project>

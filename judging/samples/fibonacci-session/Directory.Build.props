@@ -1,0 +1,6 @@
+<Project>
+
+  <!-- Empty on purpose: a session module is its own repository with nothing above it. MSBuild stops at the
+       first of these it finds walking up, which is what keeps judging/ properties out of this build. -->
+
+</Project>

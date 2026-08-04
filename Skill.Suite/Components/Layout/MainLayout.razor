@@ -1,23 +1,114 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ThemeState Theme
+@inject ITranslator T
+@using Skill.Suite.Services.Theme
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu/>
-    </div>
+<MudThemeProvider @bind-IsDarkMode="_isDarkMode" Theme="_theme"/>
+<MudPopoverProvider/>
+<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" BackdropClick="false"/>
+<MudSnackbarProvider/>
+<ThemeBootstrapper/>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
+<MudLayout>
+    <AuthorizeView Roles="Competitor">
+        <Authorized>
+            <MudAppBar Elevation="1" Color="Color.Default" Class="app-bar-compact">
+                <MudText Typo="Typo.h6" Class="app-bar-title">@T["common.appName"]</MudText>
+                <MudSpacer/>
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="app-bar-actions">
+                    <ThemeToggle Class="app-bar-action"/>
+                    <MudText Typo="Typo.body2" Class="app-bar-user">@context.User.Identity?.Name</MudText>
+                    <form action="/Account/Logout" method="post" class="inline-form">
+                        <MudButton ButtonType="ButtonType.Submit"
+                                   StartIcon="@Icons.Material.Filled.Logout"
+                                   Variant="Variant.Text"
+                                   Color="Color.Inherit"
+                                   Class="app-bar-action">
+                            @T["common.signOut"]
+                        </MudButton>
+                    </form>
+                </MudStack>
+            </MudAppBar>
+        </Authorized>
+    </AuthorizeView>
 
-        <article class="content px-4">
+    <AuthorizeView Roles="Admin,Expert">
+        <Authorized>
+            <MudDrawer Open="true" Variant="DrawerVariant.Persistent" Elevation="0" ClipMode="DrawerClipMode.Never" Width="240px">
+                <div class="sidebar-shell">
+                    <div class="sidebar-brand">
+                        <MudText Typo="Typo.h5">@T["common.appName"]</MudText>
+                    </div>
+
+                    <NavMenu/>
+
+                    <MudSpacer/>
+
+                    <MudDivider Class="mb-2"/>
+
+                    <div class="sidebar-bottom">
+                        <ThemeToggle FullWidth="true"/>
+
+                        <MudPaper Outlined="true" Class="pa-2 mt-2">
+                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Spacing="2">
+                                <MudText Typo="Typo.body2" Class="text-truncate">@context.User.Identity?.Name</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@RoleLabel(context.User)</MudText>
+                            </MudStack>
+                        </MudPaper>
+
+                        <form action="/Account/Logout" method="post" class="mt-1">
+                            <MudButton ButtonType="ButtonType.Submit"
+                                       FullWidth="true"
+                                       StartIcon="@Icons.Material.Filled.Logout"
+                                       Variant="Variant.Text"
+                                       Color="Color.Default"
+                                       Class="sidebar-action">
+                                @T["common.signOut"]
+                            </MudButton>
+                        </form>
+                    </div>
+                </div>
+            </MudDrawer>
+        </Authorized>
+    </AuthorizeView>
+
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="px-6 py-3">
             @Body
-        </article>
-    </main>
-</div>
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
 
 <div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+    @T["common.error"]
+    <a href="." class="reload">@T["common.close"]</a>
 </div>
+
+@code {
+    private bool _isDarkMode;
+    private readonly MudTheme _theme = WorldSkillsTheme.Build();
+
+    protected override void OnInitialized()
+    {
+        _isDarkMode = Theme.IsDarkMode;
+        Theme.OnChange += OnThemeChanged;
+    }
+
+    private void OnThemeChanged()
+    {
+        if (_isDarkMode == Theme.IsDarkMode) return;
+        _isDarkMode = Theme.IsDarkMode;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private static string RoleLabel(System.Security.Claims.ClaimsPrincipal user)
+    {
+        if (user.IsInRole("Admin")) return "Administrator";
+        if (user.IsInRole("Expert")) return "Expert";
+        if (user.IsInRole("Competitor")) return "Competitor";
+        return "User";
+    }
+
+    public void Dispose() => Theme.OnChange -= OnThemeChanged;
+}

@@ -1,0 +1,105 @@
+@page "/my-test-runs"
+@attribute [Authorize(Roles = "Competitor")]
+@implements IDisposable
+@inject ISender Mediator
+@inject NavigationManager Nav
+@inject ITranslator T
+@inject ITestRunChangeNotifier Notifier
+
+@using Skill.Suite.Application.TestRuns
+@using Skill.Suite.Application.TestRuns.MyTestRuns
+@using Skill.Suite.Domain.TestRuns
+
+<PageTitle>@T["myTestRuns.title"]</PageTitle>
+
+<PageHeader Title="@T["myTestRuns.title"]" Subtitle="@T["myTestRuns.subtitle"]"/>
+
+<MudDataGrid T="MyTestRunSummaryDto"
+             Elevation="1"
+             Items="_items"
+             Loading="_initialLoading"
+             Hover="true"
+             SortMode="SortMode.Multiple"
+             Filterable="false"
+             RowClick="OnRowClick"
+             RowStyle="cursor:pointer">
+        <Columns>
+            <PropertyColumn Property="x => x.CreatedAt" Title="@T["testRuns.field.startedAt"]" Format="yyyy-MM-dd HH:mm:ss"/>
+            <TemplateColumn Title="@T["testRuns.field.status"]" Sortable="false">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Item.Status)" Variant="Variant.Filled">
+                        @StatusLabel(context.Item.Status)
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.Branch" Title="@T["testRuns.field.branch"]"/>
+            <PropertyColumn Property="x => x.CommitSha" Title="@T["testRuns.field.commit"]"/>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["common.noResults"]</MudText>
+        </NoRecordsContent>
+    <PagerContent>
+        <MudDataGridPager T="MyTestRunSummaryDto"/>
+    </PagerContent>
+</MudDataGrid>
+
+@code {
+    private List<MyTestRunSummaryDto> _items = [];
+    private bool _initialLoading = true;
+
+    // Guards against two refreshes overlapping on the circuit's DbContext. This page refreshes on EVERY run's
+    // change events, and a judgement raises several in quick succession (cloning, running, completed), so two
+    // notifications arriving together queued two work items - and because InvokeAsync releases the renderer's
+    // synchronization context at the first await, the second query started while the first was still open on the
+    // same scoped DbContext. That throws "A second operation was started on this context instance" and tears
+    // down the competitor's circuit mid-session. A dropped refresh is free: the next event refreshes anyway, and
+    // the query always reads current state rather than applying a delta.
+    private bool _refreshing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        _initialLoading = false;
+        Notifier.Changed += OnTestRunChanged;
+    }
+
+    private void OnTestRunChanged(Guid testRunId) =>
+        _ = InvokeAsync(async () =>
+        {
+            if (_refreshing) return;
+            _refreshing = true;
+            try
+            {
+                await Load();
+                StateHasChanged();
+            }
+            finally
+            {
+                _refreshing = false;
+            }
+        });
+
+    private async Task Load()
+    {
+        var result = await Mediator.Send(new ListMyTestRunsQuery());
+        _items = result.IsSuccess ? result.Value : [];
+    }
+
+    private void OnRowClick(DataGridRowClickEventArgs<MyTestRunSummaryDto> args) =>
+        Nav.NavigateTo($"my-test-runs/{args.Item.Id}");
+
+    private Color StatusColor(TestRunStatus status) => status switch
+    {
+        TestRunStatus.Completed => Color.Success,
+        TestRunStatus.Running => Color.Info,
+        TestRunStatus.Cloning => Color.Info,
+        TestRunStatus.Pending => Color.Warning,
+        TestRunStatus.Failed => Color.Error,
+        TestRunStatus.Cancelled => Color.Dark,
+        _ => Color.Default,
+    };
+
+    private string StatusLabel(TestRunStatus status) => T[$"testRuns.status.{status.ToString().ToLowerInvariant()}"];
+
+    public void Dispose() => Notifier.Changed -= OnTestRunChanged;
+}

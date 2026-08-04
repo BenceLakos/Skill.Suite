@@ -1,0 +1,13 @@
+<Project>
+
+  <!--
+    These items MUST live in .targets, not .props: IsPackable is set in each project body, which
+    MSBuild evaluates *after* Directory.Build.props, so an IsPackable-conditioned ItemGroup in the
+    props file would never fire.
+  -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="README.md" Pack="true" PackagePath="/" Condition="Exists('README.md')" />
+  </ItemGroup>
+
+</Project>

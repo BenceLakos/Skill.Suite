@@ -1,0 +1,314 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
+using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
+using Skill.Suite.Application.Abstractions;
+
+namespace Skill.Suite.Infra.Containers;
+
+internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> logger) : IContainerRunner
+{
+    /// <summary>
+    /// Cap on the raw stderr copy kept for <c>FailureReason</c>.
+    /// </summary>
+    /// <remarks>
+    /// Generous enough for a full MSBuild error list or a stack trace, small enough that a competitor cannot
+    /// use it to exhaust the application's memory. Judgement containers that need to say more than this are
+    /// misusing stderr — the event stream is the channel for detail.
+    /// </remarks>
+    private const int MaxStderrCharacters = 64 * 1024;
+
+    private const int StopGraceSeconds = 5;
+
+    public async Task<ContainerRunResult> RunAsync(
+        ContainerRunRequest request,
+        Func<string, CancellationToken, Task> onStdoutLine,
+        CancellationToken cancellationToken)
+    {
+        // If the registry needs auth, log in before docker run pulls.
+        //
+        // The credentials go into a throwaway DOCKER_CONFIG directory rather than the daemon's shared store.
+        // That is what makes concurrent runs safe: `docker login` and `docker logout` both edit one global
+        // config file, so with a shared store one run's logout would revoke the credentials another run was
+        // in the middle of pulling with. It also keeps competition registry credentials out of the host's
+        // own docker config entirely.
+        string? dockerConfigDir = null;
+        if (request.RegistryAuth is not null)
+        {
+            dockerConfigDir = Directory.CreateTempSubdirectory("skill-suite-docker-").FullName;
+            await DockerLoginAsync(request.RegistryAuth, dockerConfigDir, cancellationToken);
+        }
+
+        try
+        {
+            return await RunInternalAsync(request, dockerConfigDir, onStdoutLine, cancellationToken);
+        }
+        finally
+        {
+            if (dockerConfigDir is not null)
+            {
+                await TryDockerLogoutAsync(request.RegistryAuth!.Server, dockerConfigDir);
+
+                // Deleting the directory is the real revocation; the logout above just keeps any credential
+                // helper informed.
+                try { Directory.Delete(dockerConfigDir, recursive: true); }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not remove the temporary docker config at {Path}", dockerConfigDir);
+                }
+            }
+        }
+    }
+
+    private async Task<ContainerRunResult> RunInternalAsync(
+        ContainerRunRequest request,
+        string? dockerConfigDir,
+        Func<string, CancellationToken, Task> onOutputLine,
+        CancellationToken cancellationToken)
+    {
+        var args = DockerRunArguments.Build(request);
+
+        var psi = new ProcessStartInfo("docker")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        ApplyDockerConfig(psi, dockerConfigDir);
+        foreach (var a in args) psi.ArgumentList.Add(a);
+
+        using var process = new Process { StartInfo = psi };
+        process.EnableRaisingEvents = true;
+
+        var stderr = new StringBuilder();
+
+        // The event-based async API is the only reliable way to stream both stdout and
+        // stderr from a child process without risking a deadlock when one pipe fills.
+        // Both streams are funneled into a single channel so the consumer handler runs
+        // serially against the TestRun (no concurrent mutation).
+        var lines = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+        });
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            lines.Writer.TryWrite(e.Data);
+        };
+
+        // Mirror stderr through the same parser — some judgement images emit JSON events
+        // on stderr (e.g. when they redirect logger output) — and keep a raw copy so we
+        // can surface it if the container exits non-zero.
+        //
+        // The raw copy is CAPPED. It ends up in TestRun.FailureReason, and competitor code chooses what goes
+        // into it: a `while(true) Console.Error.WriteLine(...)` grew this buffer until the application process
+        // died, which killed every other competitor being judged at the same time. The first bytes are the
+        // diagnostic ones — a compiler error, a stack trace — so keeping the head and dropping the tail loses
+        // nothing an expert needs.
+        var stderrTruncated = false;
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+
+            if (stderr.Length < MaxStderrCharacters)
+            {
+                stderr.AppendLine(e.Data);
+            }
+            else if (!stderrTruncated)
+            {
+                stderrTruncated = true;
+                stderr.AppendLine($"[truncated at {MaxStderrCharacters} characters]");
+            }
+
+            lines.Writer.TryWrite(e.Data);
+        };
+
+        // The container name is derived from the run id, so a run the worker adopts after a crash collides with
+        // whatever the dead process left behind: `docker run --name` fails outright with "name already in use",
+        // failing the recovered run for a reason that has nothing to do with the submission. Best-effort removal
+        // of a same-named container makes starting it idempotent the way re-judging needs.
+        TryRemoveStaleContainer(request.ContainerName);
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        var wasStopped = false;
+        await using var cancellation = cancellationToken.Register(() =>
+        {
+            wasStopped = true;
+            TryDockerStop(request.ContainerName);
+        });
+
+        var consumerTask = Task.Run(async () =>
+        {
+            await foreach (var line in lines.Reader.ReadAllAsync())
+            {
+                try
+                {
+                    await onOutputLine(line, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to handle judgement output line: {Line}", line);
+                }
+            }
+        });
+
+        // WaitForExitAsync (without a token) waits for the process and drains the async
+        // output readers — only after this can we safely read ExitCode.
+        await process.WaitForExitAsync(CancellationToken.None);
+
+        // Close the channel so the consumer's `await foreach` terminates.
+        lines.Writer.TryComplete();
+        await consumerTask;
+
+        logger.LogInformation(
+            "Container {ContainerName} exited with code {ExitCode} (wasStopped={WasStopped}).",
+            request.ContainerName, process.ExitCode, wasStopped);
+
+        return new ContainerRunResult(process.ExitCode, stderr.Length == 0 ? null : stderr.ToString(), wasStopped);
+    }
+
+    /// <summary>
+    /// Scopes a docker invocation to a private credentials store, so concurrent runs cannot revoke each
+    /// other's login and registry credentials never touch the host's own docker config.
+    /// </summary>
+    private static void ApplyDockerConfig(ProcessStartInfo psi, string? dockerConfigDir)
+    {
+        if (dockerConfigDir is not null)
+            psi.Environment["DOCKER_CONFIG"] = dockerConfigDir;
+    }
+
+    private async Task DockerLoginAsync(RegistryAuth auth, string dockerConfigDir, CancellationToken cancellationToken)
+    {
+        var psi = new ProcessStartInfo("docker")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        ApplyDockerConfig(psi, dockerConfigDir);
+        psi.ArgumentList.Add("login");
+        psi.ArgumentList.Add("-u");
+        psi.ArgumentList.Add(auth.Username);
+        psi.ArgumentList.Add("--password-stdin");
+        if (!string.IsNullOrWhiteSpace(auth.Server))
+            psi.ArgumentList.Add(auth.Server);
+
+        using var login = Process.Start(psi)
+            ?? throw new InvalidOperationException("docker login could not be started.");
+
+        await login.StandardInput.WriteAsync(auth.Password);
+        login.StandardInput.Close();
+
+        await login.WaitForExitAsync(cancellationToken);
+
+        if (login.ExitCode != 0)
+        {
+            var stderr = await login.StandardError.ReadToEndAsync(cancellationToken);
+            logger.LogError("docker login failed (exit {ExitCode}) for {Server}: {Stderr}",
+                login.ExitCode, auth.Server ?? "<default>", stderr);
+            throw new InvalidOperationException($"docker login exited {login.ExitCode}.");
+        }
+    }
+
+    private async Task TryDockerLogoutAsync(string? server, string dockerConfigDir)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("docker")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            ApplyDockerConfig(psi, dockerConfigDir);
+            psi.ArgumentList.Add("logout");
+            if (!string.IsNullOrWhiteSpace(server))
+                psi.ArgumentList.Add(server);
+
+            using var logout = Process.Start(psi);
+            if (logout is null) return;
+            await logout.WaitForExitAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "docker logout failed for {Server}", server ?? "<default>");
+        }
+    }
+
+    /// <summary>
+    /// Removes a container left over from an earlier attempt at the same run, if one exists.
+    /// </summary>
+    /// <remarks>
+    /// Safe to call unconditionally: <c>docker rm -f</c> on a name that does not exist is a no-op with a
+    /// non-zero exit, which is why nothing is thrown here. It cannot remove a container belonging to a
+    /// different run, because the name is the run's own id.
+    /// </remarks>
+    private void TryRemoveStaleContainer(string containerName)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("docker")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("rm");
+            psi.ArgumentList.Add("--force");
+            psi.ArgumentList.Add(containerName);
+
+            using var remove = Process.Start(psi);
+            if (remove is null) return;
+
+            remove.WaitForExit(TimeSpan.FromSeconds(StopGraceSeconds + 5));
+            if (remove.ExitCode == 0)
+                logger.LogWarning("Removed a stale container named {ContainerName} before starting this run.",
+                    containerName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not check for a stale container named {ContainerName}", containerName);
+        }
+    }
+
+    private void TryDockerStop(string containerName)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("docker")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("stop");
+            psi.ArgumentList.Add("--time");
+            psi.ArgumentList.Add(StopGraceSeconds.ToString());
+            psi.ArgumentList.Add(containerName);
+
+            using var stop = Process.Start(psi);
+            stop?.WaitForExit(TimeSpan.FromSeconds(StopGraceSeconds + 5));
+            logger.LogInformation("Stopped container {ContainerName} (cancellation requested).", containerName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "docker stop failed for container {ContainerName}", containerName);
+        }
+    }
+}

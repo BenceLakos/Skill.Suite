@@ -1,0 +1,25 @@
+@inject ITranslator T
+
+<MudItem xs="12" sm="6" md="4">
+    <MudCard Class="h-100" Elevation="2">
+        <MudCardContent>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-2">
+                <MudIcon Icon="@Icon" Color="Color.Primary"/>
+                <MudText Typo="Typo.h6">@Title</MudText>
+            </MudStack>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@Body</MudText>
+        </MudCardContent>
+        <MudCardActions>
+            <MudButton Href="@Href" Variant="Variant.Text" Color="Color.Primary" EndIcon="@Icons.Material.Filled.ArrowForward">
+                @T["home.tile.open"]
+            </MudButton>
+        </MudCardActions>
+    </MudCard>
+</MudItem>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Body { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Href { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+}

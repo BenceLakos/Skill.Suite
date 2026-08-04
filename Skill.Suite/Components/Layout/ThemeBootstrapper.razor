@@ -1,0 +1,13 @@
+@inject ThemeState Theme
+@inject ThemePersistence ThemePersistence
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var saved = await ThemePersistence.ReadAsync();
+        if (saved is { } value && value != Theme.IsDarkMode)
+            Theme.IsDarkMode = value;
+    }
+}

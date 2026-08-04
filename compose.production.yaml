@@ -1,0 +1,74 @@
+# Production overlay. Use INSTEAD of compose.override.yaml, which is local-development only:
+#
+#   docker compose -f compose.yaml -f compose.production.yaml up -d
+#
+# compose.override.yaml is applied automatically by plain `docker compose up`, and it deliberately weakens
+# things for local work — it turns on unsigned webhook pushes and drops the platform pin. Naming this file
+# explicitly is what keeps those out of a competition deployment.
+#
+# Requires a .env beside it; see .env.example. Nothing secret is in this file, so it is safe to commit.
+
+services:
+  skill.suite:
+    # Survive a crash, an OOM kill and a host reboot. Without this an app restart is a manual step nobody is
+    # watching for mid-competition, and every queued submission is lost with the process.
+    restart: unless-stopped
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+
+      # Seeded on first boot only, from the environment. appsettings.Development.json ships a known
+      # admin/Admin1234! pair; in Production nothing is seeded unless these are set, so the credential that can
+      # rewrite marks never exists in git.
+      Seed__Admin__Username: "${SKILLSUITE_ADMIN_USER:?set SKILLSUITE_ADMIN_USER in .env}"
+      Seed__Admin__Password: "${SKILLSUITE_ADMIN_PASSWORD:?set SKILLSUITE_ADMIN_PASSWORD in .env}"
+      Seed__Admin__FullName: "Competition Administrator"
+
+      # The git host as THIS PROCESS reaches it, over the container network — not as a browser reaches it.
+      # StartSession refuses to provision without it, so a Production stack that omits this cannot start a
+      # session at all.
+      Webhook__GitInternalBaseUrl: "${SKILLSUITE_GIT_INTERNAL_URL:-http://gitea:3000}"
+
+      # The git host's view of this application, written into every competitor webhook at session start.
+      # Wrong here is silent: repositories get provisioned, hooks get installed, and no push ever arrives.
+      Webhook__PublicWebhookUrl: "${SKILLSUITE_WEBHOOK_URL:-http://skill-suite:8080/webhooks/git}"
+
+      # Judge container caps. Uncapped by default in the application, which lets one competitor allocating in a
+      # loop take the host down along with every run on it. Size these for the competition machine; a black-box
+      # session needs headroom because Stryker re-runs the whole suite once per mutant.
+      Webhook__JudgeMemoryLimit: "${SKILLSUITE_JUDGE_MEMORY:-4g}"
+      Webhook__JudgeCpuLimit: "${SKILLSUITE_JUDGE_CPUS:-2}"
+      Webhook__JudgePidsLimit: "${SKILLSUITE_JUDGE_PIDS:-512}"
+      Webhook__MaxConcurrentRuns: "${SKILLSUITE_CONCURRENT_RUNS:-2}"
+
+      # Explicit, not inherited. compose.override.yaml turns this on for the scripted harness, which inserts
+      # sessions with SQL and therefore pushes unsigned. In production an unsigned push is an anonymous
+      # judging trigger for anyone who can reach the port.
+      Webhook__AllowUnsignedPushes: "false"
+
+    volumes:
+      # Starter packages the session author produced. Session.TemplateFolder is read by THIS process, so a host
+      # path typed into that field is invisible to it and every competitor gets an empty repository. Point this
+      # at wherever the authored sessions live on the competition machine.
+      - "${SKILLSUITE_STARTER_PACKAGES:-./judging/samples}:/starter-packages:ro"
+
+    # Container logs are unbounded by default, and a judgement run is chatty. Filling the disk mid-competition
+    # takes Postgres down with it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    healthcheck:
+      # The login page is the cheapest endpoint that proves the app booted and can serve a request.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/Account/Login >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+    ports:
+      # 8080 only. 8081 is the HTTPS port the container does not terminate, and exposing it on a venue network
+      # advertises a service that cannot answer.
+      - "${SKILLSUITE_BIND:-0.0.0.0}:8080:8080"

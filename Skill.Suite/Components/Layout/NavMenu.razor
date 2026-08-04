@@ -1,92 +1,40 @@
-﻿@implements IDisposable
+@inject ITranslator T
 
-@inject NavigationManager NavigationManager
+<MudNavMenu Class="mt-2">
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">
+        @T["nav.home"]
+    </MudNavLink>
 
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">Skill.Suite</a>
-    </div>
-</div>
+    <AuthorizeView Roles="Admin">
+        <Authorized>
+            <MudDivider Class="my-2"/>
+            <MudNavLink Href="sessions" Icon="@Icons.Material.Filled.EventNote">
+                @T["nav.sessions"]
+            </MudNavLink>
+            <MudNavLink Href="competitors" Icon="@Icons.Material.Filled.Groups">
+                @T["nav.competitors"]
+            </MudNavLink>
+            <MudNavLink Href="experts" Icon="@Icons.Material.Filled.School">
+                @T["nav.experts"]
+            </MudNavLink>
+            <MudNavLink Href="credentials" Icon="@Icons.Material.Filled.VpnKey">
+                @T["nav.credentials"]
+            </MudNavLink>
+            <MudNavLink Href="docker-images" Icon="@Icons.Material.Filled.Memory">
+                @T["nav.dockerImages"]
+            </MudNavLink>
+            <MudNavLink Href="test-runs" Icon="@Icons.Material.Filled.PlayCircleFilled">
+                @T["nav.testRuns"]
+            </MudNavLink>
+        </Authorized>
+    </AuthorizeView>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler"/>
-
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="auth">
-                <span class="bi bi-lock-nav-menu" aria-hidden="true"></span> Auth Required
-            </NavLink>
-        </div>
-
-        <AuthorizeView>
-            <Authorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Account/Manage">
-                        <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> @context.User.Identity?.Name
-                    </NavLink>
-                </div>
-                <div class="nav-item px-3">
-                    <form action="Account/Logout" method="post">
-                        <AntiforgeryToken/>
-                        <input type="hidden" name="ReturnUrl" value="@currentUrl"/>
-                        <button type="submit" class="nav-link">
-                            <span class="bi bi-arrow-bar-left-nav-menu" aria-hidden="true"></span> Logout
-                        </button>
-                    </form>
-                </div>
-            </Authorized>
-            <NotAuthorized>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Account/Register">
-                        <span class="bi bi-person-nav-menu" aria-hidden="true"></span> Register
-                    </NavLink>
-                </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Account/Login">
-                        <span class="bi bi-person-badge-nav-menu" aria-hidden="true"></span> Login
-                    </NavLink>
-                </div>
-            </NotAuthorized>
-        </AuthorizeView>
-    </nav>
-</div>
-
-@code {
-    private string? currentUrl;
-
-    protected override void OnInitialized()
-    {
-        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        NavigationManager.LocationChanged += OnLocationChanged;
-    }
-
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
-    {
-        currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
-        StateHasChanged();
-    }
-
-    public void Dispose()
-    {
-        NavigationManager.LocationChanged -= OnLocationChanged;
-    }
-
-}
+    <AuthorizeView Roles="Competitor">
+        <Authorized>
+            <MudDivider Class="my-2"/>
+            <MudNavLink Href="my-test-runs" Icon="@Icons.Material.Filled.PlayCircleFilled">
+                @T["nav.myTestRuns"]
+            </MudNavLink>
+        </Authorized>
+    </AuthorizeView>
+</MudNavMenu>
