@@ -61,9 +61,10 @@ judge_configure() {
     JUDGE_WORK="$(mktemp -d)"
     JUDGE_STAGED_EVENTS="${JUDGE_WORK}/staged-events.jsonl"
     JUDGE_EVENT_FILE="${LOG_DIRECTORY}/events.jsonl"
+    JUDGE_TEST_MANIFEST="${JUDGE_WORK}/test-manifest"
     : >"${JUDGE_STAGED_EVENTS}"
 
-    readonly JUDGE_WORK JUDGE_STAGED_EVENTS JUDGE_EVENT_FILE
+    readonly JUDGE_WORK JUDGE_STAGED_EVENTS JUDGE_EVENT_FILE JUDGE_TEST_MANIFEST
 
     mkdir -p "${LOG_DIRECTORY}"
 }
@@ -418,6 +419,65 @@ judge_test_user_can_write() {
     fi
 
     return 1
+}
+
+# judge_capture_test_manifest - record which tests legitimately exist, before any competitor code is present.
+#
+# This is the one piece of corroboration a competitor genuinely cannot reach. It is taken from the hidden suite's
+# own sources, inside the image, BEFORE swap_dir puts their folder anywhere near it — so at the moment it is
+# written there is no competitor code in the container at all. It lands in JUDGE_WORK, a root-owned mktemp
+# directory, and the test step runs as an unprivileged account that cannot write there.
+#
+# Counting alone could never close the invented-test vector: a forged stream can claim any number of passes for
+# tests that never existed, and comparing totals only catches it when the numbers happen to disagree. A manifest
+# of real test names catches it structurally.
+judge_capture_test_manifest() {
+    local test_dir="${JUDGE_APP_DIR}/$(dirname "${JUDGE_TEST_PROJECT}")"
+
+    # Method names of xunit test cases. Deliberately a plain grep rather than a compiled reflection pass: this
+    # runs before restore, must not execute a line of the suite, and only needs the identifiers.
+    # Deliberately simple: every `public ... Name(` on a line, reduced to Name. An earlier version anchored the
+    # identifier to end-of-line and silently matched nothing, leaving the check inert and passing - which is the
+    # failure mode to guard against here, because an integrity check that matches nothing looks identical to one
+    # that found nothing wrong.
+    grep -rh 'public' "${test_dir}" --include='*.cs' 2>/dev/null \
+        | sed -nE 's/.*[[:space:]]([A-Za-z0-9_]+)[[:space:]]*\(.*/\1/p' \
+        | sort -u >"${JUDGE_TEST_MANIFEST}" || true
+
+    chmod 0600 "${JUDGE_TEST_MANIFEST}" 2>/dev/null || true
+    printf 'judge: recorded %s candidate test name(s) before the submission was introduced\n' \
+        "$(wc -l <"${JUDGE_TEST_MANIFEST}" | tr -d ' ')"
+}
+
+# judge_verify_events_against_manifest - reject results attributed to tests that do not exist.
+judge_verify_events_against_manifest() {
+    [[ -s "${JUDGE_TEST_MANIFEST}" ]] || return 0
+
+    # Compared on the METHOD NAME only. A [Theory] case reports as `Name(index: 10, expected: 55)` - xunit puts
+    # the InlineData arguments in the display name - so matching the whole string flagged every parameterised
+    # test as invented and failed honest submissions as fraudulent. The fixture suite is all [Fact], so the
+    # persona matrix passed 8/8 and gave a false all-clear; only the Fibonacci sample, which uses [Theory],
+    # exposed it. An integrity check that rejects real work is far worse than one that misses a forgery.
+    local invented
+    invented=$(grep -oE '"event":"finish-unit-test","fixture":"[^"]*","test":"[^"]*"' "${JUDGE_EVENT_FILE}" 2>/dev/null \
+        | grep -oE '"test":"[^"]*"' | cut -d'"' -f4 \
+        | sed 's/(.*//' \
+        | sort -u \
+        | grep -vxFf "${JUDGE_TEST_MANIFEST}" || true)
+
+    [[ -z "${invented}" ]] && return 0
+
+    local names
+    names=$(printf '%s' "${invented}" | tr '\n' ' ')
+    emit_marker_error "RESULT INTEGRITY: the event stream reports results for test(s) that do not exist in this session's suite: ${names}. Those results were fabricated inside the test process."
+    printf 'judge: EVENT STREAM NAMES TESTS THAT DO NOT EXIST: %s\n' "${names}" >&2
+
+    if [[ "${JUDGE_FAIL_ON_INTEGRITY:-true}" == "true" ]]; then
+        judge_fatal "${JUDGE_EXIT_INTEGRITY}" "verify" \
+            "results were reported for tests that do not exist in this session's suite."
+    fi
+
+    return 0
 }
 
 # judge_verify_events_against_trx - cross-check the event stream against the test framework's own output.

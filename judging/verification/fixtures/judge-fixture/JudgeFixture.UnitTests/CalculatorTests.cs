@@ -41,4 +41,15 @@ public sealed class CalculatorTests : LoggedTest<CalculatorTests>, IClassFixture
     [Fact]
     public void Describe_ReturnsNonNull() =>
         Log.AssertNotNull(_svc.Describe());
+
+    // A [Theory], deliberately. xunit reports a parameterised case as `Name(left: 6, right: 3, expected: 2)`,
+    // and the integrity manifest compares against bare method names - so a suite of only [Fact]s cannot detect a
+    // regression that rejects parameterised tests as fabricated. That exact bug shipped once and passed the
+    // matrix 8/8, because nothing here was parameterised. This row is the guard.
+    [Aspect("F2.3", CompetitorVisible = true)]
+    [Theory]
+    [InlineData(6, 3, 2)]
+    [InlineData(-6, 3, -2)]
+    public void Divide_ExactQuotients(int left, int right, int expected) =>
+        Log.AssertEqual(expected, _svc.Divide(left, right));
 }

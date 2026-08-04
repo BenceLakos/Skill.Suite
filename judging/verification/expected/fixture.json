@@ -13,8 +13,8 @@
       "comment": "Reference implementation. Everything green.",
       "exit": 0,
       "status": "Completed",
-      "units": 5,
-      "passed": 5,
+      "units": 7,
+      "passed": 7,
       "failed": 0,
       "errored": 0,
       "markerError": false
@@ -24,8 +24,8 @@
       "comment": "Compiles, two aspects wrong. Red tests are a result, not a failed run - this is what makes partial credit possible.",
       "exit": 0,
       "status": "Completed",
-      "units": 5,
-      "passed": 3,
+      "units": 7,
+      "passed": 5,
       "failed": 2,
       "errored": 0,
       "markerError": false
@@ -53,7 +53,7 @@
       "comment": "Adds a package reference absent from the baked feed. The submission's project file is discarded in favour of the session's, so the reference never reaches the restore.",
       "exit": 0,
       "status": "Completed",
-      "units": 5,
+      "units": 7,
       "markerError": true,
       "markerErrorContains": "was ignored and the session's own project file was used instead",
       "note": "Was exit 4 / Failed / 0 units, asserting that the offline restore refused the added package. Now the attempt cannot be made at all: a .csproj is executable code, so swap_dir restores the authored one and the reference disappears with it. The run proceeds normally and a marker-error tells the competitor their project file was ignored - a clear message instead of an unresolved type. Stronger than refusing the restore, because nothing reaches NuGet."
@@ -76,7 +76,7 @@
       "note": "The wrong implementation must fail on its merits rather than pass via the injected target. If this persona ever reports 5 passed, the substitution regressed and a submission has arbitrary code execution inside the judge.",
       "comment": "Attack: an MSBuild <Target> in the competitor's csproj tries to overwrite the hidden suite before it compiles, as root. swap_dir must restore the authored project file.",
       "status": "Completed",
-      "units": 5,
+      "units": 7,
       "markerError": true,
       "markerErrorContains": "was ignored and the session's own project file was used instead"
     },

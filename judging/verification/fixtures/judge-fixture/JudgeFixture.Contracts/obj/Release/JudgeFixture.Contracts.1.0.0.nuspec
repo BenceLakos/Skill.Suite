@@ -7,7 +7,7 @@
     <license type="expression">MIT</license>
     <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
     <description>Package Description</description>
-    <repository type="git" commit="5669a75a5d54f90255b4dff1d68778cb49318f9c" />
+    <repository type="git" commit="793022d238e31550d5c0096b5e1c861a31213dec" />
     <dependencies>
       <group targetFramework="net9.0">
         <dependency id="Skill.Suite.TestLog" version="1.0.0" exclude="Build,Analyzers" />

@@ -193,6 +193,20 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   latest judged commit, rendered as a red **Never judged** chip when there is none. Combined with the re-judge
   action, an operator can both see and fix it. *Verified:* build + 88 tests, app boots.
 
+- **B6 strengthened — fabricated results are now caught by name, not by arithmetic.** Root records the hidden
+  suite's test names **before `swap_dir` runs**, when the competitor's code is not in the container at all, into a
+  root-owned work directory the unprivileged test account cannot write. The event stream is then rejected if it
+  reports results for a test that does not exist. Counting alone could never close this: a forged stream can claim
+  any number of passes for invented tests, and comparing totals only catches it when the numbers happen to
+  disagree. *Verified:* the `forge-events` persona's 12 invented names are all rejected by name, exit 7, while an
+  honest run is untouched.
+
+  **This shipped a false positive first, and it was the dangerous direction.** xunit reports a `[Theory]` case as
+  `Name(index: 10, expected: 55)`, so matching whole strings flagged every parameterised test as fabricated and
+  **failed honest submissions as fraudulent**. The persona matrix passed 8/8 throughout, because the fixture suite
+  was entirely `[Fact]` — only the Fibonacci sample exposed it. Fixed by comparing method names only, and the
+  fixture suite now carries a `[Theory]` specifically so the matrix cannot give that false all-clear again.
+
 ### Two self-inflicted regressions found by the real platform, not by the local harness
 
 Both are worth recording because they only appeared through `run-e2e.sh`, and the local `judge-run.sh` was
@@ -216,7 +230,7 @@ runner. Every one of these would have surfaced as "every competitor scored zero"
 | | what | why it blocks | size |
 |---|---|---|---|
 | B5 | Remainder: the **black-box** test step runs as root. Attempted twice — under the unprivileged account the coverage collector and Stryker produce no TRX, cobertura or mutation report, so every submission scores 0. The second attempt was after fixing the chown-on-volume bug that looked like the cause; it was not. | a black-box competitor executes privileged code. Mitigated but not closed: capabilities dropped to five, no-new-privileges, project file discarded, network off | M |
-| B6 | Remainder: a competitor who forges the TRX **as well**, consistently with their fabricated events, still gets through. Corroboration raises the cost and catches every careless attempt, but is not a proof. | a determined, careful forgery is still possible; pair with retaining every checkout for a scored final | L |
+| B6 | Remainder: a competitor who flips outcomes for REAL tests, consistently in both the events and the TRX, still gets through. Invented tests and count mismatches are now caught structurally. | a careful, targeted forgery on real test names remains possible; pair with retaining every checkout for a scored final | L |
 
 ## Audit findings that did not survive verification
 
