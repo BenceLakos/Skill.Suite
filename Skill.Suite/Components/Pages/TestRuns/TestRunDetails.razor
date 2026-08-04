@@ -9,6 +9,8 @@
 @using Skill.Suite.Application.TestRuns
 @using Skill.Suite.Application.TestRuns.GetTestRun
 @using Skill.Suite.Application.TestRuns.ReprocessTestRunLog
+@using Skill.Suite.Application.TestRuns.CancelTestRun
+@using Skill.Suite.Application.TestRuns.RequeueTestRun
 @using Skill.Suite.Domain.TestRuns
 
 <PageTitle>@T["testRuns.details.title"]</PageTitle>
@@ -49,6 +51,23 @@
                        StartIcon="@Icons.Material.Filled.Download"
                        OnClick="DownloadLog">
                 @T["testRuns.downloadLog"]
+            </MudButton>
+            @* Only while the run is still live. Cancelling a finished run would either do nothing or overwrite a
+               real result, so the button is not offered rather than handled with an error. *@
+            @if (_run.Status is TestRunStatus.Pending or TestRunStatus.Cloning or TestRunStatus.Running)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                           StartIcon="@Icons.Material.Filled.Stop"
+                           OnClick="CancelRun" Disabled="_acting">
+                    @T["testRuns.cancel"]
+                </MudButton>
+            }
+            @* The recovery path for a lost webhook delivery: Gitea does not retry, so without this a submission
+               whose delivery failed is simply never judged. Creates a new run and leaves this one intact. *@
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Replay"
+                       OnClick="RequeueRun" Disabled="_acting">
+                @T["testRuns.requeue"]
             </MudButton>
         }
         @if (_run is not null && _run.CompetitorId.HasValue)
@@ -357,6 +376,53 @@ else
     // forceLoad triggers a real browser navigation; the endpoint responds with
     // Content-Disposition: attachment so the browser downloads instead of leaving the page.
     private void DownloadLog() => Nav.NavigateTo($"api/test-runs/{Id}/log", forceLoad: true);
+
+    private bool _acting;
+
+    private async Task CancelRun()
+    {
+        if (_run is null) return;
+
+        _acting = true;
+        try
+        {
+            var result = await Mediator.Send(new CancelTestRunCommand(_run.Id));
+            Snackbar.Add(
+                result.IsSuccess ? T["testRuns.cancelled"] : result.Error.Message,
+                result.IsSuccess ? Severity.Success : Severity.Error);
+
+            await Load();
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private async Task RequeueRun()
+    {
+        if (_run is null) return;
+
+        _acting = true;
+        try
+        {
+            var result = await Mediator.Send(new RequeueTestRunCommand(_run.Id));
+            if (result.IsFailure)
+            {
+                Snackbar.Add(result.Error.Message, Severity.Error);
+                return;
+            }
+
+            // Navigate to the replay rather than staying here: the operator's next question is always whether
+            // the new run worked, and this page shows the old one.
+            Snackbar.Add(T["testRuns.requeued"], Severity.Success);
+            Nav.NavigateTo($"test-runs/{result.Value}");
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
 
     private async Task ReprocessLog()
     {

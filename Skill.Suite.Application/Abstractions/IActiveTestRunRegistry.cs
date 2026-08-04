@@ -21,6 +21,17 @@ public interface IActiveTestRunRegistry
     /// </summary>
     bool CancelForCompetitor(Guid competitorId);
 
+    /// <summary>
+    /// Cancels one specific run, if it is the active one for its competitor.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="CancelForCompetitor"/> because an operator cancelling a stuck run means that
+    /// run, not "whatever this competitor happens to be running" — which by the time they click could already
+    /// be a newer submission they did not intend to kill.
+    /// </remarks>
+    /// <returns>true when a cancellation was actually signalled.</returns>
+    bool CancelForRun(Guid testRunId);
+
     /// <summary>Removes the run from the registry. Idempotent.</summary>
     void Unregister(Guid testRunId);
 }

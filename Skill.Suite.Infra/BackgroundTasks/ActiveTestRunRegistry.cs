@@ -40,6 +40,25 @@ internal sealed class ActiveTestRunRegistry : IActiveTestRunRegistry
         return true;
     }
 
+    public bool CancelForRun(Guid testRunId)
+    {
+        Entry? target;
+        lock (_gate)
+        {
+            // Resolved through the competitor index so a stale run id — one already superseded by a newer push —
+            // cannot cancel the run that replaced it.
+            if (!_competitorByRun.TryGetValue(testRunId, out var competitorId)
+                || !_byCompetitor.TryGetValue(competitorId, out target)
+                || target.TestRunId != testRunId)
+            {
+                return false;
+            }
+        }
+
+        SignalCancel(target.Cts);
+        return true;
+    }
+
     public void Unregister(Guid testRunId)
     {
         lock (_gate)

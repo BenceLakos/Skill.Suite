@@ -14,6 +14,15 @@ public static class TestRunReasons
     public const string Superseded = "Superseded by a newer submission for the same competitor.";
 
     /// <summary>
+    /// An operator stopped the run from the UI.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="Superseded"/> on purpose: superseded is routine and expected, while this one is
+    /// a human decision that an expert may have to account for when a competitor asks what happened to a run.
+    /// </remarks>
+    public const string CancelledByOperator = "Cancelled by an operator.";
+
+    /// <summary>
     /// The whole run exceeded the platform's backstop budget. Takes the budget in minutes.
     /// </summary>
     public const string TimedOutFormat =

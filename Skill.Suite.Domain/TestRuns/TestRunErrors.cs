@@ -37,6 +37,10 @@ public static class TestRunErrors
     public static readonly Error MissingRepositoryUrl =
         Error.Validation("TestRun.MissingRepositoryUrl", "The webhook payload must contain a repository URL.");
 
+    public static readonly Error AlreadyTerminal =
+        Error.Conflict("TestRun.AlreadyTerminal",
+            "That run has already finished, so there is nothing to cancel.");
+
     public static readonly Error LogFileMissing =
         Error.NotFound("TestRun.LogFileMissing", "No log file was produced for this run.");
 }
