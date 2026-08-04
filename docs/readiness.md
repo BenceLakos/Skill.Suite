@@ -145,8 +145,14 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   Two things this changed, both recorded in the expectations: `adds-package` no longer reaches NuGet at all
   (stronger than the old exit 4), and because discarding silently would trade a clear diagnostic for a confusing
   unresolved type, a marker-error now tells the competitor their project file was ignored.
-  **Still open in B5/B6:** the container still runs as root with `/app` writable, and the event stream is still
-  written by a process the competitor controls — so a *white-box* mark remains self-reported. See below.
+  Also added to **every** run, not made configurable: `--cap-drop=ALL` and `--security-opt=no-new-privileges`.
+  Nothing the judge pipeline does needs a Linux capability — restoring, building and running tests are ordinary
+  file and process operations — so dropping them removes whole classes of container escape at no cost to the
+  legitimate workload, and `no-new-privileges` is what makes the drop stick against a setuid binary. Pinned by
+  two tests, because a deployment must not be able to forget them. *Verified:* a real judged run is still 16/20,
+  white-box matrix 7/7, black-box 3/3 — the pipeline needed neither capability.
+  **Still open in B5/B6:** the container's process is still root and `/app` is still writable, and the event
+  stream is written by a process the competitor controls — so a *white-box* mark remains self-reported.
 
 ## Blockers remaining
 

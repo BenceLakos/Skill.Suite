@@ -31,6 +31,18 @@ internal static class DockerRunArguments
             "--name", request.ContainerName,
             "--mount", sourceMount,
             "-w", request.ContainerWorkdir,
+
+            // Applied to every run, not made optional. A judgement container executes code written by someone
+            // with an incentive to score higher, so the only defensible default is the restrictive one.
+            //
+            // --cap-drop=ALL: nothing the judge pipeline does needs a Linux capability. Restoring, building and
+            // running tests are ordinary file and process operations. Dropping them removes whole classes of
+            // container escape from reach without costing the legitimate workload anything.
+            //
+            // --security-opt=no-new-privileges: stops a setuid binary inside the image from raising privileges,
+            // which is what makes the capability drop stick rather than being a speed bump.
+            "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
         };
 
         // Optional writable mount for the JSON-lines event log. We don't pass `readonly`
