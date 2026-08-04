@@ -10,6 +10,7 @@
   },
   "plugins": [
     {
+      "name": "session-authoring",
       "source": "./plugins/session-authoring",
       "description": "Author, calibrate and publish a judging session: contracts, reference implementation, hidden graded suite, competitor starter kit, and the white-box or black-box judge images."
     }
