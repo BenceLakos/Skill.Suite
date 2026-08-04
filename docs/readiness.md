@@ -135,7 +135,6 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 
 | | what | why it blocks | size |
 |---|---|---|---|
-| B1 | Remainder: no admin **Re-run** or **Cancel** action on a run | a stuck or mis-judged run can only be fixed by a new push | M |
 | B2 | Remainder: no reconciliation VIEW listing each competitor's latest judged commit, so "never judged" is invisible until someone looks | recovery now exists (re-judge), but nothing surfaces which runs need it | S |
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
