@@ -151,8 +151,23 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   legitimate workload, and `no-new-privileges` is what makes the drop stick against a setuid binary. Pinned by
   two tests, because a deployment must not be able to forget them. *Verified:* a real judged run is still 16/20,
   white-box matrix 7/7, black-box 3/3 — the pipeline needed neither capability.
-  **Still open in B5/B6:** the container's process is still root and `/app` is still writable, and the event
-  stream is written by a process the competitor controls — so a *white-box* mark remains self-reported.
+- **B5 (privilege drop) — the test step no longer runs as root, for white-box sessions.** `judge-base` gains an
+  unprivileged `competitor` account, and `run_tests` drops to it via `setpriv` after granting write access to
+  exactly what the test host needs: its own build output, `TestResults`, `DOTNET_CLI_HOME`, and the event log.
+  Everything else under `/app` stays root-owned. *Verified in the image:* the hidden suite is `root:root` and an
+  overwrite attempt as `competitor` returns **Permission denied**, while its results directory stays writable.
+  White-box matrix 7/7 with the drop active.
+  **Deliberately off for black-box, and this cost a real attempt to learn:** that pipeline also runs the coverage
+  collector, Stryker and two globally-installed dotnet tools, and under the unprivileged account the collectors
+  produced no TRX or cobertura at all — the marker then got empty globs, printed its usage text, and scored every
+  submission **0**. A hardening change that silently zeroes everyone's mark is worse than the exposure it closes,
+  so black-box opts out explicitly until the collector's requirements are worked out. `verify.sh fixture-blackbox`
+  is back to 3/3.
+
+  **Still open in B5/B6:** the black-box test step is still root; the container's own process is root and `/app`
+  writable outside the test step; and the event stream is written from inside the competitor's test process, so a
+  *white-box* mark remains self-reported. No file permission fixes that last one — it needs the root entrypoint to
+  own the event file.
 
 ## Blockers remaining
 

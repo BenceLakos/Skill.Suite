@@ -28,6 +28,18 @@ RUN chmod 0755 /usr/local/bin/judge-entrypoint.sh /usr/local/bin/judge-selftest.
     && chmod 0644 /usr/local/lib/judge-lib.sh \
     && mkdir -p /app /var/log/skill-suite
 
+# The account the competitor's own test code runs under.
+#
+# The entrypoint stays root - it has to swap folders, restore, and run the marker - but the ONE step that
+# executes code the competitor wrote does not. Before this, their tests ran as root with /app writable, so any
+# execution path they found let them rewrite the hidden suite that was about to grade them. Now that suite is
+# read-only to them: they can write their own build output, the test results directory, and the event log, and
+# nothing else.
+#
+# A fixed high uid so the ownership the entrypoint sets is predictable, and no login shell because this account
+# exists to run one command.
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin competitor
+
 # WORKDIR is documentation only: the platform passes `-w /workspace`, which overrides it - and that path is
 # read-only. Every step in judge-lib.sh cds to $JUDGE_APP_DIR itself.
 WORKDIR /app

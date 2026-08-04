@@ -41,6 +41,18 @@ judge_configure() {
     : "${JUDGE_FAIL_ON_RED:=false}"
     : "${JUDGE_LOCAL_FEED:=${JUDGE_APP_DIR}/local-nuget}"
     : "${JUDGE_NUGET_CACHE:=/root/.nuget/packages}"
+    # Unprivileged account the test step runs as. Overridable so an image can name its own.
+    : "${JUDGE_TEST_USER:=competitor}"
+    # Drop to JUDGE_TEST_USER for the test step. On for white-box, which is the common session type and where
+    # the hidden suite sits next to the code being run.
+    #
+    # OFF for black-box, and this is a measured limitation rather than an oversight: that pipeline also runs the
+    # coverage collector, Stryker and two globally-installed dotnet tools, and under the unprivileged account the
+    # collectors produced no TRX or cobertura output at all - the marker then received empty --trx/--coverage
+    # globs and printed its usage text, scoring every submission 0. A hardening change that silently zeroes
+    # everyone's mark is worse than the exposure it closes, so black-box keeps running the test step as root
+    # until the collector's requirements are worked out. Tracked in docs/readiness.md.
+    : "${JUDGE_DROP_TEST_PRIVILEGES:=true}"
 
     JUDGE_WORK="$(mktemp -d)"
     JUDGE_STAGED_EVENTS="${JUDGE_WORK}/staged-events.jsonl"
@@ -352,14 +364,55 @@ build_tests() {
 
 # run_tests [extra dotnet-test args...] - run the suite. Red tests are a result, not an error, unless
 # JUDGE_FAIL_ON_RED=true: a white-box session wants partial credit for a partially working submission.
+# judge_grant_test_paths - hand the competitor account write access to exactly what the test host needs.
+#
+# Everything else under /app - above all the hidden suite's sources and the compiled contracts - stays owned by
+# root and read-only to them. That is the whole point: the step that runs their code must not be able to edit
+# the tests grading it.
+#
+# LOG_DIRECTORY is included because the harness writes events.jsonl from inside their test process. That is a
+# known limit rather than an oversight: a white-box mark is self-reported until the event stream moves out of
+# their process, and no file permission fixes that.
+judge_grant_test_paths() {
+    local test_dir="${JUDGE_APP_DIR}/$(dirname "${JUDGE_TEST_PROJECT}")"
+
+    mkdir -p "${JUDGE_APP_DIR}/TestResults" "${LOG_DIRECTORY}"
+    chown -R "${JUDGE_TEST_USER}:${JUDGE_TEST_USER}" \
+        "${JUDGE_APP_DIR}/TestResults" \
+        "${LOG_DIRECTORY}" \
+        "${test_dir}/bin" "${test_dir}/obj" 2>/dev/null || true
+
+    # The swapped folder's build output too: the test host may touch it, and it is the competitor's own code.
+    chown -R "${JUDGE_TEST_USER}:${JUDGE_TEST_USER}" \
+        "${JUDGE_APP_DIR}/${JUDGE_SWAP_SRC}/bin" \
+        "${JUDGE_APP_DIR}/${JUDGE_SWAP_SRC}/obj" 2>/dev/null || true
+
+    # A writable NuGet cache and HOME, or the test host fails trying to create them under a root-owned home.
+    export DOTNET_CLI_HOME="/home/${JUDGE_TEST_USER}"
+    chown -R "${JUDGE_TEST_USER}:${JUDGE_TEST_USER}" "/home/${JUDGE_TEST_USER}" 2>/dev/null || true
+}
+
 run_tests() {
     judge_require JUDGE_TEST_PROJECT
 
     cd "${JUDGE_APP_DIR}"
 
     local status=0
+    local -a runner=()
+
+    # Dropped to an unprivileged account when one exists, which is every image built on judge-base. The guard
+    # keeps a hand-rolled image that lacks the account working rather than failing confusingly.
+    if [[ "${JUDGE_DROP_TEST_PRIVILEGES}" == "true" ]] \
+        && id "${JUDGE_TEST_USER}" >/dev/null 2>&1 && [[ "$(id -u)" == "0" ]]; then
+        judge_grant_test_paths
+        runner=(setpriv --reuid "${JUDGE_TEST_USER}" --regid "${JUDGE_TEST_USER}" --init-groups)
+        printf 'judge: running tests as %s\n' "${JUDGE_TEST_USER}"
+    else
+        printf 'judge: WARNING running tests as the container user; the hidden suite is writable by the submission\n' >&2
+    fi
+
     judge_run_step test "${JUDGE_TIMEOUT_SECONDS}" \
-        dotnet test "${JUDGE_TEST_PROJECT}" -c Release --no-restore --no-build \
+        "${runner[@]}" dotnet test "${JUDGE_TEST_PROJECT}" -c Release --no-restore --no-build \
         --logger "console;verbosity=detailed" "$@" || status=$?
 
     if (( status == 124 )); then

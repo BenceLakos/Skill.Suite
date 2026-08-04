@@ -8,6 +8,10 @@ set -euo pipefail
 
 . /usr/local/lib/judge-lib.sh
 
+# Black-box runs the test step as root. See judge-lib.sh: the coverage collector and Stryker produce no output
+# under the unprivileged account, which scores every submission 0 - strictly worse than the exposure.
+export JUDGE_DROP_TEST_PRIVILEGES=false
+
 judge_configure
 judge_install_traps
 
