@@ -176,19 +176,34 @@ public sealed class ProcessGitWebhookHandler(
     /// Cancels this competitor's in-flight runs in this session, in the database and in the worker.
     /// </summary>
     /// <remarks>
-    /// Scoped to the session as well as the competitor. Filtering on the competitor alone also cancelled
-    /// their runs in every other session, so a push in one session killed a submission being judged in
-    /// another.
+    /// Scoped to the session as well as the competitor, in BOTH halves. Filtering on the competitor alone also
+    /// cancelled their runs in every other session, so a push in one session killed a submission being judged in
+    /// another. Fixing only the database half left the same bug in the worker: the registry keys on the
+    /// competitor, so <c>CancelForCompetitor</c> would still <c>docker stop</c> a container belonging to a run in
+    /// a session this push has nothing to do with — and the executing handler, seeing its container stopped,
+    /// would record that run as "superseded by a newer submission". The ids are therefore read first and
+    /// cancelled individually, which makes the in-memory half scoped by construction rather than by convention.
     /// </remarks>
     private async Task<bool> SupersedePreviousRunsAsync(
         Guid sessionId, Guid competitorId, Guid keepRunId, CancellationToken cancellationToken)
     {
-        var affected = await db.TestRuns
+        var superseded = await db.TestRuns
             .Where(r => r.SessionId == sessionId &&
                         r.CompetitorId == competitorId &&
                         // The run this push just created is persisted first, so it has to be excluded or the
                         // very submission being accepted would be cancelled as its own predecessor.
                         r.Id != keepRunId &&
+                        (r.Status == TestRunStatus.Pending ||
+                         r.Status == TestRunStatus.Cloning ||
+                         r.Status == TestRunStatus.Running))
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        if (superseded.Count == 0)
+            return false;
+
+        var affected = await db.TestRuns
+            .Where(r => superseded.Contains(r.Id) &&
                         (r.Status == TestRunStatus.Pending ||
                          r.Status == TestRunStatus.Cloning ||
                          r.Status == TestRunStatus.Running))
@@ -198,7 +213,11 @@ public sealed class ProcessGitWebhookHandler(
                 .SetProperty(r => r.FinishedAt, (DateTime?)DateTime.UtcNow),
                 cancellationToken);
 
-        registry.CancelForCompetitor(competitorId);
+        // Signalled per run, after the rows are terminal. CancelForRun resolves through the registry's competitor
+        // index and no-ops on a run this process is not executing, so a stale id cannot stop the wrong container.
+        foreach (var runId in superseded)
+            registry.CancelForRun(runId);
+
         return affected > 0;
     }
 }

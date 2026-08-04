@@ -557,10 +557,16 @@ judge_verify_events_against_trx() {
     fi
 
     # Attributes on <Counters>, which VSTest writes from its own accounting rather than from the harness.
+    #
+    # `|| true` on every one of these, and it is load-bearing rather than defensive. Under `set -e` a plain
+    # assignment whose command substitution fails terminates the shell, and with `pipefail` a grep that matches
+    # nothing fails the whole pipeline - so an unparseable TRX killed the judge HERE, before the guard below
+    # could emit its diagnostic. The run then exited 1 with no marker-error and the platform recorded a
+    # submission whose tests had all passed as Failed. An empty value has to reach the guard to be reported.
     local trx_total trx_passed trx_failed
-    trx_total=$(grep -o 'total="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*')
-    trx_passed=$(grep -o 'passed="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*')
-    trx_failed=$(grep -o 'failed="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*')
+    trx_total=$(grep -o 'total="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*') || true
+    trx_passed=$(grep -o 'passed="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*') || true
+    trx_failed=$(grep -o 'failed="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*') || true
 
     local ev_passed ev_failed
     ev_passed=$(grep -c '"event":"finish-unit-test"[^}]*"outcome":"passed"' "${JUDGE_EVENT_FILE}" 2>/dev/null || true)

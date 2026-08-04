@@ -40,7 +40,7 @@ internal sealed class ProcessGitClient(ILogger<ProcessGitClient> logger) : IGitC
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
 
-        await process.WaitForExitAsync(cancellationToken);
+        await WaitForExitOrKillAsync(process, "clone", cancellationToken);
         var stderr = await stderrTask;
         var stdout = await stdoutTask;
 
@@ -146,7 +146,7 @@ internal sealed class ProcessGitClient(ILogger<ProcessGitClient> logger) : IGitC
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
 
-        await process.WaitForExitAsync(cancellationToken);
+        await WaitForExitOrKillAsync(process, args[0], cancellationToken);
         var stderr = await stderrTask;
         await stdoutTask;
 
@@ -156,6 +156,45 @@ internal sealed class ProcessGitClient(ILogger<ProcessGitClient> logger) : IGitC
         // args[0] only: a push argument list contains the authenticated remote URL.
         logger.LogError("git {Verb} failed (exit {ExitCode}): {Stderr}", args[0], process.ExitCode, stderr);
         throw new InvalidOperationException($"git {args[0]} exited {process.ExitCode}: {stderr}");
+    }
+
+    /// <summary>
+    /// Waits for a git invocation, killing it if the wait is cancelled.
+    /// </summary>
+    /// <remarks>
+    /// <c>WaitForExitAsync(token)</c> stops waiting but does not stop the process, and abandoning a git process
+    /// is not harmless here: a clone cancelled by a competitor's second push kept fetching into the submission
+    /// directory it no longer owned, holding a connection to the git host and workdir space, with nothing left
+    /// to reap it. Over a session of repeated pushes those accumulate, and the next attempt at the same folder
+    /// races the orphan. The whole tree is killed because git spawns helpers (git-remote-https, askpass).
+    /// </remarks>
+    private void KillIfRunning(Process process, string verb)
+    {
+        try
+        {
+            if (process.HasExited) return;
+
+            process.Kill(entireProcessTree: true);
+            logger.LogWarning("Killed the git {Verb} process after cancellation.", verb);
+        }
+        catch (Exception ex)
+        {
+            // Losing the race with a process that exited on its own is the expected case, not a problem.
+            logger.LogDebug(ex, "Could not kill the git {Verb} process; it had probably already exited.", verb);
+        }
+    }
+
+    private async Task WaitForExitOrKillAsync(Process process, string verb, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            KillIfRunning(process, verb);
+            throw;
+        }
     }
 
     /// <summary>

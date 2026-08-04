@@ -114,6 +114,11 @@ else
     private bool _initialLoading = true;
     private string _subtitle = string.Empty;
 
+    // Same guard as MyTestRuns: the id filter below narrows the window but does not close it, because one run
+    // raises several change events of its own. Two overlapping refreshes would put two queries on the circuit's
+    // single scoped DbContext and throw "A second operation was started on this context instance".
+    private bool _refreshing;
+
     protected override async Task OnInitializedAsync()
     {
         await Load();
@@ -126,8 +131,17 @@ else
         if (testRunId != Id) return;
         _ = InvokeAsync(async () =>
         {
-            await Load();
-            StateHasChanged();
+            if (_refreshing) return;
+            _refreshing = true;
+            try
+            {
+                await Load();
+                StateHasChanged();
+            }
+            finally
+            {
+                _refreshing = false;
+            }
         });
     }
 

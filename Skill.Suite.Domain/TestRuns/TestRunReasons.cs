@@ -39,4 +39,16 @@ public static class TestRunReasons
     public const string NoResults =
         "The judgement container exited successfully but produced no test results. This usually means the "
         + "submission does not compile, or the judge image discovered no tests.";
+
+    /// <summary>
+    /// The repository URL the push advertised is not an absolute http(s) URL, so it was never handed to git.
+    /// </summary>
+    /// <remarks>
+    /// Not a competitor's mistake: the git host builds this field, so a value that is not a URL means either a
+    /// misconfigured host or a forged delivery. Recorded as a distinct reason because it needs an operator to
+    /// look at the host, not a re-push.
+    /// </remarks>
+    public const string InvalidRepositoryUrl =
+        "The push advertised a repository URL that is not an absolute http(s) URL, so it was refused before "
+        + "cloning. This is a git host configuration problem, not a problem with the submission.";
 }

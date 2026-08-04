@@ -24,6 +24,11 @@ public sealed class ExecuteTestRunHandler(
     private const string NoResultsReason = TestRunReasons.NoResults;
     private const string TimedOutReasonFormat = TestRunReasons.TimedOutFormat;
 
+    /// <summary>Diagnostic recorded when the judge's event log was larger than the ingest limit.</summary>
+    private const string TruncatedEventLogDetail =
+        "The event log this run produced was larger than the platform will ingest, so only its first events "
+        + "were recorded. The results below are incomplete and must not be used as a mark without review.";
+
     public async ValueTask<Result> Handle(ExecuteTestRunCommand request, CancellationToken cancellationToken)
     {
         var run = await db.TestRuns
@@ -87,8 +92,35 @@ public sealed class ExecuteTestRunHandler(
             run.MarkCloning();
             await db.SaveChangesAsync(token);
 
+            // The same row can reach this point twice: the worker's startup recovery pass adopts rows left
+            // Cloning or Running by a process that died, and the folder name is stored on the row, so the
+            // checkout from the previous attempt is still sitting here. `git clone` refuses a non-empty
+            // destination, which turned every recovered run into a Failed one with a raw git error — the exact
+            // outcome the recovery pass exists to prevent. Clearing first is what makes re-judging idempotent.
+            if (Directory.Exists(appSubmissionPath))
+            {
+                logger.LogInformation(
+                    "Removing the checkout left at {Path} by an earlier attempt at run {TestRunId}.",
+                    appSubmissionPath, run.Id);
+                Directory.Delete(appSubmissionPath, recursive: true);
+            }
+
             var gitCredential = await ResolveCredentialAsync(session?.GitCredentialId, cancellationToken);
             var cloneUrl = RepositoryUrlRewriter.Rewrite(run.RepositoryUrl, opts.GitInternalBaseUrl);
+
+            // Validated before it becomes a `git clone` argument, not merely rewritten. Rewrite returns the
+            // original string untouched when it does not parse as an absolute URI, and git reads a leading dash
+            // as an option — so a payload naming `--upload-pack=<command>` as its clone URL would execute that
+            // command inside this container. Every other field of that payload is already treated as hostile.
+            if (!IsCloneableUrl(cloneUrl))
+            {
+                run.MarkFailed(TestRunReasons.InvalidRepositoryUrl, DateTime.UtcNow);
+                await db.SaveChangesAsync(CancellationToken.None);
+                logger.LogError(
+                    "Run {TestRunId} rejected: {Url} is not an absolute http(s) repository URL.",
+                    run.Id, run.RepositoryUrl);
+                return Result.Success();
+            }
 
             await git.CloneAsync(
                 new GitCloneRequest(cloneUrl, appSubmissionPath, run.Branch, gitCredential),
@@ -261,7 +293,18 @@ public sealed class ExecuteTestRunHandler(
         {
             try
             {
-                var fromFile = await File.ReadAllLinesAsync(logFilePath, cancellationToken);
+                // Bounded: the judge writes this file from inside the competitor's test process, so its size is
+                // theirs to choose. See EventLogReader.
+                var content = await EventLogReader.ReadAsync(logFilePath, cancellationToken);
+                var fromFile = content.Lines;
+
+                if (content.Truncated)
+                {
+                    logger.LogWarning(
+                        "Event log {Path} for run {TestRunId} exceeded the ingest limit; the remainder was dropped.",
+                        logFilePath, run.Id);
+                    run.RecordDiagnostic(TruncatedEventLogDetail, DateTime.UtcNow);
+                }
 
                 // Existence alone is not enough. A judge that creates the file and then dies leaves an empty
                 // one, and preferring it would report zero results *and* suppress this fallback - so the run
@@ -271,7 +314,7 @@ public sealed class ExecuteTestRunHandler(
                     lines = fromFile;
                     logger.LogInformation(
                         "Read {LineCount} event lines from {Path} for run {TestRunId}.",
-                        fromFile.Length, logFilePath, run.Id);
+                        fromFile.Count, logFilePath, run.Id);
                 }
                 else
                 {
@@ -298,6 +341,18 @@ public sealed class ExecuteTestRunHandler(
         foreach (var line in lines)
             TestLogParser.Apply(run, line);
     }
+
+    /// <summary>
+    /// Whether a rewritten repository URL is safe to pass to <c>git clone</c>.
+    /// </summary>
+    /// <remarks>
+    /// Absolute-and-http(s) is the whole test, and it is the scheme check that matters: anything git would read
+    /// as an option rather than a remote fails <see cref="Uri.TryCreate(string, UriKind, out Uri)"/> or carries
+    /// a different scheme.
+    /// </remarks>
+    private static bool IsCloneableUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var parsed)
+        && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps);
 
     /// <summary>
     /// Atomic, tracker-free transition to a terminal state. Used by every catch path and

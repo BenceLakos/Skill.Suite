@@ -237,13 +237,27 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
 
     // ------------------------------------------------------------------ plumbing
 
+    /// <summary>
+    /// Whether the resource at <paramref name="path"/> exists.
+    /// </summary>
+    /// <remarks>
+    /// Only a success status means "exists" and only 404 means "does not". Anything else — 401 from a rotated
+    /// admin token, 403, a 500 from the host — is neither, and treating it as existence was actively misleading:
+    /// with a bad credential the organisation and template checks both reported "already exists", nothing was
+    /// created, and provisioning then failed per competitor with a message about empty templates while the log
+    /// asserted the opposite. Throwing here names the real cause at the point it is first observable.
+    /// </remarks>
     private async Task<bool> ExistsAsync(
         string path, BasicCredential credential, CancellationToken cancellationToken)
     {
         using var request = Build(HttpMethod.Get, path, null, credential);
         using var response = await http.SendAsync(request, cancellationToken);
 
-        return response.StatusCode != HttpStatusCode.NotFound;
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return false;
+
+        await ThrowIfFailedAsync(response, $"check whether '{path}' exists", cancellationToken);
+        return true;
     }
 
     private async Task<T?> GetAsync<T>(

@@ -33,15 +33,26 @@ public sealed class ReprocessTestRunLogHandler(
         if (!File.Exists(logFilePath))
             return Result.Failure(TestRunErrors.LogFileMissing);
 
-        string[] lines;
+        EventLogContent content;
         try
         {
-            lines = await File.ReadAllLinesAsync(logFilePath, cancellationToken);
+            // Bounded for the same reason the executing handler bounds it: this file was written from inside a
+            // competitor's test process, so an unbounded read here would let an old submission OOM the app on
+            // demand — from an admin action, months after the session closed.
+            content = await EventLogReader.ReadAsync(logFilePath, cancellationToken);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to read log file {Path} during reprocess of {TestRunId}", logFilePath, run.Id);
             return Result.Failure(Error.Failure("TestRun.LogReadFailed", ex.Message));
+        }
+
+        var lines = content.Lines;
+        if (content.Truncated)
+        {
+            logger.LogWarning(
+                "Log file {Path} for run {TestRunId} exceeded the ingest limit; reprocessing only its first events.",
+                logFilePath, run.Id);
         }
 
         // Wipe every fixture for this run. The fixture → unit-test relationship has
@@ -89,7 +100,7 @@ public sealed class ReprocessTestRunLogHandler(
         logger.LogInformation(
             "Reprocessed {LineCount} log lines into {FixtureCount} fixtures for run {TestRunId}. " +
             "Terminal state {Action}.",
-            lines.Length, run.Fixtures.Count, run.Id,
+            lines.Count, run.Fixtures.Count, run.Id,
             recovered ? $"promoted to {TestRunStatus.Completed}" : $"left as {run.Status}");
 
         return Result.Success();

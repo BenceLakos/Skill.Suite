@@ -127,6 +127,12 @@ internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> log
             lines.Writer.TryWrite(e.Data);
         };
 
+        // The container name is derived from the run id, so a run the worker adopts after a crash collides with
+        // whatever the dead process left behind: `docker run --name` fails outright with "name already in use",
+        // failing the recovered run for a reason that has nothing to do with the submission. Best-effort removal
+        // of a same-named container makes starting it idempotent the way re-judging needs.
+        TryRemoveStaleContainer(request.ContainerName);
+
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -240,6 +246,43 @@ internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> log
         catch (Exception ex)
         {
             logger.LogWarning(ex, "docker logout failed for {Server}", server ?? "<default>");
+        }
+    }
+
+    /// <summary>
+    /// Removes a container left over from an earlier attempt at the same run, if one exists.
+    /// </summary>
+    /// <remarks>
+    /// Safe to call unconditionally: <c>docker rm -f</c> on a name that does not exist is a no-op with a
+    /// non-zero exit, which is why nothing is thrown here. It cannot remove a container belonging to a
+    /// different run, because the name is the run's own id.
+    /// </remarks>
+    private void TryRemoveStaleContainer(string containerName)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("docker")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("rm");
+            psi.ArgumentList.Add("--force");
+            psi.ArgumentList.Add(containerName);
+
+            using var remove = Process.Start(psi);
+            if (remove is null) return;
+
+            remove.WaitForExit(TimeSpan.FromSeconds(StopGraceSeconds + 5));
+            if (remove.ExitCode == 0)
+                logger.LogWarning("Removed a stale container named {ContainerName} before starting this run.",
+                    containerName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not check for a stale container named {ContainerName}", containerName);
         }
     }
 

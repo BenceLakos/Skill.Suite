@@ -86,8 +86,13 @@ fi
 
 # Stryker writes into a timestamped run directory (StrykerOutput/<timestamp>/reports/), so the path cannot be
 # hard-coded. Take the newest match; an absent report is a warning, not a failure.
+#
+# `|| true` is what makes "a warning, not a failure" true. When Stryker never starts, StrykerOutput does not
+# exist, `find` exits 1, and `pipefail` + `set -e` killed the script on this very line - skipping both the
+# mutation diagnostic below and the skill-marker call after it, so the submission scored nothing with no
+# explanation. The absent-report path has to survive to reach the code that reports it.
 MUTATION_REPORT=$(find "${STRYKER_OUTPUT}" -name 'mutation-report.json' -type f 2>/dev/null \
-    | sort | tail -1)
+    | sort | tail -1) || true
 : "${MUTATION_REPORT:=${STRYKER_OUTPUT}/reports/mutation-report.json}"
 printf 'judge: mutation report at %s\n' "${MUTATION_REPORT}"
 

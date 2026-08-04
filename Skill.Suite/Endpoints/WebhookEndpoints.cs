@@ -74,12 +74,35 @@ public static class WebhookEndpoints
         return app;
     }
 
+    /// <summary>
+    /// Reads at most <see cref="MaxBodyBytes"/> of the request body, or returns null if there is more.
+    /// </summary>
+    /// <remarks>
+    /// Enforced <i>while</i> copying, not after. Buffering the whole body first and then comparing its length
+    /// rejected nothing it had not already allocated — on an endpoint that is anonymous by necessity and reached
+    /// before the signature is checked, so any client could make this process allocate up to Kestrel's own
+    /// 30&#160;MB default per request. The declared 1&#160;MB bound has to be the real one.
+    /// </remarks>
     private static async Task<byte[]?> ReadBodyAsync(HttpRequest http, CancellationToken cancellationToken)
     {
-        using var buffer = new MemoryStream();
-        await http.Body.CopyToAsync(buffer, cancellationToken);
+        // The advertised length is a fast path only; it is absent on a chunked request and a lie on a hostile
+        // one, so the copy below is still bounded.
+        if (http.ContentLength > MaxBodyBytes)
+            return null;
 
-        return buffer.Length > MaxBodyBytes ? null : buffer.ToArray();
+        // One byte of headroom: reading MaxBodyBytes + 1 is what distinguishes "exactly at the limit" from
+        // "over it" without allocating the overage.
+        var buffer = new byte[MaxBodyBytes + 1];
+        var total = 0;
+
+        while (total < buffer.Length)
+        {
+            var read = await http.Body.ReadAsync(buffer.AsMemory(total), cancellationToken);
+            if (read == 0) break;
+            total += read;
+        }
+
+        return total > MaxBodyBytes ? null : buffer[..total];
     }
 
     /// <summary>
