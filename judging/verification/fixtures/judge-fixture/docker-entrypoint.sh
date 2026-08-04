@@ -27,6 +27,11 @@ judge_install_traps
 
 judge_require JUDGE_SWAP_SRC JUDGE_SOLUTION JUDGE_TEST_PROJECT JUDGE_MARKING_MAP
 
+# The reference implementation Stryker mutates, and the map that turns coverage and kill rate into a score.
+# Sealed while the only code here is the session's own - the submission's tests have not run yet.
+export JUDGE_SERVICES_SRC="${JUDGE_SERVICES_SRC:-$(dirname "${JUDGE_TEST_PROJECT}" | sed 's/UnitTests$/Services/')}"
+judge_seal_graded_assets
+
 TEST_RESULTS="${JUDGE_APP_DIR}/TestResults"
 STRYKER_OUTPUT="${JUDGE_APP_DIR}/StrykerOutput"
 
@@ -43,6 +48,10 @@ run_tests \
     -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
 judge_assert_results
+
+# Verified BEFORE Stryker and the marker run: if the implementation was edited while the submission's tests were
+# executing, every number computed after this point is meaningless.
+judge_verify_graded_assets
 
 # ---------------------------------------------------------------------------- mutation testing
 #

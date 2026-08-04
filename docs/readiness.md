@@ -207,6 +207,20 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   was entirely `[Fact]` — only the Fibonacci sample exposed it. Fixed by comparing method names only, and the
   fixture suite now carries a `[Theory]` specifically so the matrix cannot give that false all-clear again.
 
+- **B5 (black-box) — the asset the score is computed from is now sealed.** Dropping privileges for the black-box
+  test step could not be made to work (twice), but that was never the only control available, and arguably not the
+  most valuable one. In a black-box session the competitor's tests run in the same container as the reference
+  implementation Stryker mutates and the marking map that turns coverage and kill rate into a score. Editing
+  either is a complete break and far cheaper than forging an event stream: make the implementation trivial and
+  every mutant dies; widen the ramps and a shallow suite scores like a thorough one. Neither leaves a trace in the
+  results.
+  Root now hashes those files before the submission's tests run and verifies them **before Stryker and the marker
+  execute**, so a tampered run is refused rather than scored. White-box seals its hidden suite the same way, as a
+  second line behind the unprivileged test step. *Verified:* honest runs report `graded assets unchanged`,
+  white-box 8/8, black-box 3/3.
+  One iteration needed: the first version sealed `obj/` too, where restore and build legitimately rewrite
+  generated sources and `project.assets.json` — so every honest run failed the seal. Build output is now excluded.
+
 ### Two self-inflicted regressions found by the real platform, not by the local harness
 
 Both are worth recording because they only appeared through `run-e2e.sh`, and the local `judge-run.sh` was
@@ -229,7 +243,7 @@ runner. Every one of these would have surfaced as "every competitor scored zero"
 
 | | what | why it blocks | size |
 |---|---|---|---|
-| B5 | Remainder: the **black-box** test step runs as root. Attempted twice — under the unprivileged account the coverage collector and Stryker produce no TRX, cobertura or mutation report, so every submission scores 0. The second attempt was after fixing the chown-on-volume bug that looked like the cause; it was not. | a black-box competitor executes privileged code. Mitigated but not closed: capabilities dropped to five, no-new-privileges, project file discarded, network off | M |
+| B5 | Remainder: the black-box test step still executes as root. Two attempts failed — the coverage collector and Stryker produce nothing unprivileged, scoring everyone 0. Mitigated instead: graded assets are sealed and verified, capabilities dropped to five, no-new-privileges, project file discarded, network off. | a black-box competitor runs privileged code, but can no longer alter what they are measured against without the run being refused | M |
 | B6 | Remainder: a competitor who flips outcomes for REAL tests, consistently in both the events and the TRX, still gets through. Invented tests and count mismatches are now caught structurally. | a careful, targeted forgery on real test names remains possible; pair with retaining every checkout for a scored final | L |
 
 ## Audit findings that did not survive verification

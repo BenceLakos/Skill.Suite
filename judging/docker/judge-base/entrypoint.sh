@@ -17,6 +17,12 @@ judge_require JUDGE_SWAP_SRC JUDGE_SOLUTION JUDGE_TEST_PROJECT
 # is present, and anything recorded then could in principle have been influenced by it.
 judge_capture_test_manifest
 
+# In a white-box session the graded asset is the hidden suite itself. The test step already runs unprivileged and
+# cannot write it, but build_tests runs as root after the swap, so sealing is a cheap second line: if the suite
+# that produced the results is not the suite the session shipped, the results mean nothing.
+export JUDGE_SERVICES_SRC="${JUDGE_SERVICES_SRC:-$(dirname "${JUDGE_TEST_PROJECT}")}"
+judge_seal_graded_assets
+
 swap_dir
 restore_offline
 build_tests
@@ -29,5 +35,6 @@ judge_assert_results
 #   * the manifest catches results attributed to tests that do not exist, using a record taken before the
 #     submission was in the container at all
 #   * the TRX catches a pass count higher than the test framework itself counted
+judge_verify_graded_assets
 judge_verify_events_against_manifest
 judge_verify_events_against_trx

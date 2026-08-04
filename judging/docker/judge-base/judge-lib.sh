@@ -62,9 +62,10 @@ judge_configure() {
     JUDGE_STAGED_EVENTS="${JUDGE_WORK}/staged-events.jsonl"
     JUDGE_EVENT_FILE="${LOG_DIRECTORY}/events.jsonl"
     JUDGE_TEST_MANIFEST="${JUDGE_WORK}/test-manifest"
+    JUDGE_ASSET_SEAL="${JUDGE_WORK}/graded-assets.sha256"
     : >"${JUDGE_STAGED_EVENTS}"
 
-    readonly JUDGE_WORK JUDGE_STAGED_EVENTS JUDGE_EVENT_FILE JUDGE_TEST_MANIFEST
+    readonly JUDGE_WORK JUDGE_STAGED_EVENTS JUDGE_EVENT_FILE JUDGE_TEST_MANIFEST JUDGE_ASSET_SEAL
 
     mkdir -p "${LOG_DIRECTORY}"
 }
@@ -419,6 +420,60 @@ judge_test_user_can_write() {
     fi
 
     return 1
+}
+
+# judge_seal_graded_assets / judge_verify_graded_assets - detect tampering with what the run is measured against.
+#
+# This is the black-box counterpart to running the test step unprivileged, and it works where that did not. In a
+# black-box session the competitor supplies the TESTS and the reference implementation is baked in, in source
+# form, because Stryker has to mutate it. Their tests therefore run in the same container as the very code their
+# coverage and kill rate are computed from - and as the marking map that turns those into a score.
+#
+# Editing either is a complete break: make the implementation trivial and every mutant dies; widen the ramps in
+# marking-map.json and a shallow suite scores like a thorough one. Both are far cheaper attacks than forging an
+# event stream, and neither leaves a trace in the results.
+#
+# Sealed before the test step and verified after, by root, from a digest held in the root-only work directory.
+judge_seal_graded_assets() {
+    local -a targets=()
+    [[ -n "${JUDGE_SERVICES_SRC:-}" && -d "${JUDGE_APP_DIR}/${JUDGE_SERVICES_SRC}" ]] \
+        && targets+=("${JUDGE_APP_DIR}/${JUDGE_SERVICES_SRC}")
+    [[ -n "${JUDGE_MARKING_MAP:-}" && -f "${JUDGE_MARKING_MAP}" ]] && targets+=("${JUDGE_MARKING_MAP}")
+
+    (( ${#targets[@]} == 0 )) && return 0
+
+    # bin/ and obj/ excluded: restore and build legitimately rewrite generated sources and project.assets.json
+    # in there, so including them made every honest run fail the seal. Only authored files are sealed.
+    find "${targets[@]}" -type f \
+        -not -path '*/obj/*' -not -path '*/bin/*' \
+        \( -name '*.cs' -o -name '*.json' \) -exec sha256sum {} + 2>/dev/null \
+        | sort >"${JUDGE_ASSET_SEAL}" || true
+    chmod 0600 "${JUDGE_ASSET_SEAL}" 2>/dev/null || true
+
+    printf 'judge: sealed %s graded asset file(s) before the submission ran\n' \
+        "$(wc -l <"${JUDGE_ASSET_SEAL}" | tr -d ' ')"
+}
+
+judge_verify_graded_assets() {
+    [[ -s "${JUDGE_ASSET_SEAL}" ]] || return 0
+
+    if sha256sum --quiet --check "${JUDGE_ASSET_SEAL}" >/dev/null 2>&1; then
+        printf 'judge: graded assets unchanged\n'
+        return 0
+    fi
+
+    local changed
+    changed=$(sha256sum --check "${JUDGE_ASSET_SEAL}" 2>/dev/null | grep -v ': OK$' | cut -d: -f1 | tr '\n' ' ')
+
+    emit_marker_error "RESULT INTEGRITY: the code or marking configuration this submission is measured against was modified while its tests ran: ${changed}. The resulting score is meaningless and must not be used."
+    printf 'judge: GRADED ASSETS WERE MODIFIED: %s\n' "${changed}" >&2
+
+    if [[ "${JUDGE_FAIL_ON_INTEGRITY:-true}" == "true" ]]; then
+        judge_fatal "${JUDGE_EXIT_INTEGRITY}" "verify" \
+            "the code being measured was modified during the run."
+    fi
+
+    return 0
 }
 
 # judge_capture_test_manifest - record which tests legitimately exist, before any competitor code is present.
