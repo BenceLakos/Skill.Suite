@@ -36,6 +36,7 @@ public sealed class ListCompetitorTestRunsOverviewHandler(IAppDbContext db)
                     {
                         r.Status,
                         r.CreatedAt,
+                        r.CommitSha,
                         TestsRun = r.Fixtures.Sum(f => f.TestsRun),
                         TestsPassed = r.Fixtures.Sum(f => f.TestsPassed),
                         TestsFailed = r.Fixtures.Sum(f => f.TestsFailed),
@@ -59,7 +60,8 @@ public sealed class ListCompetitorTestRunsOverviewHandler(IAppDbContext db)
                     latest.CreatedAt,
                     latest.TestsRun,
                     latest.TestsPassed,
-                    latest.TestsFailed);
+                    latest.TestsFailed,
+                    latest.CommitSha);
             })
             .OrderBy(c => c.Username)
             .ToList();

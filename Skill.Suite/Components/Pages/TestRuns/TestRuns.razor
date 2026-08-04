@@ -84,6 +84,26 @@
                     }
                 </CellTemplate>
             </TemplateColumn>
+            @* The reconciliation column. A push is judged only if its one webhook delivery arrived, and the git
+               host does not retry — so a competitor can have work pushed and no run at all. Before this, that was
+               invisible until the session closed and the marks were already wrong. "Never judged" here, or a
+               commit the operator knows is stale, means use "Judge again" on that competitor before the end. *@
+            <TemplateColumn Title="@T["testRuns.field.judgedCommit"]" Sortable="false">
+                <CellTemplate>
+                    @if (string.IsNullOrEmpty(context.Item.LastCommitSha))
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+                            @T["testRuns.neverJudged"]
+                        </MudChip>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Style="font-family:monospace">
+                            @context.Item.LastCommitSha[..Math.Min(8, context.Item.LastCommitSha.Length)]
+                        </MudText>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
             <PropertyColumn Property="x => x.LastRunAt" Title="@T["testRuns.field.lastRunAt"]" Format="yyyy-MM-dd HH:mm"/>
         </Columns>
         <NoRecordsContent>

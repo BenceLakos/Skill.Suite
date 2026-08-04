@@ -187,11 +187,16 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   cost and makes careless attempts certain to be caught; it is not a proof. For a scored final, pair it with
   retaining every checkout.
 
+- **B2 — "never judged" is now visible before the session closes.** A push is judged only if its single webhook
+  delivery arrived, and the git host does not retry, so a competitor could have work pushed and no run at all —
+  invisible until the session closed and the marks were already wrong. The competitor overview now carries the
+  latest judged commit, rendered as a red **Never judged** chip when there is none. Combined with the re-judge
+  action, an operator can both see and fix it. *Verified:* build + 88 tests, app boots.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
 |---|---|---|---|
-| B2 | Remainder: no reconciliation VIEW listing each competitor's latest judged commit, so "never judged" is invisible until someone looks | recovery now exists (re-judge), but nothing surfaces which runs need it | S |
 | B5 | Remainder: the container still runs as root with `/app` writable — no `USER`, no `--read-only`, no `--cap-drop`. The MSBuild vector is closed, but any code the competitor's tests execute still runs privileged | a competitor who finds another execution path still has the hidden suite writable | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
 

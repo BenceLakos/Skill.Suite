@@ -215,6 +215,8 @@
   "testRuns.field.executions": "Executions",
   "testRuns.field.currentStatus": "Current status",
   "testRuns.field.lastResult": "Last result",
+  "testRuns.field.judgedCommit": "Judged commit",
+  "testRuns.neverJudged": "Never judged",
   "testRuns.field.lastRunAt": "Last run",
   "testRuns.field.startedAt": "Started",
   "testRuns.field.finishedAt": "Finished",
