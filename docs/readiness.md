@@ -131,12 +131,29 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   dead-Blazor-circuit-after-rebuild issue rather than a handler fault, but it is unproven either way — exercise it
   on the next live run before relying on it.
 
+- **B5 (the exploitable half) — a submission could execute code as root inside the judge.** `swap_dir` copied the
+  competitor's `.csproj` verbatim, and `build_tests` compiles the swapped folder *before* the hidden suite. One
+  `<Target BeforeTargets="Build"><Exec/></Target>` therefore ran arbitrary commands as root with the hidden tests
+  writable next to it — a clean-looking full pass nothing server-side could distinguish from real work. The
+  exclusion list was a denylist that had grown one entry per discovered vector; it is now an allowlist: a
+  `.csproj`, `.props` or `.targets` from a submission is discarded and the session's own project file restored,
+  because a build file is executable code rather than configuration.
+  *Verified adversarially:* a new `msbuild-exec` persona whose project file tries to overwrite the hidden suite.
+  Before: it would have passed everything. After: no `PWNED` marker, the wrong implementation fails on its merits,
+  and the white-box matrix is **7/7**. Two new judge-base self-test checks pin the substitution, so a regression
+  fails the build rather than a competition.
+  Two things this changed, both recorded in the expectations: `adds-package` no longer reaches NuGet at all
+  (stronger than the old exit 4), and because discarding silently would trade a clear diagnostic for a confusing
+  unresolved type, a marker-error now tells the competitor their project file was ignored.
+  **Still open in B5/B6:** the container still runs as root with `/app` writable, and the event stream is still
+  written by a process the competitor controls — so a *white-box* mark remains self-reported. See below.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |
 |---|---|---|---|
 | B2 | Remainder: no reconciliation VIEW listing each competitor's latest judged commit, so "never judged" is invisible until someone looks | recovery now exists (re-judge), but nothing surfaces which runs need it | S |
-| B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
+| B5 | Remainder: the container still runs as root with `/app` writable — no `USER`, no `--read-only`, no `--cap-drop`. The MSBuild vector is closed, but any code the competitor's tests execute still runs privileged | a competitor who finds another execution path still has the hidden suite writable | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
 
 ## Audit findings that did not survive verification

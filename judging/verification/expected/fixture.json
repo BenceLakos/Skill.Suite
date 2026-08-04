@@ -50,12 +50,13 @@
     },
     {
       "name": "adds-package",
-      "comment": "Adds a package reference absent from the baked feed. The offline restore must refuse it.",
-      "exit": 4,
-      "status": "Failed",
-      "units": 0,
+      "comment": "Adds a package reference absent from the baked feed. The submission's project file is discarded in favour of the session's, so the reference never reaches the restore.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 5,
       "markerError": true,
-      "markerErrorContains": "offline restore failed"
+      "markerErrorContains": "was ignored and the session's own project file was used instead",
+      "note": "Was exit 4 / Failed / 0 units, asserting that the offline restore refused the added package. Now the attempt cannot be made at all: a .csproj is executable code, so swap_dir restores the authored one and the reference disappears with it. The run proceeds normally and a marker-error tells the competitor their project file was ignored - a clear message instead of an unresolved type. Stronger than refusing the restore, because nothing reaches NuGet."
     },
     {
       "name": "slow",
@@ -65,7 +66,19 @@
       "units": 0,
       "markerError": true,
       "markerErrorContains": "exceeded",
-      "env": { "JUDGE_TIMEOUT_SECONDS": "45" }
+      "env": {
+        "JUDGE_TIMEOUT_SECONDS": "45"
+      }
+    },
+    {
+      "name": "msbuild-exec",
+      "exit": 0,
+      "note": "The wrong implementation must fail on its merits rather than pass via the injected target. If this persona ever reports 5 passed, the substitution regressed and a submission has arbitrary code execution inside the judge.",
+      "comment": "Attack: an MSBuild <Target> in the competitor's csproj tries to overwrite the hidden suite before it compiles, as root. swap_dir must restore the authored project file.",
+      "status": "Completed",
+      "units": 5,
+      "markerError": true,
+      "markerErrorContains": "was ignored and the session's own project file was used instead"
     }
   ]
 }

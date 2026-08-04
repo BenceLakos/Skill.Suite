@@ -107,9 +107,16 @@ mkdir -p "${COMPETITOR_DIRECTORY}/Demo.Services/bin" "${COMPETITOR_DIRECTORY}/De
 printf 'class A {}\n' >"${COMPETITOR_DIRECTORY}/Demo.Services/A.cs"
 printf 'stale\n' >"${COMPETITOR_DIRECTORY}/Demo.Services/bin/stale.dll"
 printf '<configuration/>\n' >"${COMPETITOR_DIRECTORY}/Demo.Services/nuget.config"
+# The attack in miniature: a project file with a target that would run arbitrary code at build time.
+printf '<Project Sdk="Microsoft.NET.Sdk"><Target Name="Pwn" BeforeTargets="Build"><Exec Command="touch /tmp/pwned"/></Target></Project>\n' \
+    >"${COMPETITOR_DIRECTORY}/Demo.Services/Demo.Services.csproj"
 printf '<Project/>\n' >"${COMPETITOR_DIRECTORY}/Demo.Services/Directory.Build.props"
 mkdir -p "${JUDGE_APP_DIR}/Demo.Services"
 printf 'placeholder\n' >"${JUDGE_APP_DIR}/Demo.Services/placeholder.cs"
+# The authored project file. Every real image has one - .dockerignore keeps it precisely so the restore graph
+# resolves - and swap_dir restores it over whatever the submission shipped, because a .csproj is executable code.
+printf '<Project Sdk="Microsoft.NET.Sdk"><!-- authored --></Project>\n' \
+    >"${JUDGE_APP_DIR}/Demo.Services/Demo.Services.csproj"
 
 export JUDGE_SWAP_SRC=Demo.Services
 swap_dir
@@ -122,6 +129,17 @@ check 'swap_dir excludes obj' '' "$(ls "${JUDGE_APP_DIR}/Demo.Services/obj" 2>/d
 # and Directory.Build.props can switch off the nullability contract that the proxy's null-return check needs.
 check 'swap_dir excludes nuget.config' '' "$(ls "${JUDGE_APP_DIR}/Demo.Services/nuget.config" 2>/dev/null)"
 check 'swap_dir excludes Directory.Build.props' '' "$(ls "${JUDGE_APP_DIR}/Demo.Services/Directory.Build.props" 2>/dev/null)"
+
+# The one that matters most: the submission's project file must NOT be the one that gets built. A .csproj is
+# executable code — MSBuild runs whatever a <Target> tells it to, and the swapped folder compiles before the
+# hidden suite, as root. Excluding by filename was a denylist that grew one entry per discovered vector; this is
+# the allowlist version.
+check 'swap_dir restores the authored csproj over the submission one' \
+    'authored' \
+    "$(grep -o 'authored' "${JUDGE_APP_DIR}/Demo.Services/Demo.Services.csproj" 2>/dev/null)"
+check 'swap_dir drops a build target the submission tried to inject' \
+    '' \
+    "$(grep -o 'Pwn' "${JUDGE_APP_DIR}/Demo.Services/Demo.Services.csproj" 2>/dev/null)"
 
 # A missing folder must be reported without having destroyed the destination first.
 (

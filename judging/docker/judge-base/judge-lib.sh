@@ -238,6 +238,21 @@ swap_dir() {
     fi
 
     mkdir -p "${JUDGE_SWAP_DEST}"
+
+    # Stashed BEFORE the placeholder is emptied, which is the only moment it still exists. Restored after the
+    # submission is extracted, because a build file is executable code: MSBuild runs whatever a <Target> says.
+    local authored_project stash=""
+    authored_project=$(find "${JUDGE_SWAP_DEST}" -maxdepth 1 -name '*.csproj' -print -quit)
+    if [[ -n "${authored_project}" ]]; then
+        stash="${JUDGE_WORK}/authored-$(basename "${authored_project}")"
+        cp "${authored_project}" "${stash}"
+    else
+        # Nothing to restore means nothing to protect, and the build would fail confusingly later. Fail here,
+        # where the message can say what is actually wrong with the image.
+        judge_fatal "${JUDGE_EXIT_CONFIG}" "swap" \
+            "the image has no ${JUDGE_SWAP_SRC}/*.csproj to build against. This is an image bug: .dockerignore must keep the placeholder project file."
+    fi
+
     find "${JUDGE_SWAP_DEST}" -mindepth 1 -delete
 
     # Copy sources only. Excluded on purpose:
@@ -245,12 +260,44 @@ swap_dir() {
     #   nuget.config         - would re-open nuget.org and defeat the offline restore entirely
     #   Directory.Build.*    - can rewrite compiler settings and disable the nullability contract checks
     #   global.json          - can pin a different SDK than the image provides
+    #   *.csproj *.props     - see below; these are code, not configuration
+    #   *.targets
     tar -C "${source}" -cf - \
         --exclude='bin' --exclude='obj' \
         --exclude='nuget.config' --exclude='NuGet.config' --exclude='NuGet.Config' \
         --exclude='Directory.Build.props' --exclude='Directory.Build.targets' \
         --exclude='Directory.Packages.props' --exclude='global.json' \
+        --exclude='*.csproj' --exclude='*.props' --exclude='*.targets' \
         . | tar -C "${JUDGE_SWAP_DEST}" -xf -
+
+    # Put the author's project file back, so the build graph is the one the session declared.
+    #
+    # This is the difference between a denylist and an allowlist, and it matters because a .csproj is not
+    # configuration — it is executable code. MSBuild runs whatever a target says:
+    #
+    #   <Target Name="X" BeforeTargets="Build"><Exec Command="..."/></Target>
+    #
+    # and build_tests compiles the swapped folder BEFORE the hidden suite, as root. That gave a submission
+    # arbitrary code execution inside the judge with the hidden tests writable next to it — a clean-looking
+    # full pass that nothing server-side could distinguish from real work. Excluding by filename was never
+    # going to hold: the previous list grew one entry at a time as each new vector was noticed.
+    #
+    # A competitor therefore cannot change their project file, which is already what they are told: "do not add
+    # package references - the judge restores offline and a new reference fails the run."
+    if [[ -n "${stash}" ]]; then
+        # Tell the competitor their project file was ignored, rather than letting them discover it as an
+        # unresolved type. Before the substitution, adding a package reference failed the run with exit 4 and a
+        # message naming the cause; discarding it silently would trade a clear diagnostic for a confusing
+        # compile error, so the diagnostic is emitted explicitly.
+        local submitted
+        submitted=$(find "${source}" -maxdepth 1 -name '*.csproj' -print -quit)
+        if [[ -n "${submitted}" ]] && ! cmp -s "${submitted}" "${stash}"; then
+            emit_marker_error "your $(basename "${submitted}") was ignored and the session's own project file was used instead. A project file is executable code, so the judge does not run yours - which also means added package references have no effect, because the restore is offline."
+        fi
+
+        rm -f "${JUDGE_SWAP_DEST}"/*.csproj
+        cp "${stash}" "${JUDGE_SWAP_DEST}/$(basename "${authored_project}")"
+    fi
 }
 
 # restore_offline - restore only from the baked feed and the warmed cache. This is what stops a submission
