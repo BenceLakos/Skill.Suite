@@ -569,9 +569,20 @@ judge_verify_events_against_trx() {
     printf 'judge: corroboration - trx(total=%s passed=%s failed=%s) events(passed=%s failed=%s)\n' \
         "${trx_total:-?}" "${trx_passed:-?}" "${trx_failed:-?}" "${ev_passed:-0}" "${ev_failed:-0}"
 
+    # Fail loudly when a TRX exists but its counters do not parse - a truncated file, a collector that wrote no
+    # <Counters>, or a future SDK that changes the shape. The condition below is guarded on trx_passed being
+    # non-empty, so without this branch an unparseable TRX made the corroboration silently approve the run while
+    # printing `passed=?`. That is the third check in this harness that could quietly stop checking; a run whose
+    # results nothing corroborated must say so rather than read as verified.
+    if [[ -z "${trx_passed}" ]]; then
+        emit_marker_error "the test framework's TRX output was found but its result counters could not be read, so the event stream could not be corroborated against it. Treat this run's results as unverified."
+        printf 'judge: TRX FOUND BUT COUNTERS UNREADABLE - results not corroborated\n' >&2
+        return 0
+    fi
+
     # Compared on the pass count, which is the number a forgery would inflate. An event stream reporting MORE
     # passes than VSTest counted is the signature of fabricated results.
-    if [[ -n "${trx_passed}" ]] && (( ev_passed > trx_passed )); then
+    if (( ev_passed > trx_passed )); then
         emit_marker_error "RESULT INTEGRITY: the event stream reports ${ev_passed} passing tests but the test framework counted ${trx_passed}. These must agree; a higher event count means results were fabricated inside the test process. This run must be reviewed by an expert before its marks are used."
         printf 'judge: EVENT STREAM DOES NOT MATCH THE TRX - possible fabricated results\n' >&2
 

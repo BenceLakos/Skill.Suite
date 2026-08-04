@@ -221,6 +221,24 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   One iteration needed: the first version sealed `obj/` too, where restore and build legitimately rewrite
   generated sources and `project.assets.json` — so every honest run failed the seal. Build output is now excluded.
 
+### Accepted residual risk: in-process result forgery
+
+A competitor's code runs in the same process as the code that reports the verdict, and the report is a file that
+process can write. So a competitor who reports a *coherent* lie - only real test names, and no more passes than
+the TRX counted - is not detected. The cheapest version needs no log tampering at all: the corroboration check
+compares pass **counts**, so swapping which real tests are reported as passing is invisible to it, and marks are
+per-aspect. Test names and aspect metadata are enumerable at runtime by reflection even though the suite's source
+is hidden, and `marking-map.json` is present in the container.
+
+**Judged not worth engineering against, deliberately.** A competitor gets no iteration loop: they see visible
+aspects and a bucket, never the container logs or stderr, so an exploit has to be written blind, first try,
+against an unseen harness, under competition time pressure. The available defence - corroborating the TRX per
+test name instead of by count - carries the exact `[Theory]` display-name normalisation risk that has already
+failed honest submissions in this harness once. The defence is riskier than the threat. Revisit only if a
+submission is ever suspected in practice.
+
+Not a defence: signing event lines. Any key the harness holds is in the competitor's address space.
+
 ### Two self-inflicted regressions found by the real platform, not by the local harness
 
 Both are worth recording because they only appeared through `run-e2e.sh`, and the local `judge-run.sh` was
