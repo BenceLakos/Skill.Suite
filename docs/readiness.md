@@ -118,14 +118,25 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   *Verified live:* planted a Pending run, restarted the app, saw
   `Found 1 run(s) left unfinished by a previous process; re-enqueueing them`, and the run re-judged to
   **Completed**.
-  Still open in B1: an admin **Re-run** / **Cancel** action, which is also what B2's recovery depends on.
+  **B1 completed:** added `CancelTestRun` and `RequeueTestRun`. Cancel is a filtered `ExecuteUpdateAsync`, so
+  pressing it on a run that finished between render and click leaves the real result alone, and it signals the
+  container *after* the row is terminal so the executing handler cannot race back over it.
+  `IActiveTestRunRegistry.CancelForRun` resolves through the competitor index so a stale run id cannot kill the
+  submission that superseded it. Re-judge creates a **new** run rather than resetting the old one, because an
+  expert settling a dispute needs to see what happened the first time. This is also **B2's recovery mechanism**:
+  Gitea does not retry a failed delivery, so without it a submission whose one delivery timed out was never
+  judged and no operator action existed.
+  *Verified:* build + 86 tests green, and the buttons render correctly — "Judge again" present, Cancel correctly
+  absent on a Completed run. **Not verified:** the click end to end. The page did not navigate, which matches the
+  dead-Blazor-circuit-after-rebuild issue rather than a handler fault, but it is unproven either way — exercise it
+  on the next live run before relying on it.
 
 ## Blockers remaining
 
 | | what | why it blocks | size |
 |---|---|---|---|
 | B1 | Remainder: no admin **Re-run** or **Cancel** action on a run | a stuck or mis-judged run can only be fixed by a new push | M |
-| B2 | A submission is judged only if its single webhook delivery succeeds; nothing reconciles an unjudged HEAD | one failed delivery loses a mark silently and irrecoverably | M |
+| B2 | Remainder: no reconciliation VIEW listing each competitor's latest judged commit, so "never judged" is invisible until someone looks | recovery now exists (re-judge), but nothing surfaces which runs need it | S |
 | B5 | Competitor code runs as **root** with `/app` writable; their `.csproj` is built before the hidden suite. Verified: no `USER`, no `--read-only`, `--cap-drop` or `--user` | one MSBuild `Exec` target yields an undetectable clean pass | M |
 | B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
 
