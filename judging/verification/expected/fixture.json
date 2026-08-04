@@ -79,6 +79,15 @@
       "units": 5,
       "markerError": true,
       "markerErrorContains": "was ignored and the session's own project file was used instead"
+    },
+    {
+      "name": "forge-events",
+      "comment": "Attack: fabricates 12 passing events at process exit, from inside the test process where the harness itself runs. Permissions cannot stop this - anything the harness can write, the competitor can. The TRX cross-check must catch it.",
+      "exit": 7,
+      "status": "Failed",
+      "markerError": true,
+      "markerErrorContains": "RESULT INTEGRITY",
+      "note": "Exit 7 is the integrity code, distinct from a plain failure: this is not a bad submission, it is a fabricated one, and an expert must look before any mark from the run is used. An append DURING the run is overwritten by TestLogger's own stream, so the realistic attack is at process exit - the naive version failing told us nothing."
     }
   ]
 }

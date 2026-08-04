@@ -169,6 +169,24 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   *white-box* mark remains self-reported. No file permission fixes that last one — it needs the root entrypoint to
   own the event file.
 
+- **B6 — a fabricated pass is now detected.** The harness that writes `events.jsonl` runs *inside* the
+  competitor's test process, so anything it can write they can write, and any key it held to sign events would be
+  readable from there too. Self-reporting from inside an untrusted process cannot be made unforgeable — it can
+  only be **corroborated**. The white-box pipeline now requests a TRX and cross-checks it: VSTest counts outcomes
+  independently of the harness, so an event stream claiming more passes than the framework counted is the
+  signature of fabrication. On mismatch the judge emits a `RESULT INTEGRITY` marker-error and exits **7**, a code
+  distinct from a plain failure because this is not a bad submission but a fabricated one, and an expert must look
+  before any mark from the run is used.
+  *Verified adversarially:* a `forge-events` persona that appends 12 passing events at process exit. Detected —
+  `trx(passed=0) events(passed=12)`, marker-error emitted, exit 7 — while an honest run is untouched
+  (`trx(5/0) events(5/0)`, exit 0). White-box matrix **8/8** with both attack personas.
+  Worth recording: the naive version of the attack, appending *during* the run, is silently overwritten by
+  `TestLogger`'s own truncating stream. That is luck rather than a control, and it means an attack that fails
+  proves nothing about the defence — the persona had to move to process exit before it tested anything.
+  **Honest limit:** a competitor who forges the TRX *as well*, consistently, still gets through. This raises the
+  cost and makes careless attempts certain to be caught; it is not a proof. For a scored final, pair it with
+  retaining every checkout.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |

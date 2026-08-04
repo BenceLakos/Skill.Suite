@@ -28,6 +28,10 @@ readonly JUDGE_EXIT_SWAP=3         # the competitor's folder is absent or unusab
 readonly JUDGE_EXIT_RESTORE=4      # offline restore failed - usually an added package reference
 readonly JUDGE_EXIT_TIMEOUT=5      # a step exceeded its wall clock
 readonly JUDGE_EXIT_BUILD=6        # the submission does not compile
+# The reported results contradict the test framework's own output, i.e. the event stream was fabricated inside
+# the test process. Distinct from a plain failure because it is an integrity finding, not a bad submission: the
+# platform surfaces the reason, and an expert has to look before any mark from this run is used.
+readonly JUDGE_EXIT_INTEGRITY=7
 
 # ---------------------------------------------------------------------------- configuration
 
@@ -390,6 +394,55 @@ judge_grant_test_paths() {
     # A writable NuGet cache and HOME, or the test host fails trying to create them under a root-owned home.
     export DOTNET_CLI_HOME="/home/${JUDGE_TEST_USER}"
     chown -R "${JUDGE_TEST_USER}:${JUDGE_TEST_USER}" "/home/${JUDGE_TEST_USER}" 2>/dev/null || true
+}
+
+# judge_verify_events_against_trx - cross-check the event stream against the test framework's own output.
+#
+# This is the answer to a hole that cannot be closed by permissions. The harness that writes events.jsonl runs
+# INSIDE the competitor's test process, so anything it can write, they can write - including a full set of
+# "passed" events for tests that never ran. Any key it held to sign them would be readable by them too. Self
+# reporting from inside an untrusted process is unforgeable only if something outside corroborates it.
+#
+# The TRX is that something: VSTest writes it, one entry per test, independently of the harness. Forging a pass
+# now means forging BOTH consistently. It is not a proof - a determined competitor owns the process and can
+# attack the TRX as well - but it turns a silent fabrication into a detectable one, and it catches every
+# careless attempt outright. An expert investigating a disputed mark has two independent records to compare.
+judge_verify_events_against_trx() {
+    local trx
+    trx=$(find "${JUDGE_APP_DIR}" -name '*.trx' -newer "${JUDGE_STAGED_EVENTS}" 2>/dev/null | head -1)
+    [[ -z "${trx}" ]] && trx=$(find "${JUDGE_APP_DIR}" -name '*.trx' 2>/dev/null | head -1)
+
+    if [[ -z "${trx}" ]]; then
+        emit_marker_error "no TRX file was produced, so the event stream could not be corroborated against the test framework's own output. Treat this run's results as unverified."
+        return 0
+    fi
+
+    # Attributes on <Counters>, which VSTest writes from its own accounting rather than from the harness.
+    local trx_total trx_passed trx_failed
+    trx_total=$(grep -o 'total="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*')
+    trx_passed=$(grep -o 'passed="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*')
+    trx_failed=$(grep -o 'failed="[0-9]*"' "${trx}" | head -1 | grep -o '[0-9]*')
+
+    local ev_passed ev_failed
+    ev_passed=$(grep -c '"event":"finish-unit-test"[^}]*"outcome":"passed"' "${JUDGE_EVENT_FILE}" 2>/dev/null || true)
+    ev_failed=$(grep -c '"event":"finish-unit-test"[^}]*"outcome":"failed"' "${JUDGE_EVENT_FILE}" 2>/dev/null || true)
+
+    printf 'judge: corroboration - trx(total=%s passed=%s failed=%s) events(passed=%s failed=%s)\n' \
+        "${trx_total:-?}" "${trx_passed:-?}" "${trx_failed:-?}" "${ev_passed:-0}" "${ev_failed:-0}"
+
+    # Compared on the pass count, which is the number a forgery would inflate. An event stream reporting MORE
+    # passes than VSTest counted is the signature of fabricated results.
+    if [[ -n "${trx_passed}" ]] && (( ev_passed > trx_passed )); then
+        emit_marker_error "RESULT INTEGRITY: the event stream reports ${ev_passed} passing tests but the test framework counted ${trx_passed}. These must agree; a higher event count means results were fabricated inside the test process. This run must be reviewed by an expert before its marks are used."
+        printf 'judge: EVENT STREAM DOES NOT MATCH THE TRX - possible fabricated results\n' >&2
+
+        if [[ "${JUDGE_FAIL_ON_INTEGRITY:-true}" == "true" ]]; then
+            judge_fatal "${JUDGE_EXIT_INTEGRITY}" "verify" \
+                "the event stream does not match the test framework's own results; refusing to report marks."
+        fi
+    fi
+
+    return 0
 }
 
 run_tests() {
