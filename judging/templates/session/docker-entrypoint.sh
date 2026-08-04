@@ -8,8 +8,18 @@ set -euo pipefail
 
 . /usr/local/lib/judge-lib.sh
 
-# Black-box runs the test step as root. See judge-lib.sh: the coverage collector and Stryker produce no output
-# under the unprivileged account, which scores every submission 0 - strictly worse than the exposure.
+# Black-box runs the test step as ROOT. White-box drops to an unprivileged account; this pipeline does not, and
+# it is a known gap rather than an oversight.
+#
+# Tried twice. Under the unprivileged account the coverage collector and Stryker produce no TRX, no cobertura and
+# no mutation report, so the marker receives nothing and every submission scores 0. The second attempt was made
+# after fixing a chown-on-a-volume-subpath bug that looked like the cause; it was not - the collectors still
+# produced nothing, and no coverage or mutation event reached the stream at all.
+#
+# Scoring every competitor 0 is strictly worse than the exposure it would close, so this stays root until
+# someone works out what the collectors actually require. The other black-box controls still apply: capabilities
+# are dropped to five, no-new-privileges is set, the submission's project file is discarded, and the network is
+# off. Tracked in docs/readiness.md.
 export JUDGE_DROP_TEST_PRIVILEGES=false
 
 judge_configure

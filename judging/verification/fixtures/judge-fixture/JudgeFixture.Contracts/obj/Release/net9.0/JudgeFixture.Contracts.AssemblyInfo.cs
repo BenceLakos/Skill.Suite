@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Skill Suite")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d3ade6abde5b6df18470f7ce7c694c729f7bd74c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5669a75a5d54f90255b4dff1d68778cb49318f9c")]
 [assembly: System.Reflection.AssemblyProductAttribute("JudgeFixture.Contracts")]
 [assembly: System.Reflection.AssemblyTitleAttribute("JudgeFixture.Contracts")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

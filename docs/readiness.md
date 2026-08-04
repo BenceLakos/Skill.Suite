@@ -215,7 +215,7 @@ runner. Every one of these would have surfaced as "every competitor scored zero"
 
 | | what | why it blocks | size |
 |---|---|---|---|
-| B5 | Remainder: the **black-box** test step still runs as root, because the coverage collector and Stryker produce nothing under the unprivileged account. White-box is dropped. | a black-box competitor still executes privileged code, though the MSBuild vector is closed and capabilities are dropped | M |
+| B5 | Remainder: the **black-box** test step runs as root. Attempted twice — under the unprivileged account the coverage collector and Stryker produce no TRX, cobertura or mutation report, so every submission scores 0. The second attempt was after fixing the chown-on-volume bug that looked like the cause; it was not. | a black-box competitor executes privileged code. Mitigated but not closed: capabilities dropped to five, no-new-privileges, project file discarded, network off | M |
 | B6 | Remainder: a competitor who forges the TRX **as well**, consistently with their fabricated events, still gets through. Corroboration raises the cost and catches every careless attempt, but is not a proof. | a determined, careful forgery is still possible; pair with retaining every checkout for a scored final | L |
 
 ## Audit findings that did not survive verification
