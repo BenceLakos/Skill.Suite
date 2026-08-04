@@ -193,6 +193,24 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
   latest judged commit, rendered as a red **Never judged** chip when there is none. Combined with the re-judge
   action, an operator can both see and fix it. *Verified:* build + 88 tests, app boots.
 
+### Two self-inflicted regressions found by the real platform, not by the local harness
+
+Both are worth recording because they only appeared through `run-e2e.sh`, and the local `judge-run.sh` was
+green throughout:
+
+- **`chown` does not take on a volume subpath.** `judge-run.sh` uses a host bind mount, which is permissive;
+  the platform mounts the log directory as a docker volume subpath, where the chown silently did nothing. The
+  tests ran, the harness could not write `events.jsonl`, and the platform reported "produced no events" — a
+  competitor scored zero *by a hardening step*. Fixed with a `chmod` alongside the chown, plus a write probe
+  that falls back to running privileged and emits a marker-error rather than losing the mark.
+- **`--cap-drop=ALL` cancelled the privilege drop.** It removes `CAP_SETUID`, so `setpriv` failed with
+  "setresuid: Operation not permitted" and the container exited 1. The two hardening measures defeated each
+  other. Fixed by dropping ALL and adding back only `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER` — the
+  competitor's code never holds them, because it runs after the drop with `no-new-privileges` set.
+
+The lesson for the dress rehearsal: a hardening change must be verified through the platform, not the local
+runner. Every one of these would have surfaced as "every competitor scored zero" on the day.
+
 ## Blockers remaining
 
 | | what | why it blocks | size |

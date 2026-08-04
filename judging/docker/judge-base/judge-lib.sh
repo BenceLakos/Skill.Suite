@@ -394,6 +394,30 @@ judge_grant_test_paths() {
     # A writable NuGet cache and HOME, or the test host fails trying to create them under a root-owned home.
     export DOTNET_CLI_HOME="/home/${JUDGE_TEST_USER}"
     chown -R "${JUDGE_TEST_USER}:${JUDGE_TEST_USER}" "/home/${JUDGE_TEST_USER}" 2>/dev/null || true
+
+    # chmod as well as chown, because LOG_DIRECTORY and TestResults are not always plain directories in the
+    # image: the platform mounts the log directory as a subpath of a docker volume, where a chown does not take.
+    # The local judge-run.sh uses a host bind mount, which is permissive - so this failed only under the real
+    # platform, with the tests running but their events unwritable. Exactly the kind of difference a local
+    # harness hides.
+    chmod 0777 "${LOG_DIRECTORY}" "${JUDGE_APP_DIR}/TestResults" 2>/dev/null || true
+}
+
+# judge_test_user_can_write - confirm the unprivileged account can actually write what the run depends on.
+#
+# The guard exists because the failure it prevents is the worst kind: the tests run, the harness cannot write
+# events.jsonl, and the platform reports a submission that "produced no events" - a competitor scored zero by a
+# hardening step. Better to run the tests privileged and say so than to silently lose a mark.
+judge_test_user_can_write() {
+    local probe="${LOG_DIRECTORY}/.write-probe"
+
+    if setpriv --reuid "${JUDGE_TEST_USER}" --regid "${JUDGE_TEST_USER}" --init-groups \
+        sh -c "touch '${probe}' 2>/dev/null"; then
+        rm -f "${probe}"
+        return 0
+    fi
+
+    return 1
 }
 
 # judge_verify_events_against_trx - cross-check the event stream against the test framework's own output.
@@ -458,8 +482,15 @@ run_tests() {
     if [[ "${JUDGE_DROP_TEST_PRIVILEGES}" == "true" ]] \
         && id "${JUDGE_TEST_USER}" >/dev/null 2>&1 && [[ "$(id -u)" == "0" ]]; then
         judge_grant_test_paths
-        runner=(setpriv --reuid "${JUDGE_TEST_USER}" --regid "${JUDGE_TEST_USER}" --init-groups)
-        printf 'judge: running tests as %s\n' "${JUDGE_TEST_USER}"
+
+        if judge_test_user_can_write; then
+            runner=(setpriv --reuid "${JUDGE_TEST_USER}" --regid "${JUDGE_TEST_USER}" --init-groups)
+            printf 'judge: running tests as %s\n' "${JUDGE_TEST_USER}"
+        else
+            printf 'judge: WARNING %s cannot write %s, so tests run privileged. The hidden suite is writable by the submission for this run.\n' \
+                "${JUDGE_TEST_USER}" "${LOG_DIRECTORY}" >&2
+            emit_marker_error "the judge could not drop privileges for the test step because ${LOG_DIRECTORY} is not writable by the unprivileged account. Results are still produced, but this run had weaker isolation than intended - worth an operator's attention."
+        fi
     else
         printf 'judge: WARNING running tests as the container user; the hidden suite is writable by the submission\n' >&2
     fi

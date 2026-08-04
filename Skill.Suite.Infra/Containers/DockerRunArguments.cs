@@ -42,6 +42,21 @@ internal static class DockerRunArguments
             // --security-opt=no-new-privileges: stops a setuid binary inside the image from raising privileges,
             // which is what makes the capability drop stick rather than being a speed bump.
             "--cap-drop", "ALL",
+
+            // Added back, and only these. The judge pipeline drops to an unprivileged account for the test step,
+            // which needs SETUID/SETGID to change identity and CHOWN/DAC_OVERRIDE/FOWNER to hand that account
+            // its build output and results directory. Dropping ALL without these made setpriv fail with
+            // "setresuid: Operation not permitted" — the two hardening measures cancelled each other out, and
+            // the run produced no events at all.
+            //
+            // The competitor's own code never holds these: it executes after the drop, as an unprivileged user,
+            // and no-new-privileges stops it climbing back.
+            "--cap-add", "SETUID",
+            "--cap-add", "SETGID",
+            "--cap-add", "CHOWN",
+            "--cap-add", "DAC_OVERRIDE",
+            "--cap-add", "FOWNER",
+
             "--security-opt", "no-new-privileges",
         };
 
