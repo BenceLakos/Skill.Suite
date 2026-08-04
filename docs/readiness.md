@@ -197,8 +197,8 @@ isolation is the expensive one. Estimate two to three focused weeks plus a dress
 
 | | what | why it blocks | size |
 |---|---|---|---|
-| B5 | Remainder: the container still runs as root with `/app` writable — no `USER`, no `--read-only`, no `--cap-drop`. The MSBuild vector is closed, but any code the competitor's tests execute still runs privileged | a competitor who finds another execution path still has the hidden suite writable | M |
-| B6 | The mark is whatever the container says: the logger shares a process with competitor code, and black-box sums every cobertura under a writable dir | forging a top mark needs ordinary C#, not an exploit | L |
+| B5 | Remainder: the **black-box** test step still runs as root, because the coverage collector and Stryker produce nothing under the unprivileged account. White-box is dropped. | a black-box competitor still executes privileged code, though the MSBuild vector is closed and capabilities are dropped | M |
+| B6 | Remainder: a competitor who forges the TRX **as well**, consistently with their fabricated events, still gets through. Corroboration raises the cost and catches every careless attempt, but is not a proof. | a determined, careful forgery is still possible; pair with retaining every checkout for a scored final | L |
 
 ## Audit findings that did not survive verification
 
