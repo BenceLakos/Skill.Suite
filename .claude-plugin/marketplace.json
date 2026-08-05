@@ -13,6 +13,11 @@
       "name": "session-authoring",
       "source": "./plugins/session-authoring",
       "description": "Author, calibrate and publish a judging session: contracts, reference implementation, hidden graded suite, competitor starter kit, and the white-box or black-box judge images."
+    },
+    {
+      "name": "marking-scheme-authoring",
+      "source": "./plugins/marking-scheme-authoring",
+      "description": "Derive, verify and revise the CIS marking scheme for a session: aspects traced to the brief, marks that reconcile, expected values from an independent model, and proof that every aspect can actually be lost."
     }
   ]
 }

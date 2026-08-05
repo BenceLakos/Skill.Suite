@@ -1,0 +1,17 @@
+{
+  "name": "marking-scheme-authoring",
+  "description": "Derive, verify and revise a WorldSkills CIS marking scheme for a Skill Suite session — aspects, marks, expected values, and proof that every aspect can actually be lost.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Ingenimind Kft.",
+    "email": "zsolt.nagy@ingenimind.com"
+  },
+  "homepage": "https://github.com/BenceLakos/Skill.Suite",
+  "keywords": [
+    "skill-suite",
+    "competition",
+    "marking-scheme",
+    "cis",
+    "worldskills"
+  ]
+}
