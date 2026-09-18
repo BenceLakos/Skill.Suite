@@ -1,0 +1,219 @@
+name: publish-image
+
+# Builds the Skill Suite platform image (Skill.Suite/Dockerfile) and pushes it to the container registry of
+# the Gitea instance this repository lives on, so the competition platform can be started from an image
+# instead of a local build.
+#
+# Why this file lives in .gitea/workflows: Gitea only falls back to .github/workflows when .gitea/workflows
+# does not exist. Creating this directory therefore deliberately stops Gitea from picking up judging-ci.yml
+# and judging-release.yml - both of which are written for GitHub runners and publish to GHCR and nuget.org,
+# neither of which exists here. Those two keep running on GitHub, unchanged.
+#
+# Session judge images are still never built in CI, here or on GitHub: they bake hidden test suites and, for
+# some session types, the reference implementation. They are built out of band and pushed straight to the
+# private registry. The generic judge images stay with .github/workflows/judging-release.yml.
+#
+# Runner prerequisites - the stack in infra/compose.yaml already provides every one of these, so on that
+# stack the defaults below work with no configuration at all:
+#   * a runner labelled `ubuntu-latest` with access to a docker daemon - the stack runs act_runner replicas
+#     with the host docker socket handed to job containers;
+#   * name resolution for the registry host from inside the job container. Gitea sits behind Traefik with
+#     ROOT_URL http://git.${DOMAIN}/, so github.server_url - and the registry host derived from it - is
+#     `git.<domain>`. Traefik holds `git.<domain>` and `suite.<domain>` as network aliases on the
+#     `skill-suite` network, and the runners put job containers on that network, so the name resolves
+#     without any LAN DNS;
+#   * the registry is plain http. Neither of the two steps that talk to it leans on the host daemon's
+#     `insecure-registries` for that - see the comments on the credential and buildx steps below;
+#   * actions/checkout, docker/* resolve from github.com unless the runner sets a different
+#     default_actions_url, so the runner needs outbound network on first run.
+#
+# Pulling the published image is a deployment concern, not a CI one: whichever host runs `docker pull` for
+# it must resolve `git.<domain>` and list it in its OWN daemon.json `insecure-registries`, because that pull
+# goes through that host's daemon - nothing this workflow does can arrange it.
+#
+# Operator knobs - repository or organisation variables and secrets, all optional:
+#   vars.REGISTRY_HOST      registry host:port, e.g. `gitea:3000` (docker network name) or `gitea.local:3000`.
+#                           Defaults to the host of the instance ROOT_URL, which is only correct when the
+#                           runner reaches Gitea under the same name a browser does.
+#   vars.IMAGE_PLATFORMS    build platforms, defaults to linux/amd64 (compose.yaml pins that for production).
+#   vars.BUILDX_NETWORK     docker network the buildx builder container joins, defaults to `skill-suite` so
+#                           the builder resolves the `git.<domain>` alias. Set it to `host` on a bare-metal
+#                           runner that reaches the registry over LAN DNS instead.
+#   secrets.REGISTRY_USERNAME / secrets.REGISTRY_TOKEN
+#                           a personal access token with `write:package` scope, for setups where the
+#                           per-job token cannot push to the owner's package namespace. When unset, the
+#                           automatic secrets.GITHUB_TOKEN (alias GITEA_TOKEN) is used.
+
+on:
+  push:
+    branches: [main]
+    # Platform releases only. The judging layer tags `judging-v*`, which does not match `v*`, so a judging
+    # release never triggers a platform image build.
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Extra image tag to apply (optional)'
+        type: string
+        default: ''
+
+# Gitea ignores these, but they keep the file honest if it is ever run on GitHub.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: skill-suite
+
+jobs:
+  image:
+    name: build and publish the platform image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runs first because both the builder and the credential file below need the registry host.
+      #
+      # Everything the following steps need is computed here, in POSIX shell only (no bashisms: the runner
+      # image decides whether `run:` is bash or sh). Values arrive as env, not inline expressions.
+      - name: Derive image reference and tags
+        id: meta
+        env:
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
+          SERVER_URL: ${{ github.server_url }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+
+          # The registry is served by the Gitea instance itself, so its host is the ROOT_URL's host:port.
+          host="${REGISTRY_HOST:-}"
+          if [ -z "${host}" ]; then
+            url="${SERVER_URL:-}"
+            url="${url%/}"        # ROOT_URL is configured with a trailing slash
+            host="${url#*://}"    # drop the scheme
+            host="${host%%/*}"    # drop any sub-path, keep host:port
+          fi
+          if [ -z "${host}" ]; then
+            echo "::error::cannot determine the registry host - set the REGISTRY_HOST variable" && exit 1
+          fi
+
+          # Registries reject uppercase path components, and Gitea owner names are free to contain them.
+          owner="$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          image="${host}/${owner}/${IMAGE_NAME}"
+          sha7="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+
+          case "${EVENT_NAME}" in
+            workflow_dispatch)
+              # Never :latest from a manual run - that tag is what a deployment pulls.
+              names="dev-${sha7}"
+              if [ -n "${INPUT_TAG:-}" ]; then names="${names} ${INPUT_TAG}"; fi
+              ;;
+            *)
+              case "${REF}" in
+                refs/tags/v*)
+                  names="${REF#refs/tags/v} latest"
+                  ;;
+                refs/heads/main)
+                  # sha- alongside :latest so a deployment can be pinned to the exact commit it was cut from.
+                  names="latest sha-${sha7}"
+                  ;;
+                *)
+                  names="dev-${sha7}"
+                  ;;
+              esac
+              ;;
+          esac
+
+          {
+            echo "registry=${host}"
+            echo "image=${image}"
+            echo "tags<<EOF"
+            for name in ${names}; do echo "${image}:${name}"; done
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "will publish:"
+          for name in ${names}; do echo "  ${image}:${name}"; done
+
+      # Only when the operator asks for something other than the runner's own architecture: emulating a
+      # foreign arch inside a runner is slow, and production is amd64 (compose.yaml pins linux/amd64).
+      - name: Set up QEMU
+        if: vars.IMAGE_PLATFORMS != '' && vars.IMAGE_PLATFORMS != 'linux/amd64'
+        uses: docker/setup-qemu-action@v3
+
+      # Also gives a docker-container builder, which is what makes the registry cache below exportable - and
+      # that builder is a container of its own, with its own registry configuration and its own network view:
+      #   * the host daemon's `insecure-registries` does not reach it, so the plain-http registry has to be
+      #     declared to BuildKit directly (http = true is what makes it speak http at all; insecure = true
+      #     covers the case where the operator later fronts it with a self-signed certificate);
+      #   * it has to sit on the stack network to resolve the `git.<domain>` alias Traefik answers to. Set
+      #     vars.BUILDX_NETWORK to `host` on a bare-metal runner that reaches the registry via LAN DNS.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=${{ vars.BUILDX_NETWORK || 'skill-suite' }}
+          buildkitd-config-inline: |
+            [registry."${{ steps.meta.outputs.registry }}"]
+              http = true
+              insecure = true
+
+      # Deliberately not the docker login action: that shells out to `docker login`, which the docker CLI
+      # hands to the HOST daemon (POST /auth). The host daemon would then have to resolve `git.<domain>`
+      # itself and carry the registry in its own `insecure-registries` - CI coupled to host DNS and host
+      # daemon configuration. Writing the credential file by hand keeps the exchange inside the job
+      # container: buildx reads ~/.docker/config.json when it pushes, so the host daemon never sees this.
+      #
+      # Two credential paths, same file. With the automatic per-job token Gitea ignores the username; with a
+      # personal access token (`write:package` scope, for setups where the per-job token cannot push to the
+      # owner's package namespace) the username must be the token's own user.
+      - name: Write registry credentials
+        env:
+          REGISTRY: ${{ steps.meta.outputs.registry }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+
+          # -w0 is GNU; busybox and BSD base64 need the wrapping stripped afterwards instead.
+          auth="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 -w0 2>/dev/null \
+                  || printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 | tr -d '\n')"
+
+          umask 077
+          mkdir -p "${HOME}/.docker"
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${REGISTRY}" "${auth}" > "${HOME}/.docker/config.json"
+          chmod 600 "${HOME}/.docker/config.json"
+
+          echo "credentials for ${REGISTRY} written as ${REGISTRY_USERNAME}"
+
+      # Context is the repo root, not Skill.Suite/: the Dockerfile does `COPY . .` and restores all four
+      # csproj folders. .dockerignore keeps judging/ out, bar the shared Protocol sources.
+      #
+      # The cache is a registry layer cache in the same namespace as the image. Gitea's registry accepts OCI
+      # cache manifests, which is what image-manifest=true,oci-mediatypes=true asks for. A cache miss on the
+      # first run is normal and not an error.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Skill.Suite/Dockerfile
+          platforms: ${{ vars.IMAGE_PLATFORMS || 'linux/amd64' }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -eu
+          echo "Pushed:"
+          printf '%s\n' "${TAGS}"
+          echo
+          echo "To run the platform from one of these, set the skill.suite service's image: in compose.yaml"
+          echo "to that reference, then bring the stack up:"
+          echo "  docker compose -f infra/compose.yaml up -d"
+          echo "  docker compose pull && docker compose up -d"

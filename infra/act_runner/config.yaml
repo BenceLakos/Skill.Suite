@@ -1,0 +1,41 @@
+# act_runner configuration, mounted read-only at the path CONFIG_FILE points to in infra/compose.yaml.
+# Only the keys that matter for this stack are set; everything else stays at the runner's own defaults.
+
+log:
+  level: info
+
+runner:
+  # Relative to the container's working directory. Each replica has its own filesystem and therefore its own
+  # registration - see the note about the missing /data volume in infra/compose.yaml.
+  file: .runner
+  # One job per runner. Parallelism is set with GITEA_RUNNER_REPLICAS, not here: a second concurrent job
+  # inside one runner shares that container's memory and its docker socket contention with the first, which
+  # makes a .NET publish unpredictable rather than twice as fast.
+  capacity: 1
+  # A platform image build is a full restore + publish; the 3h ceiling is a backstop, not a target.
+  timeout: 3h
+  fetch_timeout: 5s
+  fetch_interval: 2s
+  # Labels are supplied by GITEA_RUNNER_LABELS at registration time; leaving this empty keeps the two from
+  # disagreeing after the runner is already registered.
+  labels: []
+
+cache:
+  enabled: true
+
+container:
+  # Every job container joins the stack network, so git.${DOMAIN} (the Traefik alias) and gitea:3000 both
+  # resolve inside a job. Without it a workflow could not reach the registry it is pushing to.
+  network: skill-suite
+  privileged: false
+  # Hands the host docker socket to each job container, which is what lets docker/build-push-action build and
+  # push from inside a job.
+  options: -v /var/run/docker.sock:/var/run/docker.sock
+  # act_runner only honours a -v in `options` if the source is on this allow-list; the socket is the one thing
+  # jobs are permitted to mount.
+  valid_volumes:
+    - /var/run/docker.sock
+  # Empty means "use the daemon act_runner itself talks to" - the host daemon, via the socket the runner
+  # container has mounted.
+  docker_host: ""
+  force_pull: false

@@ -38,6 +38,15 @@ services:
     ports:
       - "8080:8080"
       - "8081:8081"
+    # Traefik runs in infra/compose.yaml and discovers this container over the shared `skill-suite` network,
+    # so the route lives here as labels rather than in a proxy configuration file. The 8080 host port stays
+    # published as a direct fallback for when the proxy or name resolution is the thing being debugged.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.suite.rule=Host(`suite.${DOMAIN:-localhost}`)
+      - traefik.http.routers.suite.entrypoints=web
+      # The container exposes 8080 and 8081; 8081 is https the container does not terminate, so name the one.
+      - traefik.http.services.suite.loadbalancer.server.port=8080
     networks:
       - skill-suite
 
