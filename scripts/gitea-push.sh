@@ -14,6 +14,17 @@
 # an ordinary fast-forward. Nothing is force-pushed - a Gitea repository that already carries history is a
 # reason to stop and look rather than to overwrite, so a rejected push reports how to reconcile it instead.
 #
+# The same token is stored on the repository as the Actions secrets REGISTRY_USERNAME and REGISTRY_TOKEN,
+# which .gitea/workflows/publish-image.yml uses to push into Gitea's container registry. Gitea's registry
+# refuses the automatic per-job token, so every repository that runs that workflow needs a real token in
+# those two secrets - and the one that could create the repository is already in hand. --no-registry-secrets
+# skips this for repositories that will never build images.
+#
+# For this repository, the deployment settings in .env are copied to the repository as well - keys that look
+# like credentials (PASSWORD, TOKEN, SECRET) as Actions secrets, the rest as Actions variables - because the
+# workflow's deploy job starts the platform on the docker host with exactly those settings. Editing .env and
+# re-running this script is how a setting reaches the deployed platform. --no-env-sync skips it.
+#
 # The token reaches git through a temporary GIT_ASKPASS helper rather than an embedded credential in the
 # remote URL (https://token@host/owner/repo.git). An embedded token is written verbatim into .git/config, so
 # it outlives this run, shows up in every `git remote -v`, and travels with anything copied out of the
@@ -26,9 +37,13 @@ API_PREFIX=/api/v1
 DEFAULT_REMOTE=gitea
 REPO_NAME_PATTERN='^[A-Za-z0-9._-]+$'
 WORKFLOW_FILE=.gitea/workflows/publish-image.yml
+REGISTRY_USERNAME_SECRET=REGISTRY_USERNAME
+REGISTRY_TOKEN_SECRET=REGISTRY_TOKEN
+SECRET_KEY_PATTERN='PASSWORD|TOKEN|SECRET'
 HTTP_POST_BUFFER=$((1024 * 1024 * 1024))
 SCRIPT_NAME=$(basename "${BASH_SOURCE[0]}")
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_SYNC_FILE="${SCRIPT_ROOT}/.env"
 
 GITEA_URL=${GITEA_URL:-}
 TOKEN=${GITEA_TOKEN:-}
@@ -40,6 +55,8 @@ DESCRIPTION=""
 REMOTE=${DEFAULT_REMOTE}
 ALL_BRANCHES=0
 PRIVATE=true
+REGISTRY_SECRETS=1
+ENV_SYNC=1
 
 WORK_DIR=""
 HTTP_STATUS=""
@@ -60,7 +77,8 @@ ${SCRIPT_NAME} - create a Gitea repository and push a local repository into it.
 usage: scripts/${SCRIPT_NAME} --url <gitea-url> --token <token> --path <repo-dir> [options]
 
   --url     <url>        Gitea base URL, e.g. http://localhost:3000        (env: GITEA_URL)
-  --token   <token>      personal access token with repo write scope       (env: GITEA_TOKEN)
+  --token   <token>      personal access token; needs repository write and,
+                         for the image workflow, package write              (env: GITEA_TOKEN)
   --path    <dir>        local git repository to publish                   (default: ${SCRIPT_ROOT})
   --owner   <user|org>   repository owner                                  (default: the token's own user)
   --name    <repo>       repository name                                   (default: basename of --path)
@@ -68,6 +86,10 @@ usage: scripts/${SCRIPT_NAME} --url <gitea-url> --token <token> --path <repo-dir
   --all-branches         push every local branch instead of just one
   --public               create the repository public                      (default: private)
   --remote  <name>       git remote to configure in the local repository   (default: ${DEFAULT_REMOTE})
+  --no-registry-secrets  do not store the token as the ${REGISTRY_USERNAME_SECRET}/${REGISTRY_TOKEN_SECRET}
+                         Actions secrets the image workflow pushes with
+  --no-env-sync          do not copy this repository's .env into the Actions secrets and variables
+                         the deploy job starts the platform with (Skill Suite repository only)
   --description <text>   repository description
   -h, --help             show this help
 
@@ -99,6 +121,8 @@ while [[ $# -gt 0 ]]; do
         --remote)       need_value "$@"; REMOTE=$2; shift 2 ;;
         --all-branches) ALL_BRANCHES=1; shift ;;
         --public)       PRIVATE=false; shift ;;
+        --no-registry-secrets) REGISTRY_SECRETS=0; shift ;;
+        --no-env-sync)  ENV_SYNC=0; shift ;;
         -h|--help)      usage; exit 0 ;;
         --)             shift; break ;;
         *)              usage_error "unknown argument: $1" ;;
@@ -274,6 +298,73 @@ if [[ ${HTTP_STATUS} == 200 ]]; then
     ok "Actions enabled"
 else
     warn "could not enable Actions ($(api_error)); turn them on under Settings -> Repository -> Actions"
+fi
+
+# 201 is created, 204 is updated; Gitea encrypts the value at rest and never returns it through the API.
+set_actions_secret() {
+    local name=$1 value=$2
+    api_request PUT "/repos/${OWNER}/${REPO_NAME}/actions/secrets/${name}" \
+        "$(printf '{"data":"%s"}' "$(json_escape "${value}")")"
+    [[ ${HTTP_STATUS} == 201 || ${HTTP_STATUS} == 204 ]]
+}
+
+if [[ ${REGISTRY_SECRETS} -eq 1 ]]; then
+    log "storing registry credentials as Actions secrets on ${OWNER}/${REPO_NAME}"
+    if set_actions_secret "${REGISTRY_USERNAME_SECRET}" "${LOGIN}" \
+        && set_actions_secret "${REGISTRY_TOKEN_SECRET}" "${TOKEN}"; then
+        ok "${REGISTRY_USERNAME_SECRET}=${LOGIN} and ${REGISTRY_TOKEN_SECRET} set; the token needs package write for the push to work"
+    else
+        warn "could not store the Actions secrets ($(api_error)); add ${REGISTRY_USERNAME_SECRET} and ${REGISTRY_TOKEN_SECRET} under Settings -> Actions -> Secrets"
+    fi
+fi
+
+# Variables have no upsert: PUT updates an existing one (204) and 404s otherwise, POST creates (201).
+set_actions_variable() {
+    local name=$1 value=$2 body
+    body=$(printf '{"value":"%s"}' "$(json_escape "${value}")")
+    api_request PUT "/repos/${OWNER}/${REPO_NAME}/actions/variables/${name}" "${body}"
+    [[ ${HTTP_STATUS} == 204 || ${HTTP_STATUS} == 200 ]] && return 0
+    [[ ${HTTP_STATUS} == 404 ]] || return 1
+    api_request POST "/repos/${OWNER}/${REPO_NAME}/actions/variables/${name}" "${body}"
+    [[ ${HTTP_STATUS} == 201 || ${HTTP_STATUS} == 204 ]]
+}
+
+# Reads KEY=VALUE lines the way compose does for the values that matter here: comments and blank lines are
+# skipped, a value wrapped in matching single or double quotes loses the quotes (that is how .env.example
+# tells people to write the htpasswd hash), everything else is taken verbatim. Empty values are not synced -
+# the deploy job treats a missing variable as "use the default", which is what an empty line means too.
+sync_env_to_actions() {
+    local line key value secrets=0 variables=0 failed=()
+    while IFS= read -r line || [[ -n ${line} ]]; do
+        line=${line#"${line%%[![:space:]]*}"}
+        [[ -z ${line} || ${line} == \#* ]] && continue
+        [[ ${line} == *=* ]] || continue
+        key=${line%%=*}
+        value=${line#*=}
+        key=${key%"${key##*[![:space:]]}"}
+        [[ ${key} =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        value=${value%"${value##*[![:space:]]}"}
+        if [[ ${value} == \'*\' || ${value} == \"*\" ]]; then value=${value:1:${#value}-2}; fi
+        [[ -n ${value} ]] || continue
+
+        if [[ ${key} =~ ${SECRET_KEY_PATTERN} ]]; then
+            set_actions_secret "${key}" "${value}" && (( secrets += 1 )) || failed+=("${key}")
+        else
+            set_actions_variable "${key}" "${value}" && (( variables += 1 )) || failed+=("${key}")
+        fi
+    done <"${ENV_SYNC_FILE}"
+
+    ok "${secrets} secret(s) and ${variables} variable(s) synced from .env"
+    (( ${#failed[@]} == 0 )) || warn "not synced: ${failed[*]} ($(api_error)); set them under Settings -> Actions"
+}
+
+if [[ ${ENV_SYNC} -eq 1 && ${REPO_TOP} == "${SCRIPT_ROOT}" ]]; then
+    if [[ -f ${ENV_SYNC_FILE} ]]; then
+        log "syncing deployment settings from .env to Actions secrets and variables"
+        sync_env_to_actions
+    else
+        warn "no .env beside compose.yaml, so the deploy job has no admin credentials yet: cp .env.example .env, fill it in, re-run"
+    fi
 fi
 
 CURRENT_REMOTE_URL=$(git -C "${REPO_TOP}" remote get-url "${REMOTE}" 2>/dev/null || true)

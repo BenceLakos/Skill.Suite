@@ -1,8 +1,9 @@
 name: publish-image
 
-# Builds the Skill Suite platform image (Skill.Suite/Dockerfile) and pushes it to the container registry of
-# the Gitea instance this repository lives on, so the competition platform can be started from an image
-# instead of a local build.
+# Builds the Skill Suite platform image (Skill.Suite/Dockerfile), pushes it to the container registry of the
+# Gitea instance this repository lives on, and then starts it on the docker host the runner is attached to -
+# the same host that runs Gitea, Postgres and Traefik from infra/compose.yaml. A push to main is therefore a
+# deployment: the platform that answers at suite.<domain> is the commit that was just pushed.
 #
 # Why this file lives in .gitea/workflows: Gitea only falls back to .github/workflows when .gitea/workflows
 # does not exist. Creating this directory therefore deliberately stops Gitea from picking up judging-ci.yml
@@ -14,35 +15,51 @@ name: publish-image
 # private registry. The generic judge images stay with .github/workflows/judging-release.yml.
 #
 # Runner prerequisites - the stack in infra/compose.yaml already provides every one of these, so on that
-# stack the defaults below work with no configuration at all:
-#   * a runner labelled `ubuntu-latest` with access to a docker daemon - the stack runs act_runner replicas
-#     with the host docker socket handed to job containers;
+# stack the defaults below work with no configuration beyond the secrets and variables listed further down:
+#   * a runner labelled `ubuntu-latest` whose job containers get the HOST docker socket - the stack runs
+#     act_runner replicas configured exactly so. Both the build and the deployment go through that socket,
+#     which is what makes "start it where Gitea runs" true;
 #   * name resolution for the registry host from inside the job container. Gitea sits behind Traefik with
 #     ROOT_URL http://git.${DOMAIN}/, so github.server_url - and the registry host derived from it - is
 #     `git.<domain>`. Traefik holds `git.<domain>` and `suite.<domain>` as network aliases on the
 #     `skill-suite` network, and the runners put job containers on that network, so the name resolves
 #     without any LAN DNS;
-#   * the registry is plain http. Neither of the two steps that talk to it leans on the host daemon's
-#     `insecure-registries` for that - see the comments on the credential and buildx steps below;
+#   * the registry is plain http. Neither the build nor the deployment leans on the host daemon's
+#     `insecure-registries` for that - see the credential and buildx steps, and DEPLOY_REGISTRY below;
 #   * actions/checkout, docker/* resolve from github.com unless the runner sets a different
 #     default_actions_url, so the runner needs outbound network on first run.
 #
-# Pulling the published image is a deployment concern, not a CI one: whichever host runs `docker pull` for
-# it must resolve `git.<domain>` and list it in its OWN daemon.json `insecure-registries`, because that pull
-# goes through that host's daemon - nothing this workflow does can arrange it.
+# Secrets (repository or owner level). scripts/gitea-push.sh stores all of them from this checkout's .env:
+#   REGISTRY_USERNAME / REGISTRY_TOKEN        REQUIRED. A personal access token with the `package` permission
+#                                             set to Read and Write (scope write:package), and its user. The
+#                                             automatic per-job token cannot be used: Gitea 1.26 accepts it
+#                                             for Basic auth but the registry's token exchange demands a
+#                                             package scope the job token does not carry, and answers with a
+#                                             bare 401 "failed to fetch oauth token".
+#   SKILLSUITE_ADMIN_PASSWORD                 REQUIRED for the deployment; the password of the administrator
+#                                             compose.production.yaml seeds on first boot.
 #
-# Operator knobs - repository or organisation variables and secrets, all optional:
-#   vars.REGISTRY_HOST      registry host:port, e.g. `gitea:3000` (docker network name) or `gitea.local:3000`.
-#                           Defaults to the host of the instance ROOT_URL, which is only correct when the
-#                           runner reaches Gitea under the same name a browser does.
-#   vars.IMAGE_PLATFORMS    build platforms, defaults to linux/amd64 (compose.yaml pins that for production).
-#   vars.BUILDX_NETWORK     docker network the buildx builder container joins, defaults to `skill-suite` so
-#                           the builder resolves the `git.<domain>` alias. Set it to `host` on a bare-metal
-#                           runner that reaches the registry over LAN DNS instead.
-#   secrets.REGISTRY_USERNAME / secrets.REGISTRY_TOKEN
-#                           a personal access token with `write:package` scope, for setups where the
-#                           per-job token cannot push to the owner's package namespace. When unset, the
-#                           automatic secrets.GITHUB_TOKEN (alias GITEA_TOKEN) is used.
+# Variables (repository or owner level), all optional unless marked:
+#   SKILLSUITE_ADMIN_USER        REQUIRED for the deployment; the administrator's user name (not a credential,
+#                                so a variable, which is also where scripts/gitea-push.sh files it).
+#   SKILLSUITE_STARTER_PACKAGES  REQUIRED for the deployment. Directory ON THE DOCKER HOST holding the authored
+#                                sessions; mounted read-only into the platform. A path relative to the checkout
+#                                would be resolved inside the job container, where the host daemon cannot see it.
+#   DOMAIN, SKILLSUITE_GIT_INTERNAL_URL, SKILLSUITE_WEBHOOK_URL, SKILLSUITE_JUDGE_MEMORY, SKILLSUITE_JUDGE_CPUS,
+#   SKILLSUITE_JUDGE_PIDS, SKILLSUITE_CONCURRENT_RUNS, SKILLSUITE_BIND
+#                                the same knobs .env.example documents, with the same defaults when unset.
+#   AUTO_DEPLOY                  set to `false` to build and push without starting anything.
+#   DEPLOY_REGISTRY              where the HOST daemon pulls the image from; defaults to `localhost:3000`, the
+#                                port infra/compose.yaml publishes Gitea on. localhost is implicitly insecure
+#                                for docker, so no daemon.json change is needed. Set it to `git.<domain>` on
+#                                a host that has that in insecure-registries and resolves it.
+#   SKILLSUITE_COMPOSE_FILES     compose files for the deployment, default "compose.yaml compose.production.yaml".
+#   REGISTRY_HOST                registry host:port the BUILD pushes to. Defaults to the host of the instance
+#                                ROOT_URL, correct whenever the runner reaches Gitea under the browser's name.
+#   IMAGE_PLATFORMS              build platform, defaults to linux/amd64. The deployment pins the platform it
+#                                runs to the first entry, so an arm64 test machine sets `linux/arm64` here once.
+#   BUILDX_NETWORK               docker network the buildx builder container joins, defaults to `skill-suite`
+#                                so the builder resolves the `git.<domain>` alias. `host` on a bare-metal runner.
 
 on:
   push:
@@ -56,6 +73,10 @@ on:
         description: 'Extra image tag to apply (optional)'
         type: string
         default: ''
+      deploy:
+        description: 'Start the built image on the docker host'
+        type: boolean
+        default: true
 
 # Gitea ignores these, but they keep the file honest if it is ever run on GitHub.
 permissions:
@@ -69,6 +90,9 @@ jobs:
   image:
     name: build and publish the platform image
     runs-on: ubuntu-latest
+    outputs:
+      owner: ${{ steps.meta.outputs.owner }}
+      deploy_tag: ${{ steps.meta.outputs.deploy_tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -105,23 +129,28 @@ jobs:
           image="${host}/${owner}/${IMAGE_NAME}"
           sha7="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
 
+          # `primary` is the immutable tag the deployment runs; the others are conveniences.
           case "${EVENT_NAME}" in
             workflow_dispatch)
               # Never :latest from a manual run - that tag is what a deployment pulls.
-              names="dev-${sha7}"
+              primary="dev-${sha7}"
+              names="${primary}"
               if [ -n "${INPUT_TAG:-}" ]; then names="${names} ${INPUT_TAG}"; fi
               ;;
             *)
               case "${REF}" in
                 refs/tags/v*)
-                  names="${REF#refs/tags/v} latest"
+                  primary="${REF#refs/tags/v}"
+                  names="${primary} latest"
                   ;;
                 refs/heads/main)
                   # sha- alongside :latest so a deployment can be pinned to the exact commit it was cut from.
-                  names="latest sha-${sha7}"
+                  primary="sha-${sha7}"
+                  names="latest ${primary}"
                   ;;
                 *)
-                  names="dev-${sha7}"
+                  primary="dev-${sha7}"
+                  names="${primary}"
                   ;;
               esac
               ;;
@@ -129,7 +158,9 @@ jobs:
 
           {
             echo "registry=${host}"
+            echo "owner=${owner}"
             echo "image=${image}"
+            echo "deploy_tag=${primary}"
             echo "tags<<EOF"
             for name in ${names}; do echo "${image}:${name}"; done
             echo "EOF"
@@ -166,16 +197,24 @@ jobs:
       # daemon configuration. Writing the credential file by hand keeps the exchange inside the job
       # container: buildx reads ~/.docker/config.json when it pushes, so the host daemon never sees this.
       #
-      # Two credential paths, same file. With the automatic per-job token Gitea ignores the username; with a
-      # personal access token (`write:package` scope, for setups where the per-job token cannot push to the
-      # owner's package namespace) the username must be the token's own user.
+      # A personal access token, never the automatic job token: Gitea's registry token exchange
+      # (container.Authenticate) rejects any authenticated credential without a package scope, and the job
+      # token has none. Failing here with the reason beats buildx's "failed to fetch oauth token: unauthorized"
+      # twenty minutes later. The username must be the user the token belongs to.
       - name: Write registry credentials
         env:
           REGISTRY: ${{ steps.meta.outputs.registry }}
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME || github.actor }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN || secrets.GITHUB_TOKEN }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
           set -eu
+
+          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_TOKEN:-}" ]; then
+            echo "::error::secrets REGISTRY_USERNAME and REGISTRY_TOKEN are not set. Create a personal access token" \
+                 "(Settings -> Applications, permission package: Read and Write) for the user that owns the" \
+                 "${REGISTRY} namespace and add both as Actions secrets on this repository or its owner."
+            exit 1
+          fi
 
           # -w0 is GNU; busybox and BSD base64 need the wrapping stripped afterwards instead.
           auth="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 -w0 2>/dev/null \
@@ -212,8 +251,90 @@ jobs:
           set -eu
           echo "Pushed:"
           printf '%s\n' "${TAGS}"
+
+  # The job container carries the host docker socket, so `docker compose up` here creates the platform
+  # container on the HOST daemon, next to Gitea on the `skill-suite` network - exactly what
+  # `docker compose -f compose.yaml -f compose.production.yaml up -d` does when typed on that host. Only
+  # the compose FILES are read from the job's checkout; every bind mount source has to be a host path, which
+  # is why SKILLSUITE_STARTER_PACKAGES is required rather than defaulted below.
+  deploy:
+    name: start the platform on this docker host
+    needs: image
+    if: vars.AUTO_DEPLOY != 'false' && (github.event_name != 'workflow_dispatch' || inputs.deploy)
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_REGISTRY: ${{ vars.DEPLOY_REGISTRY || 'localhost:3000' }}
+      COMPOSE_FILES: ${{ vars.SKILLSUITE_COMPOSE_FILES || 'compose.yaml compose.production.yaml' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The pull is performed by the host daemon, but the credentials for it come from the client config in
+      # this job container - compose forwards them with the pull request - so the same file as in the build
+      # job, keyed by the host the daemon will contact.
+      - name: Write registry credentials for the pull
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          auth="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 -w0 2>/dev/null \
+                  || printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 | tr -d '\n')"
+          umask 077
+          mkdir -p "${HOME}/.docker"
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${DEPLOY_REGISTRY}" "${auth}" > "${HOME}/.docker/config.json"
+          chmod 600 "${HOME}/.docker/config.json"
+
+      # Compose interpolates from the process environment, so the deployment settings are passed as env and
+      # no .env file is written: a password containing `$` or quotes would need escaping in a .env file and
+      # needs none here. An unset variable arrives as an empty string, which compose's `${X:-default}` treats
+      # as unset, so every knob keeps the default .env.example documents.
+      - name: Pull and start
+        env:
+          SKILLSUITE_IMAGE: ${{ env.DEPLOY_REGISTRY }}/${{ needs.image.outputs.owner }}/${{ env.IMAGE_NAME }}:${{ needs.image.outputs.deploy_tag }}
+          IMAGE_PLATFORMS: ${{ vars.IMAGE_PLATFORMS || 'linux/amd64' }}
+          SKILLSUITE_ADMIN_USER: ${{ vars.SKILLSUITE_ADMIN_USER }}
+          SKILLSUITE_ADMIN_PASSWORD: ${{ secrets.SKILLSUITE_ADMIN_PASSWORD }}
+          SKILLSUITE_STARTER_PACKAGES: ${{ vars.SKILLSUITE_STARTER_PACKAGES }}
+          DOMAIN: ${{ vars.DOMAIN }}
+          SKILLSUITE_GIT_INTERNAL_URL: ${{ vars.SKILLSUITE_GIT_INTERNAL_URL }}
+          SKILLSUITE_WEBHOOK_URL: ${{ vars.SKILLSUITE_WEBHOOK_URL }}
+          SKILLSUITE_JUDGE_MEMORY: ${{ vars.SKILLSUITE_JUDGE_MEMORY }}
+          SKILLSUITE_JUDGE_CPUS: ${{ vars.SKILLSUITE_JUDGE_CPUS }}
+          SKILLSUITE_JUDGE_PIDS: ${{ vars.SKILLSUITE_JUDGE_PIDS }}
+          SKILLSUITE_CONCURRENT_RUNS: ${{ vars.SKILLSUITE_CONCURRENT_RUNS }}
+          SKILLSUITE_BIND: ${{ vars.SKILLSUITE_BIND }}
+        run: |
+          set -eu
+
+          if [ -z "${SKILLSUITE_ADMIN_USER:-}" ] || [ -z "${SKILLSUITE_ADMIN_PASSWORD:-}" ]; then
+            echo "::error::variable SKILLSUITE_ADMIN_USER and secret SKILLSUITE_ADMIN_PASSWORD are not set; the" \
+                 "production stack seeds its administrator from them. scripts/gitea-push.sh stores them from .env."
+            exit 1
+          fi
+          case "${SKILLSUITE_STARTER_PACKAGES:-}" in
+            /*) ;;
+            *)
+              echo "::error::variable SKILLSUITE_STARTER_PACKAGES must be an absolute path ON THE DOCKER HOST" \
+                   "(got '${SKILLSUITE_STARTER_PACKAGES:-}'). The platform mounts it read-only as /starter-packages."
+              exit 1
+              ;;
+          esac
+
+          # The image was built for the first (usually only) platform in IMAGE_PLATFORMS; run it as that.
+          SKILLSUITE_PLATFORM="${IMAGE_PLATFORMS%%,*}"
+          export SKILLSUITE_PLATFORM
+
+          set -- ; for file in ${COMPOSE_FILES}; do set -- "$@" -f "${file}"; done
+
+          echo "deploying ${SKILLSUITE_IMAGE} (${SKILLSUITE_PLATFORM}) with: ${COMPOSE_FILES}"
+          docker compose "$@" pull skill.suite
+          # --no-build: compose.yaml carries a build: section for local development, and without this a
+          # missing image would be built from the checkout instead of pulled - a different binary from the
+          # one that was tested. --wait blocks on the production healthcheck, so green here means it answers.
+          docker compose "$@" up -d --no-build --wait --wait-timeout 300 skill.suite
+          docker compose "$@" ps skill.suite
+
           echo
-          echo "To run the platform from one of these, set the skill.suite service's image: in compose.yaml"
-          echo "to that reference, then bring the stack up:"
-          echo "  docker compose -f infra/compose.yaml up -d"
-          echo "  docker compose pull && docker compose up -d"
+          echo "running ${SKILLSUITE_IMAGE}"
+          if [ -n "${DOMAIN:-}" ]; then echo "  http://suite.${DOMAIN}/"; fi
+          echo "  http://<docker host>:8080/"

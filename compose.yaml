@@ -1,8 +1,15 @@
+# Fixed project name, because the stack is started from two places - a shell on the host, and the deploy job
+# of .gitea/workflows/publish-image.yml running in a job container - and compose would otherwise derive two
+# different names from two different checkout directories and refuse to touch "another project's" container.
+name: skill-suite
+
 services:
   skill.suite:
     container_name: skill-suite
-    image: ghcr.io/blz-it/skill.suite:latest
-    platform: linux/amd64
+    # The deploy job sets SKILLSUITE_IMAGE to the reference it just published, and SKILLSUITE_PLATFORM to the
+    # platform it was built for. Unset, the stack builds the image locally from the Dockerfile below, for amd64.
+    image: ${SKILLSUITE_IMAGE:-ghcr.io/blz-it/skill.suite:latest}
+    platform: ${SKILLSUITE_PLATFORM:-linux/amd64}
     build:
       context: .
       dockerfile: Skill.Suite/Dockerfile

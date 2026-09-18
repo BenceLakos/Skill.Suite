@@ -164,8 +164,9 @@ services:
       # GITEA_RUNNER_NAME is deliberately unset: it then defaults to the container hostname, which compose
       # makes unique per replica. A fixed name would have every replica register as the same runner.
     volumes:
-      # Job containers are created on the host daemon by the runner, and the workflow's build steps need the
-      # socket handed through to them as well (see container.options in act_runner/config.yaml).
+      # Job containers are created on the host daemon by the runner, which also mounts this same socket into
+      # each of them on its own (see container.docker_host in act_runner/config.yaml), so the workflow's build
+      # steps reach the daemon too.
       - /var/run/docker.sock:/var/run/docker.sock
       - ./act_runner/config.yaml:/etc/act_runner/config.yaml:ro
     # No /data volume on purpose. act_runner stores its registration in a .runner file, and a shared volume
