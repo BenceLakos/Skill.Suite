@@ -64,8 +64,10 @@ services:
         max-file: "5"
 
     healthcheck:
-      # The login page is the cheapest endpoint that proves the app booted and can serve a request.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/Account/Login >/dev/null 2>&1 || exit 1"]
+      # /healthz is the anonymous liveness endpoint Program.cs maps; curl is installed into the image for this
+      # probe, because the aspnet runtime image carries neither curl nor wget and a missing tool reports as
+      # "unhealthy" indistinguishably from a dead application. The deploy job's `up --wait` blocks on this.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
