@@ -23,6 +23,20 @@ and `judge-smoke` to GHCR. It needs `NUGET_API_KEY`; GHCR uses the built-in `GIT
 
 Session images are deliberately absent from that workflow. Do not add them.
 
+### The same layer, on the competition's Gitea
+
+`.gitea/workflows/publish-judging.yml` publishes the identical artifacts to the Gitea the platform repository is
+pushed to, so sessions build with no reach outside the venue: the four packages to the owner's NuGet feed
+(`http://gitea:3000/api/packages/<owner>/nuget/index.json`, as a job container sees it) and `judge-base` /
+`judge-smoke` to Gitea's registry (`localhost:3000/<owner>/skill-suite-judge-base:9.0`, as the host daemon sees
+it). It runs on a push to `main` that touches `judging/`, on a `judging-v*` tag, or by hand. Versions are fixed at
+1.0.0 and a feed never overwrites a version, so a re-run is a no-op; the manual run has a `replace` switch that
+deletes the versions first — for development only, never after a session was calibrated against them.
+
+A session's `publish-session` workflow defaults its `JUDGING_FEED` and `BASE_IMAGE` to exactly these, under the
+session's own owner. Set the variables on the session repository or organisation when the platform lives under a
+different owner.
+
 ## Your session images (private, never public CI)
 
 Build locally or on a private runner, then push to the private registry. The registry host is
@@ -56,6 +70,18 @@ implementation *should* be there — Stryker needs it — but `<Session>.UnitTes
 
 If an image with the answer key has already been pushed, deleting the tag is not enough — assume anyone who
 could pull it did. Rotate to a new session or a new task.
+
+### Or let Gitea do it
+
+A module generated from the template carries `.gitea/workflows/publish-session.yml`. Pushed to the competition's
+Gitea with the platform's `scripts/gitea-push.sh` (which also stores the `REGISTRY_USERNAME`/`REGISTRY_TOKEN`
+secrets), every push to `main` runs the calibration test, `make-competitor-start.sh` in both modes,
+`build-image.sh both`, pushes both images to Gitea's registry as `localhost:3000/<owner>/<repo>-judge:sha-<7>` and
+`…-blackbox-judge:sha-<7>`, and copies both kits into the `skill-suite-starter-packages` volume, so the template
+folders `/starter-packages/<repo>/competitor-start` and `/starter-packages/<repo>-blackbox/competitor-start` are
+ready to pick in the session editor. A `v*` tag publishes under the version instead. The job runs on the runner
+attached to the competition host, so the images never leave it — the private-registry rule holds by construction.
+Nothing is started: register the images and sessions in the UI as described below.
 
 ## Registry reference gotcha
 

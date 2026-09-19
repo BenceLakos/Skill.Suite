@@ -86,6 +86,23 @@ environment-dependent values are settable:
 | `REGISTRY=<host>/<owner>` | prefixes the name for pushing |
 | `NO_CACHE=1` | `docker build --no-cache` |
 
+## Publish from Gitea
+
+`.gitea/workflows/publish-session.yml` does the whole publishing pass on a push to `main` or a `v*` tag, on
+the runner attached to the competition's docker host: `pack-contracts.sh`, the hidden suite against the
+reference (a red test stops everything), `make-competitor-start.sh` in both modes, `build-image.sh both`, a
+push of both images to Gitea's registry under `sha-<commit>` or the version tag, and a copy of both kits into
+the platform's `skill-suite-starter-packages` volume as `<repository>/competitor-start` and
+`<repository>-blackbox/competitor-start`. It prints the image references and template folders to register
+in the UI; starting a session stays a manual step. Publish the repository with the platform's
+`scripts/gitea-push.sh`, which also stores the registry token the workflow needs, and see the header of the
+workflow for the optional variables (`REGISTRY`, `JUDGING_FEED`, `BASE_IMAGE`, `STARTER_PACKAGE_NAME`).
+
+The judging packages and `judge-base` it restores and builds from come from the platform repository's
+`publish-judging` workflow, which puts them on the same Gitea under the platform's owner. Run that once
+before the first session publish, and set `JUDGING_FEED` / `BASE_IMAGE` on this repository if that owner
+differs from this one. A plain-http `JUDGING_FEED` works: the scripts mark the source insecure for NuGet.
+
 ## Run a submission without the platform
 
 ```bash

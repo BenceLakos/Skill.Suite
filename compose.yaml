@@ -38,6 +38,13 @@ services:
       # Where the session starter packages are mounted; the Starter packages admin page browses, uploads into
       # and downloads from this directory, and Session.TemplateFolder values point below it.
       StarterPackages__RootPath: /starter-packages
+      # The SQL Server as THIS PROCESS reaches it: the compose service on the shared skill-suite network, not
+      # the sql.<domain> name a competitor's laptop uses. The competitors page creates logins and databases
+      # here with the Microsoft SQL Server credential stored in the platform.
+      MsSql__Server: "mssql,1433"
+      # Domain the synthetic <username>@<domain> address of each Gitea user is built from. Gitea requires an
+      # address and never sends to it; a non-routable name keeps a misconfigured host from mailing a stranger.
+      CompetitorAccounts__GiteaEmailDomain: "competitors.local"
     volumes:
       # /var/run/docker.sock lets the app spawn judgement containers via the host daemon.
       # `workdir` is a docker-managed volume — the same volume is mounted by the daemon

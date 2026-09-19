@@ -54,6 +54,30 @@ public interface IGitHostClient
         BasicCredential credential,
         TimeSpan timeout,
         CancellationToken cancellationToken);
+
+    /// <summary>Creates the competitor's user account if it does not already exist.</summary>
+    /// <remarks>
+    /// An existing account's password is deliberately left alone: the competitor may already be working with
+    /// it, and re-running provisioning must not lock them out of their own repository.
+    /// </remarks>
+    Task<AccountProvisioning> EnsureUserAsync(
+        EnsureGitHostUserRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Lists every user account on the host, for bulk status evaluation.</summary>
+    Task<IReadOnlyCollection<string>> ListUsernamesAsync(
+        BasicCredential credential, CancellationToken cancellationToken);
+
+    /// <summary>Whether the user still owns any repository.</summary>
+    /// <remarks>
+    /// Removal refuses when they do. Deleting the user would take their repositories with them, and a
+    /// competitor's submission history is the evidence a marking dispute is settled from.
+    /// </remarks>
+    Task<bool> HasRepositoriesAsync(
+        string username, BasicCredential credential, CancellationToken cancellationToken);
+
+    /// <summary>Deletes the user account. Destructive and not recoverable.</summary>
+    Task<AccountRemoval> DeleteUserAsync(
+        string username, BasicCredential credential, CancellationToken cancellationToken);
 }
 
 /// <summary>Identifies a repository on the host.</summary>

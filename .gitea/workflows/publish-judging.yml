@@ -1,0 +1,200 @@
+name: publish-judging
+
+# Publishes the generic judging layer to the Gitea this repository lives on, so session modules on the same
+# Gitea can be built with no reach outside it: the four packages to Gitea's NuGet feed, and judge-base plus
+# judge-smoke to Gitea's container registry. It is the private mirror of .github/workflows/judging-release.yml,
+# which does the same towards nuget.org and GHCR - same artifacts, different destination, nothing
+# session-specific in either. Session images are never built here; each session repository has its own
+# publish-session workflow for that.
+#
+# Consumers, and the two hostnames they see:
+#   * a session's pack-contracts.sh and make-competitor-start.sh restore from the feed inside a job container,
+#     which is on the `skill-suite` docker network: http://gitea:3000/api/packages/<owner>/nuget/index.json.
+#     The feed is plain http, which .NET 9 refuses unless the source is marked allowInsecureConnections -
+#     the template scripts do that for an http JUDGING_FEED;
+#   * a session's build-image.sh pulls judge-base through the HOST daemon: localhost:3000/<owner>/skill-suite-judge-base:9.0.
+#
+# Secrets: REGISTRY_USERNAME / REGISTRY_TOKEN - a personal access token with `package` Read and Write and
+# its user (scripts/gitea-push.sh stores them). It authenticates both the NuGet push and the image push.
+# Variables, optional: NUGET_HOST (default gitea:3000, as reached from a job container), REGISTRY (default
+# localhost:3000, as reached by the host daemon).
+#
+# Versions are fixed at 1.0.0 in the csproj files and a feed never overwrites a version, so a re-run is a no-op
+# for the packages (--skip-duplicate). To publish a CHANGED 1.0.0 during development, run the workflow by
+# hand with `replace` ticked: the existing versions are deleted through the API first. Never do that once a
+# session has been calibrated against them.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'judging/**'
+      - '.gitea/workflows/publish-judging.yml'
+    tags: ['judging-v*']
+  workflow_dispatch:
+    inputs:
+      replace:
+        description: 'Delete the existing package versions from the feed before pushing'
+        type: boolean
+        default: false
+
+env:
+  NUGET_HOST: ${{ vars.NUGET_HOST || 'gitea:3000' }}
+  REGISTRY: ${{ vars.REGISTRY || 'localhost:3000' }}
+  JUDGE_BASE_TAG: '9.0'
+  JUDGE_SMOKE_TAG: '1'
+
+jobs:
+  packages:
+    name: pack and publish to the Gitea NuGet feed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # judging/global.json pins 9.0.x and resolves from the working directory, hence working-directory below.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build and test
+        working-directory: judging
+        run: |
+          dotnet build -c Release -warnaserror
+          dotnet test -c Release --no-build
+
+      - name: Pack
+        working-directory: judging
+        run: |
+          dotnet pack Skill.Suite.TestLog       -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.TestLog.Xunit -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.Marker        -c Release --no-build -o artifacts/nuget
+          dotnet pack Skill.Suite.StarterKit    -c Release --no-build -o artifacts/nuget
+
+      - name: Publish
+        working-directory: judging
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          REPLACE: ${{ inputs.replace }}
+        run: |
+          set -eu
+          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_TOKEN:-}" ]; then
+            echo "::error::secrets REGISTRY_USERNAME and REGISTRY_TOKEN are not set (a token with package Read and Write)."
+            exit 1
+          fi
+          owner="$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          feed="http://${NUGET_HOST}/api/packages/${owner}/nuget/index.json"
+
+          if [ "${REPLACE:-false}" = "true" ]; then
+            # <id>.<version>.nupkg, where the version is the trailing dotted numeric part.
+            for file in artifacts/nuget/*.nupkg; do
+              name="$(basename "${file}" .nupkg)"
+              version="$(printf '%s' "${name}" | sed -E 's/^.*\.([0-9]+\.[0-9]+\.[0-9]+[^.]*)$/\1/')"
+              id="${name%."${version}"}"
+              echo "deleting ${id} ${version} from the feed"
+              curl -sS -o /dev/null -w "  %{http_code}\n" -X DELETE -u "${REGISTRY_USERNAME}:${REGISTRY_TOKEN}" \
+                "http://${NUGET_HOST}/api/v1/packages/${owner}/nuget/${id}/${version}"
+            done
+          fi
+
+          # The feed is plain http, which NuGet refuses unless the source is marked allowInsecureConnections.
+          # Marked in a config file rather than with --allow-insecure-connections: that switch only exists in
+          # the newest 9.0 SDKs, the config attribute in every 8.0 and 9.0 one. --no-symbols: the .snupkg files
+          # beside the packages would otherwise go to a symbol server this feed does not have.
+          # --skip-duplicate makes a re-run of an unchanged layer a no-op.
+          dotnet --version
+          config="$(mktemp)"
+          cat >"${config}" <<NUGET
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="gitea" value="${feed}" allowInsecureConnections="true" />
+            </packageSources>
+          </configuration>
+          NUGET
+          dotnet nuget push 'artifacts/nuget/*.nupkg' \
+            --configfile "${config}" --source gitea --api-key "${REGISTRY_TOKEN}" \
+            --skip-duplicate --no-symbols
+          rm -f "${config}"
+
+          echo
+          echo "JUDGING_FEED for session repositories: ${feed}"
+
+  images:
+    name: build and publish the generic judge images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive image references
+        id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -eu
+          owner="$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          sha7="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+          {
+            echo "base=${REGISTRY}/${owner}/skill-suite-judge-base"
+            echo "smoke=${REGISTRY}/${owner}/skill-suite-judge-smoke"
+            echo "sha7=${sha7}"
+          } >> "${GITHUB_OUTPUT}"
+
+      # Same credential file as the platform workflow: the CLI sends it with each push, so the host daemon
+      # never has to log in - or resolve - anything itself.
+      - name: Write registry credentials
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_TOKEN:-}" ]; then
+            echo "::error::secrets REGISTRY_USERNAME and REGISTRY_TOKEN are not set (a token with package Read and Write)."
+            exit 1
+          fi
+          auth="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 -w0 2>/dev/null \
+                  || printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 | tr -d '\n')"
+          umask 077
+          mkdir -p "${HOME}/.docker"
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${REGISTRY}" "${auth}" > "${HOME}/.docker/config.json"
+          chmod 600 "${HOME}/.docker/config.json"
+
+      # Plain `docker build` through the host daemon, for the host's own architecture: that is the daemon
+      # which will later build session images FROM this base, so this is the architecture they need.
+      #
+      # Both a moving :9.0 for session Dockerfiles to FROM and an immutable :9.0-<sha> to pin - the same pair
+      # judging-release.yml publishes to GHCR. The shell layer of judge-base carries real logic that no xUnit
+      # test reaches, so its self-test gates the push.
+      - name: Build, self-test and push judge-base
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          SHA7: ${{ steps.meta.outputs.sha7 }}
+        run: |
+          set -eu
+          docker build -t "${BASE}:${JUDGE_BASE_TAG}" -t "${BASE}:${JUDGE_BASE_TAG}-${SHA7}" judging/docker/judge-base
+          docker run --rm --entrypoint /usr/local/bin/judge-selftest.sh "${BASE}:${JUDGE_BASE_TAG}"
+          docker push "${BASE}:${JUDGE_BASE_TAG}"
+          docker push "${BASE}:${JUDGE_BASE_TAG}-${SHA7}"
+
+      # Context is judging/, not the smoke folder: the image compiles against Skill.Suite.TestLog.
+      - name: Build and push judge-smoke
+        env:
+          SMOKE: ${{ steps.meta.outputs.smoke }}
+          SHA7: ${{ steps.meta.outputs.sha7 }}
+        run: |
+          set -eu
+          docker build -t "${SMOKE}:${JUDGE_SMOKE_TAG}" -t "${SMOKE}:${JUDGE_SMOKE_TAG}-${SHA7}" \
+            -f judging/docker/judge-smoke/Dockerfile judging
+          docker push "${SMOKE}:${JUDGE_SMOKE_TAG}"
+          docker push "${SMOKE}:${JUDGE_SMOKE_TAG}-${SHA7}"
+
+      - name: Summary
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          SMOKE: ${{ steps.meta.outputs.smoke }}
+          SHA7: ${{ steps.meta.outputs.sha7 }}
+        run: |
+          echo "BASE_IMAGE for session repositories: ${BASE}:${JUDGE_BASE_TAG}   (pinned: ${BASE}:${JUDGE_BASE_TAG}-${SHA7})"
+          echo "smoke image for platform wiring checks: ${SMOKE}:${JUDGE_SMOKE_TAG}"

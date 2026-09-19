@@ -34,24 +34,60 @@ discover_judging_root() {
 
 JUDGING_ROOT=${JUDGING_ROOT:-$(discover_judging_root || true)}
 
+# Writes a nuget.config naming the feed and nuget.org. NuGet on .NET 9 refuses a plain-http source (NU1302)
+# unless the source carries allowInsecureConnections, and there is no command-line switch for that - so a
+# feed served over http, which is what a Gitea on a venue LAN is, has to come through a config file rather
+# than --source. nuget.org stays in because the judging packages depend on xunit and friends, which only
+# live there; the probe restore resolves the whole graph even though only the four packages are kept.
+write_feed_config() {
+    local feed=$1 target=$2 insecure=""
+    [[ "${feed}" == http://* ]] && insecure=' allowInsecureConnections="true"'
+    cat >"${target}" <<NUGET
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="judging" value="${feed}"${insecure} />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+</configuration>
+NUGET
+}
+
 fetch_from_feed() {
-    local feed=$1 pkg
-    for pkg in "${PACKAGES[@]}"; do
-        echo "downloading ${pkg} from ${feed}"
-        # `nuget install` is not guaranteed present; a restore into a throwaway project is, and it resolves
-        # the same graph the image will.
-        local work
-        work=$(mktemp -d)
-        (
-            cd "${work}"
-            dotnet new classlib -o probe --framework net9.0 >/dev/null
-            cd probe
-            dotnet add package "${pkg}" --version 1.0.0 --source "${feed}" \
-                --package-directory "${work}/pkgs" >/dev/null
-        )
-        find "${work}/pkgs" -name "${pkg,,}.1.0.0.nupkg" -exec cp {} "${DIR}/local-nuget/" \; 2>/dev/null || true
+    local feed=$1 pkg work
+    work=$(mktemp -d)
+    write_feed_config "${feed}" "${work}/nuget.config"
+
+    # PackageDownload rather than `dotnet add package`: two of the four are dotnet tools, and a PackageReference
+    # to a tool package is refused outright (NU1212). PackageDownload fetches any package type without adding
+    # a reference, in one restore for all of them, and drops the .nupkg files into the package directory.
+    {
+        printf '<Project Sdk="Microsoft.NET.Sdk">\n'
+        printf '  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>\n'
+        printf '  <ItemGroup>\n'
+        for pkg in "${PACKAGES[@]}"; do
+            printf '    <PackageDownload Include="%s" Version="[1.0.0]" />\n' "${pkg}"
+        done
+        printf '  </ItemGroup>\n</Project>\n'
+    } >"${work}/probe.csproj"
+
+    echo "downloading ${PACKAGES[*]} from ${feed}"
+    # The CLI reports restore errors on stdout, so the output is kept and shown only on failure; a feed that
+    # is missing one package must stop here, not surface later as NU1101 inside the image.
+    if ! dotnet restore "${work}/probe.csproj" --packages "${work}/pkgs" >"${work}/restore.log" 2>&1; then
+        cat "${work}/restore.log" >&2
+        printf 'pack-contracts: could not download the judging packages from %s\n' "${feed}" >&2
         rm -rf "${work}"
+        exit 1
+    fi
+
+    for pkg in "${PACKAGES[@]}"; do
+        find "${work}/pkgs" -name "${pkg,,}.1.0.0.nupkg" -exec cp {} "${DIR}/local-nuget/" \;
+        [[ -f "${DIR}/local-nuget/${pkg,,}.1.0.0.nupkg" ]] \
+            || { printf 'pack-contracts: %s 1.0.0 was not downloaded from %s\n' "${pkg}" "${feed}" >&2; rm -rf "${work}"; exit 1; }
     done
+    rm -rf "${work}"
 }
 
 if [[ -n "${JUDGING_FEED:-}" ]]; then

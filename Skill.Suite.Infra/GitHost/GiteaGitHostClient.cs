@@ -56,6 +56,14 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     /// <summary>How long to wait for a freshly pushed repository to report content.</summary>
     private static readonly TimeSpan ContentPollInterval = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>Users per page when listing accounts.</summary>
+    private const int UserPageSize = 50;
+
+    /// <summary>
+    /// Hard stop on paging, so a host that keeps returning full pages cannot spin the status query forever.
+    /// </summary>
+    private const int MaxUserPages = 40;
+
     public async Task EnsureOrganizationAsync(
         EnsureOrganizationRequest request, CancellationToken cancellationToken)
     {
@@ -228,6 +236,93 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
 
             await Task.Delay(ContentPollInterval, cancellationToken);
         }
+    }
+
+    public async Task<AccountProvisioning> EnsureUserAsync(
+        EnsureGitHostUserRequest request, CancellationToken cancellationToken)
+    {
+        if (await ExistsAsync($"users/{Escape(request.Username)}", request.Credential, cancellationToken))
+        {
+            // The existing account's password is NOT reset. A competitor may already be pushing with it, and
+            // silently rotating a credential mid-competition costs them the time it takes to work out why.
+            logger.LogInformation("Gitea user {Username} already exists", request.Username);
+            return AccountProvisioning.AlreadyExisted;
+        }
+
+        var body = new Dictionary<string, object?>
+        {
+            ["username"] = request.Username,
+            // Required and required to be unique, though nothing is ever sent to it: a competition has no mail
+            // server, so this is an identifier wearing an address's shape.
+            ["email"] = request.Email,
+            ["password"] = request.Password,
+            // The password is handed to the competitor on paper. Forcing a change at first login turns the
+            // first five minutes of a competition into a support queue.
+            ["must_change_password"] = false,
+            ["send_notify"] = false,
+            ["visibility"] = "private",
+        };
+
+        await SendAsync(HttpMethod.Post, "admin/users", body, request.Credential,
+            $"create the user '{request.Username}'", cancellationToken);
+
+        logger.LogInformation("Created Gitea user {Username}", request.Username);
+        return AccountProvisioning.Created;
+    }
+
+    public async Task<IReadOnlyCollection<string>> ListUsernamesAsync(
+        BasicCredential credential, CancellationToken cancellationToken)
+    {
+        var usernames = new List<string>();
+
+        // Paged rather than one big limit: Gitea caps the page size server-side, so a large limit silently
+        // returns one page and every competitor past it is reported as having no account.
+        for (var page = 1; page <= MaxUserPages; page++)
+        {
+            var batch = await GetAsync<List<GiteaUser>>(
+                $"admin/users?limit={UserPageSize}&page={page}", credential, cancellationToken) ?? [];
+
+            usernames.AddRange(batch
+                .Select(u => u.Login)
+                .Where(login => !string.IsNullOrWhiteSpace(login))!);
+
+            if (batch.Count < UserPageSize)
+                return usernames;
+        }
+
+        logger.LogWarning(
+            "Stopped listing Gitea users after {Pages} pages; the status column may be incomplete",
+            MaxUserPages);
+
+        return usernames;
+    }
+
+    public async Task<bool> HasRepositoriesAsync(
+        string username, BasicCredential credential, CancellationToken cancellationToken)
+    {
+        var repositories = await GetAsync<List<GiteaRepository>>(
+            $"users/{Escape(username)}/repos?limit=1", credential, cancellationToken);
+
+        return repositories is { Count: > 0 };
+    }
+
+    public async Task<AccountRemoval> DeleteUserAsync(
+        string username, BasicCredential credential, CancellationToken cancellationToken)
+    {
+        if (!await ExistsAsync($"users/{Escape(username)}", credential, cancellationToken))
+        {
+            logger.LogInformation("Gitea user {Username} is already gone", username);
+            return AccountRemoval.AlreadyMissing;
+        }
+
+        // No ?purge=true. Purge deletes the user's repositories along with them, and a competitor's submission
+        // history is the evidence a marking dispute is settled from. The caller refuses to delete a user that
+        // still owns any, so there is nothing left to purge by the time this runs.
+        await SendAsync(HttpMethod.Delete, $"admin/users/{Escape(username)}", null, credential,
+            $"delete the user '{username}'", cancellationToken);
+
+        logger.LogInformation("Deleted Gitea user {Username}", username);
+        return AccountRemoval.Removed;
     }
 
     internal async Task<GiteaRepository?> GetRepositoryAsync(

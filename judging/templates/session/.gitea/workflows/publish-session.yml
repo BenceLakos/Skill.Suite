@@ -1,0 +1,227 @@
+name: publish-session
+
+# Publishes this session from the Gitea it lives on: calibrates the answer key, builds the white-box and
+# black-box judge images with the module's own build-image.sh, pushes them to Gitea's container registry
+# under an immutable tag, generates both competitor starter kits with make-competitor-start.sh and copies
+# them into the platform's starter-packages volume. Nothing is started - registering the images and the
+# sessions in the Skill Suite UI stays a deliberate step, because a session start provisions repositories.
+#
+# This is the private counterpart of the platform's own workflow: a session image carries the hidden suite
+# (white-box) or the reference implementation as source (black-box), so it is built here, on the runner
+# attached to the competition's docker host, and pushed only to that host's registry.
+#
+# Runner prerequisites - the platform's infra/compose.yaml provides them: a runner labelled `ubuntu-latest`
+# whose job containers get the HOST docker socket (both the image builds and the volume copy go through it),
+# and outbound network on first run for actions/checkout and the .NET SDK download.
+#
+# Secrets (scripts/gitea-push.sh of the platform repository stores these on every repository it publishes):
+#   REGISTRY_USERNAME / REGISTRY_TOKEN   REQUIRED. A personal access token with `package` Read and Write and
+#                                        its user. The automatic per-job token cannot push packages.
+#
+# Variables, all optional:
+#   REGISTRY                 registry the HOST daemon builds for and pushes to; defaults to `localhost:3000`,
+#                            the port the platform stack publishes Gitea on. localhost is implicitly insecure
+#                            for docker, and it is also the reference the platform itself pulls, so register
+#                            the printed references in the UI verbatim.
+#   JUDGING_FEED             NuGet source for the Skill.Suite.* judging packages, which a module in its own
+#                            repository cannot build from source. Defaults to this owner's Gitea feed,
+#                            http://gitea:3000/api/packages/<owner>/nuget/index.json, filled by the platform
+#                            repository's publish-judging workflow; set it when the platform lives under a
+#                            different owner. Plain http is fine: the scripts mark the source insecure.
+#   BASE_IMAGE               judge-base image to build FROM. Defaults to this owner's copy in Gitea's registry,
+#                            localhost:3000/<owner>/skill-suite-judge-base:9.0, also published by
+#                            publish-judging; the ghcr.io image works too where the host reaches it.
+#   STARTER_PACKAGE_NAME     package name in the starter-packages volume; defaults to the repository name in
+#                            lower case. The black-box kit is uploaded as `<name>-blackbox`.
+#   STARTER_VOLUME           docker volume the platform mounts at /starter-packages,
+#                            default `skill-suite-starter-packages`.
+#   UPLOAD_STARTER_PACKAGES  set to `false` to publish images only.
+#   HELPER_IMAGE             image for the volume copy, default `alpine:3`; any image with sh and tar.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  REGISTRY: ${{ vars.REGISTRY || 'localhost:3000' }}
+  STARTER_VOLUME: ${{ vars.STARTER_VOLUME || 'skill-suite-starter-packages' }}
+  HELPER_IMAGE: ${{ vars.HELPER_IMAGE || 'alpine:3' }}
+
+jobs:
+  publish:
+    name: calibrate, build, push, upload
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The judging subtree is net9.0: competitors work on .NET 9 and the judge images are sdk:9.0.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # POSIX shell only: the runner image decides whether `run:` is bash or sh. Everything later steps need
+      # is derived here once, so the image names the push step pushes are the ones build-image.sh built.
+      - name: Derive names and tag
+        id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+          PACKAGE_OVERRIDE: ${{ vars.STARTER_PACKAGE_NAME }}
+          JUDGING_FEED_OVERRIDE: ${{ vars.JUDGING_FEED }}
+          BASE_IMAGE_OVERRIDE: ${{ vars.BASE_IMAGE }}
+          NUGET_HOST: ${{ vars.NUGET_HOST || 'gitea:3000' }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -eu
+
+          owner="$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          # The generic layer published by the platform repository's publish-judging workflow, under the same
+          # owner unless told otherwise. Two hostnames on purpose: the feed is read from inside this job
+          # container (docker network name), the base image is pulled by the host daemon (published port).
+          judging_feed="${JUDGING_FEED_OVERRIDE:-http://${NUGET_HOST}/api/packages/${owner}/nuget/index.json}"
+          base_image="${BASE_IMAGE_OVERRIDE:-${REGISTRY}/${owner}/skill-suite-judge-base:9.0}"
+          package="${PACKAGE_OVERRIDE:-}"
+          if [ -z "${package}" ]; then
+            package="$(printf '%s' "${REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
+          fi
+          # The same rule the platform's Starter packages page and scripts/starter-packages.sh enforce.
+          case "${package}" in
+            [A-Za-z0-9]*) ;;
+            *) echo "::error::'${package}' is not a usable package name (set STARTER_PACKAGE_NAME)"; exit 1 ;;
+          esac
+          if printf '%s' "${package}" | grep -q '[^A-Za-z0-9._-]'; then
+            echo "::error::'${package}' is not a usable package name (letters, digits, '.', '-', '_')"; exit 1
+          fi
+
+          # Immutable, always: the platform runs `docker run` with no --pull, so a re-pushed tag would leave
+          # it judging with whatever stale image the host already has.
+          sha7="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+          case "${EVENT_NAME}:${REF}" in
+            push:refs/tags/v*) tag="${REF#refs/tags/v}" ;;
+            push:refs/heads/main) tag="sha-${sha7}" ;;
+            *) tag="dev-${sha7}" ;;
+          esac
+
+          {
+            echo "owner=${owner}"
+            echo "package=${package}"
+            echo "tag=${tag}"
+            echo "judging_feed=${judging_feed}"
+            echo "base_image=${base_image}"
+            echo "whitebox_image=${REGISTRY}/${owner}/${package}-judge:${tag}"
+            echo "blackbox_image=${REGISTRY}/${owner}/${package}-blackbox-judge:${tag}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "package ${package}, tag ${tag}"
+          echo "judging feed ${judging_feed}"
+          echo "base image ${base_image}"
+
+      # The template cannot ship the execute bit (a post-action would make dotnet new prompt for
+      # --allow-scripts), and git may or may not have kept it.
+      - name: Pack the offline feed
+        env:
+          JUDGING_FEED: ${{ steps.meta.outputs.judging_feed }}
+        run: |
+          set -eu
+          chmod +x pack-contracts.sh build-image.sh make-competitor-start.sh docker-entrypoint.sh
+          ./pack-contracts.sh
+
+      # Calibration gate: a hidden suite that is not fully green against the reference marks every
+      # competitor down for the author's bug, so nothing is published past a red test.
+      - name: Hidden suite against the reference
+        run: dotnet test SkillSuite.Session.sln -c Release
+
+      # Both modes write the same competitor-start/ directory, so each kit is moved aside before the next is
+      # generated. The scripts compile what they produce, so a kit that does not build stops the job here.
+      - name: Generate the competitor starter kits
+        env:
+          JUDGING_FEED: ${{ steps.meta.outputs.judging_feed }}
+        run: |
+          set -eu
+          rm -rf kits && mkdir -p kits/whitebox kits/blackbox
+          ./make-competitor-start.sh
+          mv competitor-start kits/whitebox/competitor-start
+          ./make-competitor-start.sh blackbox
+          mv competitor-start kits/blackbox/competitor-start
+
+      # Written by hand rather than with `docker login`: the login action hands the exchange to the host
+      # daemon, which would then need to resolve and trust the registry itself. The CLI reads this file and
+      # sends the credential along with each push, and the daemon never authenticates on its own.
+      - name: Write registry credentials
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_TOKEN:-}" ]; then
+            echo "::error::secrets REGISTRY_USERNAME and REGISTRY_TOKEN are not set. Create a personal access token" \
+                 "(Settings -> Applications, permission package: Read and Write) and add both as Actions secrets," \
+                 "or publish this repository with the platform's scripts/gitea-push.sh, which stores them."
+            exit 1
+          fi
+          auth="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 -w0 2>/dev/null \
+                  || printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 | tr -d '\n')"
+          umask 077
+          mkdir -p "${HOME}/.docker"
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${REGISTRY}" "${auth}" > "${HOME}/.docker/config.json"
+          chmod 600 "${HOME}/.docker/config.json"
+
+      # build-image.sh is the one way a session image gets built - here, on an author's machine, in the
+      # platform's CI - so nothing session-specific is passed: the solution, the swapped folder and the test
+      # project are ENV in the Dockerfiles. It also re-checks the answer-key firewall on the final white-box
+      # image. The daemon behind the socket does the build, so the image lands on the competition host.
+      - name: Build both judge images
+        env:
+          REGISTRY_PREFIX: ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}
+          IMAGE_NAME: ${{ steps.meta.outputs.package }}-judge
+          BLACKBOX_IMAGE_NAME: ${{ steps.meta.outputs.package }}-blackbox-judge
+          TAG: ${{ steps.meta.outputs.tag }}
+          BASE_IMAGE: ${{ steps.meta.outputs.base_image }}
+        run: |
+          set -eu
+          REGISTRY="${REGISTRY_PREFIX}" ./build-image.sh both
+
+      - name: Push
+        env:
+          WHITEBOX_IMAGE: ${{ steps.meta.outputs.whitebox_image }}
+          BLACKBOX_IMAGE: ${{ steps.meta.outputs.blackbox_image }}
+        run: |
+          set -eu
+          docker push "${WHITEBOX_IMAGE}"
+          docker push "${BLACKBOX_IMAGE}"
+
+      # The volume has no host path, and this job's checkout is not on the host either, so the kit travels as
+      # a tar stream through a throwaway container that mounts the volume - the same route as
+      # scripts/starter-packages.sh, and the same layout: <name>/competitor-start, the TemplateFolder a
+      # session points at. Replace rather than merge, so a file removed from the kit does not linger.
+      - name: Upload the starter kits to the volume
+        if: vars.UPLOAD_STARTER_PACKAGES != 'false'
+        env:
+          PACKAGE: ${{ steps.meta.outputs.package }}
+        run: |
+          set -eu
+          upload() {
+            kind=$1; name=$2
+            tar -C "kits/${kind}" -cf - competitor-start \
+              | docker run --rm -i -v "${STARTER_VOLUME}:/sp" "${HELPER_IMAGE}" \
+                  sh -c "rm -rf '/sp/${name}' && mkdir -p '/sp/${name}' && tar -C '/sp/${name}' -xf -"
+            echo "uploaded ${kind} kit as ${name}  ->  /starter-packages/${name}/competitor-start"
+          }
+          upload whitebox "${PACKAGE}"
+          upload blackbox "${PACKAGE}-blackbox"
+
+      - name: Summary
+        env:
+          WHITEBOX_IMAGE: ${{ steps.meta.outputs.whitebox_image }}
+          BLACKBOX_IMAGE: ${{ steps.meta.outputs.blackbox_image }}
+          PACKAGE: ${{ steps.meta.outputs.package }}
+        run: |
+          set -eu
+          echo "Register in the Skill Suite UI (Docker images -> Pull, then Sessions):"
+          echo "  white-box  image ${WHITEBOX_IMAGE}"
+          echo "             template folder /starter-packages/${PACKAGE}/competitor-start"
+          echo "  black-box  image ${BLACKBOX_IMAGE}"
+          echo "             template folder /starter-packages/${PACKAGE}-blackbox/competitor-start"

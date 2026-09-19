@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Application.Common;
+using Skill.Suite.Application.Competitors.Accounts;
 using Skill.Suite.Application.StarterPackages;
 using Skill.Suite.Application.Webhooks;
 using Skill.Suite.Infra.BackgroundTasks;
@@ -14,6 +15,7 @@ using Skill.Suite.Infra.GitHost;
 using Skill.Suite.Infra.Identity;
 using Skill.Suite.Infra.Persistence;
 using Skill.Suite.Infra.Security;
+using Skill.Suite.Infra.Sql;
 using Skill.Suite.Infra.StarterPackages;
 
 namespace Skill.Suite.Infra;
@@ -92,11 +94,15 @@ public static class DependencyInjection
 
         services.Configure<WebhookOptions>(configuration.GetSection(WebhookOptions.SectionName));
         services.Configure<StarterPackagesOptions>(configuration.GetSection(StarterPackagesOptions.SectionName));
+        services.Configure<CompetitorAccountsOptions>(
+            configuration.GetSection(CompetitorAccountsOptions.SectionName));
+        services.Configure<MsSqlOptions>(configuration.GetSection(MsSqlOptions.SectionName));
         services.AddSingleton<IBackgroundTaskQueue, ChannelBackgroundTaskQueue>();
         services.AddSingleton<IActiveTestRunRegistry, ActiveTestRunRegistry>();
         services.AddSingleton<IStarterPackageStore, FileSystemStarterPackageStore>();
         services.AddScoped<IGitClient, ProcessGitClient>();
         services.AddScoped<IContainerRunner, ProcessContainerRunner>();
+        services.AddScoped<IMsSqlAdminClient, SqlServerAdminClient>();
 
         // BaseAddress carries the trailing /api/v1/ so the client's relative paths stay readable. It must end
         // in a slash: without one, Uri resolution discards the last segment and every call 404s.

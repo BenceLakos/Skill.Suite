@@ -57,8 +57,24 @@ if [[ -n "${JUDGING_ROOT}" ]]; then
 elif [[ -n "${JUDGING_FEED:-}" ]]; then
     TOOLS="${DIR}/.tools"
     if [[ ! -x "${TOOLS}/skill-starter" ]]; then
-        dotnet tool install --tool-path "${TOOLS}" --add-source "${JUDGING_FEED}" \
+        # Through a config file rather than --add-source: a plain-http feed (a Gitea on the venue LAN) needs
+        # allowInsecureConnections on the source, or NuGet on .NET 9 refuses it with NU1302.
+        FEED_CONFIG=$(mktemp)
+        INSECURE=""
+        [[ "${JUDGING_FEED}" == http://* ]] && INSECURE=' allowInsecureConnections="true"'
+        cat >"${FEED_CONFIG}" <<NUGET
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="judging" value="${JUDGING_FEED}"${INSECURE} />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+</configuration>
+NUGET
+        dotnet tool install --tool-path "${TOOLS}" --configfile "${FEED_CONFIG}" \
             Skill.Suite.StarterKit --version 1.0.0 >/dev/null
+        rm -f "${FEED_CONFIG}"
     fi
     "${TOOLS}/skill-starter" "${SOURCE}" "${OUTPUT}" --kind "${KIND}"
 else

@@ -33,6 +33,16 @@ services:
       # Wrong here is silent: repositories get provisioned, hooks get installed, and no push ever arrives.
       Webhook__PublicWebhookUrl: "${SKILLSUITE_WEBHOOK_URL:-http://skill-suite:8080/webhooks/git}"
 
+      # The SQL Server as THIS PROCESS reaches it, over the container network. The competitors page creates a
+      # login and a database per competitor here, as the Microsoft SQL Server credential stored in the
+      # platform. Wrong here is not silent - provisioning reports the connection failure on the row.
+      MsSql__Server: "${SKILLSUITE_MSSQL_SERVER:-mssql,1433}"
+
+      # Domain the synthetic <username>@<domain> address of each Gitea user is built from. Gitea requires a
+      # unique address per user and nothing is ever sent to it, so this must stay a domain no real mail server
+      # will accept delivery for.
+      CompetitorAccounts__GiteaEmailDomain: "${SKILLSUITE_COMPETITOR_EMAIL_DOMAIN:-competitors.local}"
+
       # Judge container caps. Uncapped by default in the application, which lets one competitor allocating in a
       # loop take the host down along with every run on it. Size these for the competition machine; a black-box
       # session needs headroom because Stryker re-runs the whole suite once per mutant.

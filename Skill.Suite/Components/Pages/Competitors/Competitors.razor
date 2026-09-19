@@ -6,8 +6,12 @@
 @inject ITranslator T
 
 @using Skill.Suite.Application.Competitors
+@using Skill.Suite.Application.Competitors.Accounts
 @using Skill.Suite.Application.Competitors.DeleteCompetitor
+@using Skill.Suite.Application.Competitors.GetCompetitorAccountStatuses
 @using Skill.Suite.Application.Competitors.ListCompetitors
+@using Skill.Suite.Application.Competitors.ProvisionCompetitorAccounts
+@using Skill.Suite.Application.Competitors.RemoveCompetitorAccounts
 
 <PageTitle>@T["competitors.title"]</PageTitle>
 
@@ -37,14 +41,55 @@
                           Variant="Variant.Outlined"
                           Margin="Margin.Dense"
                           Class="mt-0" Style="max-width:320px;"/>
+            <MudSpacer/>
+            <MudTooltip Text="@T["competitors.account.refresh"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                               Disabled="@_statusLoading"
+                               OnClick="LoadStatuses"/>
+            </MudTooltip>
         </ToolBarContent>
         <Columns>
             <PropertyColumn Property="x => x.Username" Title="@T["competitors.field.username"]"/>
             <PropertyColumn Property="x => x.FullName" Title="@T["competitors.field.fullName"]"/>
             <PropertyColumn Property="x => x.IpAddress" Title="@T["competitors.field.ipAddress"]"/>
             <PropertyColumn Property="x => x.CountryCode" Title="@T["competitors.field.countryCode"]"/>
+            <TemplateColumn Title="@T["competitors.field.accounts"]" Sortable="false">
+                <CellTemplate>
+                    @if (_statusLoading)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true"/>
+                    }
+                    else
+                    {
+                        var status = StatusFor(context.Item.Id);
+                        var gitea = status?.Gitea ?? ExternalAccountStatus.Unknown;
+                        var msSql = status?.MsSql ?? ExternalAccountStatus.Unknown;
+
+                        <MudTooltip Text="@StatusTooltip(T["competitors.account.gitea"], gitea, status?.GiteaDetail)">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@StatusColor(gitea)" Icon="@StatusIcon(gitea)">
+                                @T["competitors.account.gitea"]
+                            </MudChip>
+                        </MudTooltip>
+                        <MudTooltip Text="@StatusTooltip(T["competitors.account.mssql"], msSql, status?.MsSqlDetail)">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="@StatusColor(msSql)" Icon="@StatusIcon(msSql)">
+                                @T["competitors.account.mssql"]
+                            </MudChip>
+                        </MudTooltip>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
             <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
                 <CellTemplate>
+                    <MudTooltip Text="@T["competitors.account.provision"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" Color="Color.Primary"
+                                       Disabled="@IsBusy(context.Item.Id)" OnClick="@(() => Provision(context.Item))"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@T["competitors.account.remove"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.CloudOff" Size="Size.Small" Color="Color.Warning"
+                                       Disabled="@IsBusy(context.Item.Id)" OnClick="@(() => Remove(context.Item))"/>
+                    </MudTooltip>
                     <MudTooltip Text="@T["common.edit"]">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context.Item))"/>
                     </MudTooltip>
@@ -64,10 +109,23 @@
 
 @code {
     private List<CompetitorDto> _items = [];
+    private Dictionary<Guid, CompetitorAccountStatusDto> _statuses = [];
+    private readonly HashSet<Guid> _busy = [];
     private bool _loading;
+    private bool _statusLoading = true;
     private string? _search;
 
     protected override async Task OnInitializedAsync() => await Load();
+
+    /// <remarks>
+    /// The status query talks to Gitea and SQL Server, so it runs only after the grid has rendered:
+    /// an unreachable external system must not keep the competitor list off the screen.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await LoadStatuses();
+    }
 
     private async Task Load()
     {
@@ -75,6 +133,24 @@
         var result = await Mediator.Send(new ListCompetitorsQuery(null));
         _items = result.IsSuccess ? result.Value : [];
         _loading = false;
+    }
+
+    private async Task LoadStatuses()
+    {
+        _statusLoading = true;
+        StateHasChanged();
+
+        var result = await Mediator.Send(new GetCompetitorAccountStatusesQuery());
+        _statuses = result.IsSuccess ? result.Value.ToDictionary(s => s.CompetitorId) : [];
+
+        _statusLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task Reload()
+    {
+        await Load();
+        await LoadStatuses();
     }
 
     private Func<CompetitorDto, bool> QuickFilter => x =>
@@ -88,7 +164,7 @@
     {
         var dialog = await Dialogs.ShowAsync<CompetitorFormDialog>(T["competitors.create"]);
         var result = await dialog.Result;
-        if (result is { Canceled: false }) await Load();
+        if (result is { Canceled: false }) await Reload();
     }
 
     private async Task OpenEdit(CompetitorDto item)
@@ -96,7 +172,7 @@
         var parameters = new DialogParameters { ["Id"] = item.Id };
         var dialog = await Dialogs.ShowAsync<CompetitorFormDialog>(T["competitors.edit"], parameters);
         var result = await dialog.Result;
-        if (result is { Canceled: false }) await Load();
+        if (result is { Canceled: false }) await Reload();
     }
 
     private async Task Delete(CompetitorDto item)
@@ -114,11 +190,135 @@
         if (result.IsSuccess)
         {
             Snackbar.Add(T["common.success.deleted"], Severity.Success);
-            await Load();
+            await Reload();
         }
         else
         {
             Snackbar.Add(result.Error.Message, Severity.Error);
         }
+    }
+
+    /// <remarks>
+    /// No confirmation: provisioning is additive and idempotent, and it never resets an existing password.
+    /// </remarks>
+    private async Task Provision(CompetitorDto item)
+    {
+        _busy.Add(item.Id);
+        try
+        {
+            var result = await Mediator.Send(new ProvisionCompetitorAccountsCommand(item.Id));
+            if (result.IsFailure)
+            {
+                Snackbar.Add(result.Error.Message, Severity.Error);
+            }
+            else
+            {
+                Report(T["competitors.account.gitea"], result.Value.Gitea);
+                Report(T["competitors.account.mssql"], result.Value.MsSql);
+            }
+        }
+        catch (Exception ex)
+        {
+            // The handler talks to two external systems; an unhandled exception here would tear down the
+            // Blazor circuit and leave the operator with a dead page instead of a message.
+            Snackbar.Add(T.Format("competitors.account.failed", ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _busy.Remove(item.Id);
+        }
+
+        await LoadStatuses();
+    }
+
+    private async Task Remove(CompetitorDto item)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["competitors.account.removeConfirmTitle"],
+            Message = T.Format("competitors.account.removeConfirm", item.Username),
+            YesText = T["common.confirm"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        _busy.Add(item.Id);
+        try
+        {
+            var result = await Mediator.Send(new RemoveCompetitorAccountsCommand(item.Id));
+            if (result.IsFailure)
+            {
+                Snackbar.Add(result.Error.Message, Severity.Error);
+            }
+            else
+            {
+                Report(T["competitors.account.gitea"], result.Value.Gitea);
+                Report(T["competitors.account.mssql"], result.Value.MsSql);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(T.Format("competitors.account.failed", ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _busy.Remove(item.Id);
+        }
+
+        await LoadStatuses();
+    }
+
+    /// <summary>Raises one snackbar per external system, so a half-succeeded action reads as such.</summary>
+    private void Report(string system, AccountActionResult result)
+    {
+        var (label, severity) = result.Outcome switch
+        {
+            AccountActionOutcome.Created => (T["competitors.account.provisioned"], Severity.Success),
+            AccountActionOutcome.Removed => (T["competitors.account.removed"], Severity.Success),
+            AccountActionOutcome.AlreadyExists => (T["competitors.account.alreadyExists"], Severity.Info),
+            AccountActionOutcome.AlreadyMissing => (T["competitors.account.alreadyMissing"], Severity.Info),
+            AccountActionOutcome.Skipped => (T.Format("competitors.account.skipped", Detail(result)), Severity.Warning),
+            AccountActionOutcome.Failed => (T.Format("competitors.account.failed", Detail(result)), Severity.Error),
+            _ => (T["common.error"], Severity.Error),
+        };
+
+        Snackbar.Add(T.Format("competitors.account.summary", system, label), severity);
+    }
+
+    private CompetitorAccountStatusDto? StatusFor(Guid competitorId) => _statuses.GetValueOrDefault(competitorId);
+
+    private bool IsBusy(Guid competitorId) => _busy.Contains(competitorId);
+
+    private static string Detail(AccountActionResult result) => result.Detail?.Trim() ?? string.Empty;
+
+    private static Color StatusColor(ExternalAccountStatus status) => status switch
+    {
+        ExternalAccountStatus.Exists => Color.Success,
+        ExternalAccountStatus.Missing => Color.Default,
+        _ => Color.Warning,
+    };
+
+    private static string StatusIcon(ExternalAccountStatus status) => status switch
+    {
+        ExternalAccountStatus.Exists => Icons.Material.Filled.CheckCircle,
+        ExternalAccountStatus.Missing => Icons.Material.Filled.RemoveCircleOutline,
+        _ => Icons.Material.Filled.HelpOutline,
+    };
+
+    private string StatusLabel(ExternalAccountStatus status, string? detail) => status switch
+    {
+        ExternalAccountStatus.Exists => T["competitors.account.status.exists"],
+        ExternalAccountStatus.Missing => T["competitors.account.status.missing"],
+        _ => T.Format("competitors.account.status.unknown", detail?.Trim() ?? string.Empty),
+    };
+
+    private string StatusTooltip(string system, ExternalAccountStatus status, string? detail)
+    {
+        var label = StatusLabel(status, detail);
+
+        // The Unknown label already carries the reason; anything else appends the detail when there is one.
+        return status != ExternalAccountStatus.Unknown && !string.IsNullOrWhiteSpace(detail)
+            ? T.Format("competitors.account.summaryDetail", system, label, detail.Trim())
+            : T.Format("competitors.account.summary", system, label);
     }
 }
