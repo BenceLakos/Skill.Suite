@@ -104,19 +104,30 @@ public static class DependencyInjection
         services.AddScoped<IContainerRunner, ProcessContainerRunner>();
         services.AddScoped<IMsSqlAdminClient, SqlServerAdminClient>();
 
-        // BaseAddress carries the trailing /api/v1/ so the client's relative paths stay readable. It must end
-        // in a slash: without one, Uri resolution discards the last segment and every call 404s.
-        services.AddHttpClient<IGitHostClient, GiteaGitHostClient>(client =>
-        {
-            var baseUrl = configuration.GetSection(WebhookOptions.SectionName)
-                              .GetValue<string>(nameof(WebhookOptions.GitInternalBaseUrl))
-                          ?? "http://gitea:3000";
-
-            client.BaseAddress = new Uri($"{baseUrl.TrimEnd('/')}/api/v1/");
-            client.Timeout = TimeSpan.FromSeconds(60);
-        });
+        services.AddHttpClient<IGitHostClient, GiteaGitHostClient>(
+            client => ConfigureGiteaApi(client, configuration));
+        services.AddHttpClient<IContainerRegistryClient, GiteaContainerRegistryClient>(
+            client => ConfigureGiteaApi(client, configuration));
         services.AddHostedService<TestRunWorker>();
 
         return services;
+    }
+
+    /// <summary>The git host as this process reaches it, when configuration does not say.</summary>
+    private const string DefaultGitInternalBaseUrl = "http://gitea:3000";
+
+    /// <summary>Per-request budget for one Gitea API call.</summary>
+    private const int GitHostApiTimeoutSeconds = 60;
+
+    private static void ConfigureGiteaApi(HttpClient client, IConfiguration configuration)
+    {
+        var baseUrl = configuration.GetSection(WebhookOptions.SectionName)
+                          .GetValue<string>(nameof(WebhookOptions.GitInternalBaseUrl))
+                      ?? DefaultGitInternalBaseUrl;
+
+        // BaseAddress carries the trailing /api/v1/ so the clients' relative paths stay readable. It must end
+        // in a slash: without one, Uri resolution discards the last segment and every call 404s.
+        client.BaseAddress = new Uri($"{baseUrl.TrimEnd('/')}/api/v1/");
+        client.Timeout = TimeSpan.FromSeconds(GitHostApiTimeoutSeconds);
     }
 }

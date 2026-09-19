@@ -3,14 +3,16 @@
 
 <MudPaper Outlined="true" Class="pa-3">
     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="mb-2">
-        <MudSelect T="string" @bind-Value="Image.Image"
-                   Variant="Variant.Outlined"
-                   Label="@T["sessions.dockerImage.image"]" Style="flex:1;">
-            @foreach (var img in AvailableImages)
-            {
-                <MudSelectItem Value="@img">@img</MudSelectItem>
-            }
-        </MudSelect>
+        @*
+            Free text with suggestions, not a picker: an image the registry listing did not reach must still
+            be typable, and a value saved earlier must survive being edited on a day the registry is down.
+        *@
+        <MudAutocomplete T="string" @bind-Value="Image.Image"
+                         Variant="Variant.Outlined" MaxLength="500"
+                         Label="@T["sessions.dockerImage.image"]" Style="flex:1;"
+                         SearchFunc="SearchImages"
+                         CoerceText="true" CoerceValue="true"
+                         ResetValueOnEmptyText="false"/>
         <MudTooltip Text="@T["common.delete"]">
             <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small" OnClick="OnRemove"/>
         </MudTooltip>
@@ -36,4 +38,9 @@
     [Parameter, EditorRequired] public DockerImageDraft Image { get; set; } = null!;
     [Parameter, EditorRequired] public List<string> AvailableImages { get; set; } = [];
     [Parameter, EditorRequired] public EventCallback OnRemove { get; set; }
+
+    private Task<IEnumerable<string>> SearchImages(string? value, CancellationToken cancellationToken) =>
+        Task.FromResult(string.IsNullOrWhiteSpace(value)
+            ? AvailableImages.AsEnumerable()
+            : AvailableImages.Where(image => image.Contains(value, StringComparison.OrdinalIgnoreCase)));
 }

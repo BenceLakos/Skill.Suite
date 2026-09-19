@@ -17,4 +17,8 @@ public static class DockerImageErrors
     public static readonly Error PushNotAllowedForPulledImage =
         Error.Validation("DockerImage.PushNotAllowedForPulledImage",
             "Pulled images come from an external registry and cannot be pushed from here.");
+
+    public static Error RegistryUnavailable(string detail) =>
+        Error.Failure("DockerImage.RegistryUnavailable",
+            $"The container registry could not be listed. {detail}");
 }

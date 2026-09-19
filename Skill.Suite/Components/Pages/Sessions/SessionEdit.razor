@@ -9,7 +9,7 @@
 @using System.Text.RegularExpressions
 @using Skill.Suite.Application.Credentials
 @using Skill.Suite.Application.Credentials.ListCredentials
-@using Skill.Suite.Application.DockerImages.ListDockerImageOptions
+@using Skill.Suite.Application.DockerImages.ListSessionImageOptions
 @using Skill.Suite.Application.Sessions.CreateSession
 @using Skill.Suite.Application.Sessions.GetSession
 @using Skill.Suite.Application.Sessions.UpdateSession
@@ -107,15 +107,21 @@ else
                                          ResetValueOnEmptyText="false"
                                          Clearable="true"/>
                     </LabeledField>
-                    <LabeledField Label="@T["sessions.field.judgementImage"]">
-                        <MudSelect T="string" @bind-Value="_model.JudgementImage"
-                                   Variant="Variant.Outlined" Clearable="true">
-                            @foreach (var img in _availableImages)
-                            {
-                                <MudSelectItem Value="@img">@img</MudSelectItem>
-                            }
-                        </MudSelect>
+                    @*
+                        Same shape as the template folder above, and for the same reason: the registry
+                        listing is a suggestion, not the set of legal answers. A judge image can live on a
+                        registry this application has no credential for, and a session saved before an image
+                        was renamed must still show what it actually points at.
+                    *@
+                    <LabeledField Label="@T["sessions.field.judgementImage"]" Help="@T["sessions.help.judgementImage"]">
+                        <MudAutocomplete T="string" @bind-Value="_model.JudgementImage"
+                                         Variant="Variant.Outlined" MaxLength="500"
+                                         SearchFunc="SearchImages"
+                                         CoerceText="true" CoerceValue="true"
+                                         ResetValueOnEmptyText="false"
+                                         Clearable="true"/>
                     </LabeledField>
+                    @RegistryWarning()
 
                     <LabeledField Label="@T["sessions.field.gitCredential"]"
                                   Help="@T["sessions.help.gitCredential"]">
@@ -166,6 +172,8 @@ else
                         @T["sessions.dockerImages.add"]
                     </MudButton>
                 </MudStack>
+
+                @RegistryWarning()
 
                 @if (_model.DockerImages.Count == 0)
                 {
@@ -222,11 +230,16 @@ else
     private bool _loading = true;
     private bool _submitting;
     private string? _error;
+    private string? _registryWarning;
 
     protected override async Task OnInitializedAsync()
     {
-        var imageOptions = await Mediator.Send(new ListDockerImageOptionsQuery());
-        _availableImages = imageOptions.IsSuccess ? imageOptions.Value : [];
+        var imageOptions = await Mediator.Send(new ListSessionImageOptionsQuery());
+        if (imageOptions.IsSuccess)
+        {
+            _availableImages = [.. imageOptions.Value.Images];
+            _registryWarning = imageOptions.Value.RegistryWarning;
+        }
 
         // Packages without a competitor-start folder are still offered, last: the folder may simply not have
         // been uploaded yet, and a session cannot be started until it is there anyway.
@@ -270,6 +283,23 @@ else
 
         _loading = false;
     }
+
+    // Shown above both image pickers rather than once at the top of the form: the operator only needs to know
+    // the list is short when they are looking at the list.
+    private RenderFragment? RegistryWarning()
+    {
+        if (string.IsNullOrWhiteSpace(_registryWarning))
+            return null;
+
+        return @<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                   @T.Format("sessions.images.registryUnavailable", _registryWarning)
+               </MudAlert>;
+    }
+
+    private Task<IEnumerable<string>> SearchImages(string? value, CancellationToken cancellationToken) =>
+        Task.FromResult(string.IsNullOrWhiteSpace(value)
+            ? _availableImages.AsEnumerable()
+            : _availableImages.Where(image => image.Contains(value, StringComparison.OrdinalIgnoreCase)));
 
     private Task<IEnumerable<string>> SearchTemplateFolders(string? value, CancellationToken cancellationToken) =>
         Task.FromResult(string.IsNullOrWhiteSpace(value)

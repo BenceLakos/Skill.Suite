@@ -96,6 +96,8 @@
   "sessions.field.judgementImage": "Judgement docker image",
   "sessions.field.gitCredential": "Git access credential",
   "sessions.field.judgementImagePullCredential": "Judgement image pull credential",
+  "sessions.help.judgementImage": "Registered docker images plus every container package found in the Gitea registry. Type to filter, or enter any reference the judge host can pull.",
+  "sessions.images.registryUnavailable": "Registry images are not listed, so only registered images are offered. {0}",
   "sessions.help.gitCredential": "Used to `git clone` competitor submissions when a webhook arrives.",
   "sessions.help.judgementImagePullCredential": "Used to `docker login` before pulling the judgement image from a private registry.",
   "sessions.field.databaseName": "Database name",

@@ -1,8 +1,4 @@
-using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Skill.Suite.Application.Abstractions;
 
@@ -33,25 +29,7 @@ namespace Skill.Suite.Infra.GitHost;
 internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostClient> logger)
     : IGitHostClient
 {
-    /// <summary>
-    /// Gitea's API is snake_case throughout, so the naming policy has to be too.
-    /// </summary>
-    /// <remarks>
-    /// This is not cosmetic. Under the Web defaults' camelCase, <c>clone_url</c>, <c>full_name</c> and
-    /// <c>default_branch</c> all deserialize to null while single-word members like <c>empty</c> keep working
-    /// — so the content check passed and the clone URL silently vanished, failing every competitor with
-    /// "reported no clone URL" after their repository had already been created.
-    /// <para>
-    /// Request bodies are built as dictionaries with literal snake_case keys. Those are unaffected: a
-    /// property naming policy does not rewrite dictionary keys, <see cref="JsonSerializerOptions.DictionaryKeyPolicy"/>
-    /// does, and it is deliberately left unset.
-    /// </para>
-    /// </remarks>
-    private static readonly JsonSerializerOptions Json = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        PropertyNameCaseInsensitive = true,
-    };
+    private readonly GiteaApi api = new(http);
 
     /// <summary>How long to wait for a freshly pushed repository to report content.</summary>
     private static readonly TimeSpan ContentPollInterval = TimeSpan.FromMilliseconds(500);
@@ -67,7 +45,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     public async Task EnsureOrganizationAsync(
         EnsureOrganizationRequest request, CancellationToken cancellationToken)
     {
-        if (await ExistsAsync($"orgs/{Escape(request.Name)}", request.Credential, cancellationToken))
+        if (await api.ExistsAsync($"orgs/{GiteaApi.Escape(request.Name)}", request.Credential, cancellationToken))
         {
             logger.LogInformation("Gitea organisation {Org} already exists", request.Name);
             return;
@@ -82,7 +60,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
             ["visibility"] = "private",
         };
 
-        await SendAsync(HttpMethod.Post, "orgs", body, request.Credential,
+        await api.SendAsync(HttpMethod.Post, "orgs", body, request.Credential,
             $"create organisation '{request.Name}'", cancellationToken);
 
         logger.LogInformation("Created Gitea organisation {Org}", request.Name);
@@ -93,7 +71,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     {
         var (owner, name) = (request.Repository.Owner, request.Repository.Name);
 
-        if (await ExistsAsync($"repos/{Escape(owner)}/{Escape(name)}", request.Credential, cancellationToken))
+        if (await api.ExistsAsync($"repos/{GiteaApi.Escape(owner)}/{GiteaApi.Escape(name)}", request.Credential, cancellationToken))
         {
             logger.LogInformation("Template repository {Owner}/{Name} already exists", owner, name);
             return;
@@ -110,7 +88,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
             ["auto_init"] = false,
         };
 
-        await SendAsync(HttpMethod.Post, $"orgs/{Escape(owner)}/repos", body, request.Credential,
+        await api.SendAsync(HttpMethod.Post, $"orgs/{GiteaApi.Escape(owner)}/repos", body, request.Credential,
             $"create template repository '{owner}/{name}'", cancellationToken);
 
         logger.LogInformation("Created template repository {Owner}/{Name}", owner, name);
@@ -120,7 +98,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
         GenerateRepositoryRequest request, CancellationToken cancellationToken)
     {
         var (owner, name) = (request.Target.Owner, request.Target.Name);
-        var path = $"repos/{Escape(request.Template.Owner)}/{Escape(request.Template.Name)}/generate";
+        var path = $"repos/{GiteaApi.Escape(request.Template.Owner)}/{GiteaApi.Escape(request.Template.Name)}/generate";
 
         var existing = await GetRepositoryAsync(request.Target, request.Credential, cancellationToken);
         if (existing is null)
@@ -137,10 +115,10 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
                 ["private"] = true,
             };
 
-            using var response = await SendAsync(HttpMethod.Post, path, body, request.Credential,
+            using var response = await api.SendAsync(HttpMethod.Post, path, body, request.Credential,
                 $"generate repository '{owner}/{name}' from template", cancellationToken);
 
-            existing = await response.Content.ReadFromJsonAsync<GiteaRepository>(Json, cancellationToken);
+            existing = await response.Content.ReadFromJsonAsync<GiteaRepository>(GiteaApi.Json, cancellationToken);
             logger.LogInformation("Generated repository {Owner}/{Name} from template", owner, name);
         }
         else
@@ -173,16 +151,16 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     public async Task EnsureOrganizationWebhookAsync(
         EnsureWebhookRequest request, CancellationToken cancellationToken)
     {
-        var path = $"orgs/{Escape(request.Organization)}/hooks";
+        var path = $"orgs/{GiteaApi.Escape(request.Organization)}/hooks";
 
         // Delete before creating rather than editing in place: the secret is regenerated on every Start, so
         // a hook left from an earlier attempt would keep delivering with a key nothing verifies against.
-        var existing = await GetAsync<List<GiteaHook>>(path, request.Credential, cancellationToken) ?? [];
+        var existing = await api.GetAsync<List<GiteaHook>>(path, request.Credential, cancellationToken) ?? [];
         foreach (var hook in existing.Where(h => h.Config is not null
                                                  && h.Config.TryGetValue("url", out var url)
                                                  && string.Equals(url, request.TargetUrl, StringComparison.OrdinalIgnoreCase)))
         {
-            await SendAsync(HttpMethod.Delete, $"{path}/{hook.Id}", null, request.Credential,
+            await api.SendAsync(HttpMethod.Delete, $"{path}/{hook.Id}", null, request.Credential,
                 $"remove the previous webhook {hook.Id}", cancellationToken);
             logger.LogInformation("Removed stale webhook {HookId} on {Org}", hook.Id, request.Organization);
         }
@@ -202,7 +180,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
             },
         };
 
-        await SendAsync(HttpMethod.Post, path, body, request.Credential,
+        await api.SendAsync(HttpMethod.Post, path, body, request.Credential,
             $"create the push webhook on '{request.Organization}'", cancellationToken);
 
         logger.LogInformation("Installed push webhook on {Org} -> {Url}",
@@ -241,7 +219,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     public async Task<AccountProvisioning> EnsureUserAsync(
         EnsureGitHostUserRequest request, CancellationToken cancellationToken)
     {
-        if (await ExistsAsync($"users/{Escape(request.Username)}", request.Credential, cancellationToken))
+        if (await api.ExistsAsync($"users/{GiteaApi.Escape(request.Username)}", request.Credential, cancellationToken))
         {
             // The existing account's password is NOT reset. A competitor may already be pushing with it, and
             // silently rotating a credential mid-competition costs them the time it takes to work out why.
@@ -263,7 +241,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
             ["visibility"] = "private",
         };
 
-        await SendAsync(HttpMethod.Post, "admin/users", body, request.Credential,
+        await api.SendAsync(HttpMethod.Post, "admin/users", body, request.Credential,
             $"create the user '{request.Username}'", cancellationToken);
 
         logger.LogInformation("Created Gitea user {Username}", request.Username);
@@ -279,7 +257,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
         // returns one page and every competitor past it is reported as having no account.
         for (var page = 1; page <= MaxUserPages; page++)
         {
-            var batch = await GetAsync<List<GiteaUser>>(
+            var batch = await api.GetAsync<List<GiteaUser>>(
                 $"admin/users?limit={UserPageSize}&page={page}", credential, cancellationToken) ?? [];
 
             usernames.AddRange(batch
@@ -300,8 +278,8 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     public async Task<bool> HasRepositoriesAsync(
         string username, BasicCredential credential, CancellationToken cancellationToken)
     {
-        var repositories = await GetAsync<List<GiteaRepository>>(
-            $"users/{Escape(username)}/repos?limit=1", credential, cancellationToken);
+        var repositories = await api.GetAsync<List<GiteaRepository>>(
+            $"users/{GiteaApi.Escape(username)}/repos?limit=1", credential, cancellationToken);
 
         return repositories is { Count: > 0 };
     }
@@ -309,7 +287,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     public async Task<AccountRemoval> DeleteUserAsync(
         string username, BasicCredential credential, CancellationToken cancellationToken)
     {
-        if (!await ExistsAsync($"users/{Escape(username)}", credential, cancellationToken))
+        if (!await api.ExistsAsync($"users/{GiteaApi.Escape(username)}", credential, cancellationToken))
         {
             logger.LogInformation("Gitea user {Username} is already gone", username);
             return AccountRemoval.AlreadyMissing;
@@ -318,7 +296,7 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
         // No ?purge=true. Purge deletes the user's repositories along with them, and a competitor's submission
         // history is the evidence a marking dispute is settled from. The caller refuses to delete a user that
         // still owns any, so there is nothing left to purge by the time this runs.
-        await SendAsync(HttpMethod.Delete, $"admin/users/{Escape(username)}", null, credential,
+        await api.SendAsync(HttpMethod.Delete, $"admin/users/{GiteaApi.Escape(username)}", null, credential,
             $"delete the user '{username}'", cancellationToken);
 
         logger.LogInformation("Deleted Gitea user {Username}", username);
@@ -327,92 +305,6 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
 
     internal async Task<GiteaRepository?> GetRepositoryAsync(
         RepositoryReference repository, BasicCredential credential, CancellationToken cancellationToken) =>
-        await GetAsync<GiteaRepository>(
-            $"repos/{Escape(repository.Owner)}/{Escape(repository.Name)}", credential, cancellationToken);
-
-    // ------------------------------------------------------------------ plumbing
-
-    /// <summary>
-    /// Whether the resource at <paramref name="path"/> exists.
-    /// </summary>
-    /// <remarks>
-    /// Only a success status means "exists" and only 404 means "does not". Anything else — 401 from a rotated
-    /// admin token, 403, a 500 from the host — is neither, and treating it as existence was actively misleading:
-    /// with a bad credential the organisation and template checks both reported "already exists", nothing was
-    /// created, and provisioning then failed per competitor with a message about empty templates while the log
-    /// asserted the opposite. Throwing here names the real cause at the point it is first observable.
-    /// </remarks>
-    private async Task<bool> ExistsAsync(
-        string path, BasicCredential credential, CancellationToken cancellationToken)
-    {
-        using var request = Build(HttpMethod.Get, path, null, credential);
-        using var response = await http.SendAsync(request, cancellationToken);
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            return false;
-
-        await ThrowIfFailedAsync(response, $"check whether '{path}' exists", cancellationToken);
-        return true;
-    }
-
-    private async Task<T?> GetAsync<T>(
-        string path, BasicCredential credential, CancellationToken cancellationToken)
-    {
-        using var request = Build(HttpMethod.Get, path, null, credential);
-        using var response = await http.SendAsync(request, cancellationToken);
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            return default;
-
-        await ThrowIfFailedAsync(response, $"GET {path}", cancellationToken);
-        return await response.Content.ReadFromJsonAsync<T>(Json, cancellationToken);
-    }
-
-    private async Task<HttpResponseMessage> SendAsync(
-        HttpMethod method,
-        string path,
-        Dictionary<string, object?>? body,
-        BasicCredential credential,
-        string what,
-        CancellationToken cancellationToken)
-    {
-        using var request = Build(method, path, body, credential);
-        var response = await http.SendAsync(request, cancellationToken);
-
-        await ThrowIfFailedAsync(response, what, cancellationToken);
-        return response;
-    }
-
-    private static HttpRequestMessage Build(
-        HttpMethod method, string path, Dictionary<string, object?>? body, BasicCredential credential)
-    {
-        var request = new HttpRequestMessage(method, path);
-
-        // Basic auth with the admin's token as the password is what the Gitea API accepts for both a real
-        // password and a personal access token, so one credential shape covers either.
-        var raw = $"{credential.Username}:{credential.Secret}";
-        request.Headers.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes(raw)));
-
-        if (body is not null)
-            request.Content = JsonContent.Create(body, options: Json);
-
-        return request;
-    }
-
-    private static async Task ThrowIfFailedAsync(
-        HttpResponseMessage response, string what, CancellationToken cancellationToken)
-    {
-        if (response.IsSuccessStatusCode)
-            return;
-
-        var detail = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (detail.Length > 500) detail = detail[..500];
-
-        throw new GitHostException(
-            $"Could not {what}: the git host returned {(int)response.StatusCode} " +
-            $"{response.ReasonPhrase}. {detail}");
-    }
-
-    private static string Escape(string segment) => Uri.EscapeDataString(segment);
+        await api.GetAsync<GiteaRepository>(
+            $"repos/{GiteaApi.Escape(repository.Owner)}/{GiteaApi.Escape(repository.Name)}", credential, cancellationToken);
 }
