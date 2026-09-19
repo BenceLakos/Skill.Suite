@@ -112,6 +112,17 @@ public sealed class TestSuiteSkeletonRewriterTests
     }
 
     [Fact]
+    public void TheBannerDoesNotAssumeWhichSessionTypeTheCompetitorIsIn()
+    {
+        // The same kit ships for both session types, so this project reaches a competitor whose suite is the
+        // graded artefact AND one who writes tests only to check their own implementation.
+        var skeleton = Rewrite(ReferenceSuite);
+
+        Assert.Contains("In a testing session", skeleton);
+        Assert.Contains("In an implementation session", skeleton);
+    }
+
+    [Fact]
     public void AnExampleIsPresentButCommentedOut()
     {
         var skeleton = Rewrite(ReferenceSuite);

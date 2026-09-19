@@ -48,4 +48,32 @@ public static class SessionErrors
     public static readonly Error NoCompetitors =
         Error.Validation("Session.NoCompetitors",
             "There are no competitors to provision repositories for.");
+
+    public static readonly Error GitAccessUnknown =
+        Error.Failure("Session.GitAccessUnknown",
+            "The git server's user list could not be read, so there is no way to tell which competitors can " +
+            "reach a repository. The session was not started and nothing was created — check the git server " +
+            "and the git access credential, then start it again.");
+
+    public static readonly Error MissingDatabaseCredential =
+        Error.Validation("Session.MissingDatabaseCredential",
+            "This session has a database configured but no Microsoft SQL Server credential exists. Add one " +
+            "on the Credentials page, or clear the session's database name.");
+
+    public static readonly Error DatabaseAccessUnknown =
+        Error.Failure("Session.DatabaseAccessUnknown",
+            "The SQL Server's login list could not be read, so there is no way to tell which competitors can " +
+            "be granted access to the session database. The session was not started and nothing was created " +
+            "— check the SQL Server and its credential, then start it again.");
+
+    public static readonly Error MissingImagePullCredential =
+        Error.Validation("Session.MissingImagePullCredential",
+            "The image pull credential this session names no longer exists, so its docker services cannot be " +
+            "pulled. Select a credential on the session, or remove the one it points at.");
+
+    public static readonly Error NoCompetitorsWithGitAccess =
+        Error.Validation("Session.NoCompetitorsWithGitAccess",
+            "No competitor has an account on the git server, so every repository created would be " +
+            "unreachable. Provision their git accounts on the Competitors page first, then start the " +
+            "session.");
 }

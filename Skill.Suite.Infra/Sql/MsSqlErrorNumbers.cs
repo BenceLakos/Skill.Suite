@@ -17,6 +17,9 @@ internal static class MsSqlErrorNumbers
     /// <summary>A database with that name already exists.</summary>
     public const int DatabaseAlreadyExists = 1801;
 
+    /// <summary>A user, group or role of that name already exists in the current database.</summary>
+    public const int DatabaseUserAlreadyExists = 15023;
+
     /// <summary>Cannot drop the login, because it does not exist.</summary>
     public const int LoginNotFound = 15151;
 

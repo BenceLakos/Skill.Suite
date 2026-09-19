@@ -1,0 +1,35 @@
+@*
+    A labelled bar for a long operation that reports its own progress.
+
+    Deliberately dumb: the caller supplies the finished label — including any counts and percentage, so the
+    wording stays in the translation file — and this only draws it.
+*@
+
+<MudStack Spacing="1" Class="@Class">
+    <MudText Typo="Typo.body2">@Label</MudText>
+    <MudProgressLinear Color="Color.Primary"
+                       Size="Size.Large"
+                       Rounded="true"
+                       Indeterminate="@Indeterminate"
+                       Value="@BarValue"/>
+</MudStack>
+
+@code {
+    /// <summary>A full bar, matching MudProgressLinear's default maximum.</summary>
+    private const double FullBar = 100d;
+
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Units of work finished, used for the bar's length.</summary>
+    [Parameter] public int Completed { get; set; }
+
+    /// <summary>Units of work expected; zero when the stage has nothing countable.</summary>
+    [Parameter] public int Total { get; set; }
+
+    /// <summary>Draws a moving bar instead of a length, for a stage with no countable total.</summary>
+    [Parameter] public bool Indeterminate { get; set; }
+
+    [Parameter] public string? Class { get; set; }
+
+    private double BarValue => Total > 0 ? Completed * FullBar / Total : 0;
+}

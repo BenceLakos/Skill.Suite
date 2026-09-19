@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Skill.Suite.Application.Abstractions;
+using Skill.Suite.Application.Credentials;
+using Skill.Suite.Application.DockerImages;
 using Skill.Suite.Application.Webhooks;
 using Skill.Suite.Domain.Common;
 using Skill.Suite.Domain.TestRuns;
@@ -390,32 +392,13 @@ public sealed class ExecuteTestRunHandler(
     private static bool IsTerminal(TestRunStatus status) =>
         status is TestRunStatus.Completed or TestRunStatus.Failed or TestRunStatus.Cancelled;
 
-    private async Task<BasicCredential?> ResolveCredentialAsync(Guid? credentialId, CancellationToken cancellationToken)
-    {
-        if (credentialId is null)
-            return null;
-
-        var credential = await db.Credentials
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == credentialId.Value, cancellationToken);
-
-        if (credential is null)
-            return null;
-
-        var plaintext = vault.Unprotect(credential.EncryptedSecret);
-        return BasicCredential.Parse(plaintext);
-    }
+    private async Task<BasicCredential?> ResolveCredentialAsync(Guid? credentialId, CancellationToken cancellationToken) =>
+        credentialId is null ? null : await db.FindByIdAsync(vault, credentialId.Value, cancellationToken);
 
     private async Task<RegistryAuth?> ResolveRegistryAuthAsync(
         Guid? credentialId, string image, CancellationToken cancellationToken)
     {
         var basic = await ResolveCredentialAsync(credentialId, cancellationToken);
-        if (basic is null)
-            return null;
-
-        return new RegistryAuth(
-            Server: RegistryHostExtractor.Extract(image),
-            Username: basic.Username,
-            Password: basic.Secret);
+        return basic is null ? null : RegistryAuthFactory.For(basic, image);
     }
 }

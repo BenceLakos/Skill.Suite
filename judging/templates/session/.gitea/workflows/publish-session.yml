@@ -2,9 +2,13 @@ name: publish-session
 
 # Publishes this session from the Gitea it lives on: calibrates the answer key, builds the white-box and
 # black-box judge images with the module's own build-image.sh, pushes them to Gitea's container registry
-# under an immutable tag, generates both competitor starter kits with make-competitor-start.sh and copies
-# them into the platform's starter-packages volume. Nothing is started - registering the images and the
+# under an immutable tag, generates the competitor starter kit with make-competitor-start.sh and copies it
+# into the platform's starter-packages volume. Nothing is started - registering the images and the
 # sessions in the Skill Suite UI stays a deliberate step, because a session start provisions repositories.
+#
+# ONE starter kit, both session types. The kit is a whole solution - the stubbed services project and the
+# emptied test project - and the judge copies only the folder it swaps, ignoring the rest of a submission.
+# So both sessions point at the same template folder, and a competitor always gets something that opens.
 #
 # This is the private counterpart of the platform's own workflow: a session image carries the hidden suite
 # (white-box) or the reference implementation as source (black-box), so it is built here, on the runner
@@ -32,7 +36,11 @@ name: publish-session
 #                            localhost:3000/<owner>/skill-suite-judge-base:9.0, also published by
 #                            publish-judging; the ghcr.io image works too where the host reaches it.
 #   STARTER_PACKAGE_NAME     package name in the starter-packages volume; defaults to the repository name in
-#                            lower case. The black-box kit is uploaded as `<name>-blackbox`.
+#                            lower case. Both sessions of this module point at that one package.
+#   STARTER_KIT_MODE         set to `maintenance` when competitor-start/<Session>.Services holds an AUTHORED
+#                            inherited implementation rather than a generated stub - a maintenance session.
+#                            Those sources are then kept and everything around them regenerated. Any other
+#                            value, or unset, derives the whole kit from this module.
 #   STARTER_VOLUME           docker volume the platform mounts at /starter-packages,
 #                            default `skill-suite-starter-packages`.
 #   UPLOAD_STARTER_PACKAGES  set to `false` to publish images only.
@@ -134,18 +142,19 @@ jobs:
       - name: Hidden suite against the reference
         run: dotnet test SkillSuite.Session.sln -c Release
 
-      # Both modes write the same competitor-start/ directory, so each kit is moved aside before the next is
-      # generated. The scripts compile what they produce, so a kit that does not build stops the job here.
-      - name: Generate the competitor starter kits
+      # One kit for both session types. The script compiles what it produces, so a kit that does not build
+      # stops the job here, before an image is pushed or a volume is touched.
+      - name: Generate the competitor starter kit
         env:
           JUDGING_FEED: ${{ steps.meta.outputs.judging_feed }}
+          STARTER_KIT_MODE: ${{ vars.STARTER_KIT_MODE }}
         run: |
           set -eu
-          rm -rf kits && mkdir -p kits/whitebox kits/blackbox
-          ./make-competitor-start.sh
-          mv competitor-start kits/whitebox/competitor-start
-          ./make-competitor-start.sh blackbox
-          mv competitor-start kits/blackbox/competitor-start
+          if [ "${STARTER_KIT_MODE:-}" = "maintenance" ]; then
+            ./make-competitor-start.sh maintenance
+          else
+            ./make-competitor-start.sh
+          fi
 
       # Written by hand rather than with `docker login`: the login action hands the exchange to the host
       # daemon, which would then need to resolve and trust the registry itself. The CLI reads this file and
@@ -197,21 +206,16 @@ jobs:
       # a tar stream through a throwaway container that mounts the volume - the same route as
       # scripts/starter-packages.sh, and the same layout: <name>/competitor-start, the TemplateFolder a
       # session points at. Replace rather than merge, so a file removed from the kit does not linger.
-      - name: Upload the starter kits to the volume
+      - name: Upload the starter kit to the volume
         if: vars.UPLOAD_STARTER_PACKAGES != 'false'
         env:
           PACKAGE: ${{ steps.meta.outputs.package }}
         run: |
           set -eu
-          upload() {
-            kind=$1; name=$2
-            tar -C "kits/${kind}" -cf - competitor-start \
-              | docker run --rm -i -v "${STARTER_VOLUME}:/sp" "${HELPER_IMAGE}" \
-                  sh -c "rm -rf '/sp/${name}' && mkdir -p '/sp/${name}' && tar -C '/sp/${name}' -xf -"
-            echo "uploaded ${kind} kit as ${name}  ->  /starter-packages/${name}/competitor-start"
-          }
-          upload whitebox "${PACKAGE}"
-          upload blackbox "${PACKAGE}-blackbox"
+          tar -cf - competitor-start \
+            | docker run --rm -i -v "${STARTER_VOLUME}:/sp" "${HELPER_IMAGE}" \
+                sh -c "rm -rf '/sp/${PACKAGE}' && mkdir -p '/sp/${PACKAGE}' && tar -C '/sp/${PACKAGE}' -xf -"
+          echo "uploaded the kit as ${PACKAGE}  ->  /starter-packages/${PACKAGE}/competitor-start"
 
       - name: Summary
         env:
@@ -222,6 +226,5 @@ jobs:
           set -eu
           echo "Register in the Skill Suite UI (Docker images -> Pull, then Sessions):"
           echo "  white-box  image ${WHITEBOX_IMAGE}"
-          echo "             template folder /starter-packages/${PACKAGE}/competitor-start"
           echo "  black-box  image ${BLACKBOX_IMAGE}"
-          echo "             template folder /starter-packages/${PACKAGE}-blackbox/competitor-start"
+          echo "  both       template folder /starter-packages/${PACKAGE}/competitor-start"

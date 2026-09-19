@@ -124,7 +124,9 @@ public sealed class ImplementationStubber : CSharpSyntaxRewriter
     private static readonly SyntaxTriviaList Banner = SyntaxFactory.ParseLeadingTrivia(
         """
         /// <summary>
-        /// Your implementation. Every member throws until you write it.
+        /// The implementation of the contract. In an implementation session it is yours to write, and every
+        /// member throws until you do. In a testing session it is a compile-time placeholder: the real
+        /// implementation is hidden, and your tests run against it in the judge.
         /// </summary>
         /// <remarks>
         /// Keep this folder's name and its csproj: the judge replaces the whole folder with yours. Do not add

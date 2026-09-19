@@ -80,6 +80,63 @@ internal sealed class SqlServerAdminClient(
         return created ? AccountProvisioning.Created : AccountProvisioning.AlreadyExisted;
     }
 
+    public async Task<AccountProvisioning> EnsureDatabaseAsync(
+        string database, BasicCredential admin, CancellationToken cancellationToken)
+    {
+        await using var connection = Connect(admin);
+        await connection.OpenAsync(cancellationToken);
+
+        var created = false;
+
+        if (!await ExistsAsync(connection, MsSqlAccountScripts.DatabaseExists, database, cancellationToken))
+        {
+            created = await TryExecuteAsync(
+                connection,
+                MsSqlAccountScripts.CreateDatabase(database),
+                $"create the database '{database}'",
+                MsSqlErrorNumbers.DatabaseAlreadyExists,
+                cancellationToken);
+        }
+
+        logger.LogInformation(
+            "SQL Server database {Database}: {Outcome}", database, created ? "created" : "already existed");
+
+        return created ? AccountProvisioning.Created : AccountProvisioning.AlreadyExisted;
+    }
+
+    public async Task GrantDatabaseAccessAsync(
+        MsSqlDatabaseAccessRequest request, CancellationToken cancellationToken)
+    {
+        // Opened against the session database rather than master, because everything below is scoped to the
+        // current database and none of it can say which one it means. USE is not an alternative: CREATE USER
+        // has to be the first statement in its batch, and this client sends one statement per command anyway.
+        await using var connection = Connect(request.Admin, request.Database);
+        await connection.OpenAsync(cancellationToken);
+
+        var login = request.Login;
+
+        if (!await ExistsAsync(
+                connection, MsSqlDatabaseAccessScripts.DatabaseUserExists, login, cancellationToken))
+        {
+            await TryExecuteAsync(
+                connection,
+                MsSqlDatabaseAccessScripts.CreateDatabaseUser(login),
+                $"create the database user '{login}' in '{request.Database}'",
+                MsSqlErrorNumbers.DatabaseUserAlreadyExists,
+                cancellationToken);
+        }
+
+        await SetRoleMembershipAsync(
+            connection, request, MsSqlDatabaseAccessScripts.ReaderRole, request.Read, cancellationToken);
+
+        await SetRoleMembershipAsync(
+            connection, request, MsSqlDatabaseAccessScripts.WriterRole, request.Write, cancellationToken);
+
+        logger.LogInformation(
+            "SQL Server access for {Login} on {Database}: read {Read}, write {Write}",
+            login, request.Database, request.Read, request.Write);
+    }
+
     public async Task<MsSqlAccountInventory> GetInventoryAsync(
         BasicCredential admin, CancellationToken cancellationToken)
     {
@@ -163,12 +220,12 @@ internal sealed class SqlServerAdminClient(
 
     // ------------------------------------------------------------------ plumbing
 
-    private SqlConnection Connect(BasicCredential admin)
+    private SqlConnection Connect(BasicCredential admin, string catalog = AdminCatalog)
     {
         var builder = new SqlConnectionStringBuilder
         {
             DataSource = options.Value.Server,
-            InitialCatalog = AdminCatalog,
+            InitialCatalog = catalog,
             UserID = admin.Username,
             Password = admin.Secret,
             Encrypt = true,
@@ -197,6 +254,53 @@ internal sealed class SqlServerAdminClient(
         catch (SqlException ex)
         {
             throw Wrap(ex, $"check whether '{name}' already exists");
+        }
+    }
+
+    /// <summary>
+    /// Adds or removes the login from the role so that its membership matches <paramref name="wanted"/>.
+    /// </summary>
+    /// <remarks>
+    /// Membership is read first rather than inferred from whether the <c>ALTER ROLE</c> complained. The server
+    /// is not consistent about what it reports for a member that is already there or already gone, and this has
+    /// to converge on the flags every run, not the first one.
+    /// </remarks>
+    private async Task SetRoleMembershipAsync(
+        SqlConnection connection,
+        MsSqlDatabaseAccessRequest request,
+        string role,
+        bool wanted,
+        CancellationToken cancellationToken)
+    {
+        var login = request.Login;
+
+        if (await IsRoleMemberAsync(connection, login, role, cancellationToken) == wanted) return;
+
+        var sql = wanted
+            ? MsSqlDatabaseAccessScripts.AddRoleMember(role, login)
+            : MsSqlDatabaseAccessScripts.DropRoleMember(role, login);
+
+        var what = wanted
+            ? $"add '{login}' to '{role}' in '{request.Database}'"
+            : $"remove '{login}' from '{role}' in '{request.Database}'";
+
+        await ExecuteAsync(connection, sql, what, cancellationToken);
+    }
+
+    private async Task<bool> IsRoleMemberAsync(
+        SqlConnection connection, string login, string role, CancellationToken cancellationToken)
+    {
+        await using var command = Command(connection, MsSqlDatabaseAccessScripts.RoleMembershipExists);
+        command.Parameters.AddWithValue(MsSqlDatabaseAccessScripts.NameParameter, login);
+        command.Parameters.AddWithValue(MsSqlDatabaseAccessScripts.RoleParameter, role);
+
+        try
+        {
+            return await command.ExecuteScalarAsync(cancellationToken) is not null;
+        }
+        catch (SqlException ex)
+        {
+            throw Wrap(ex, $"check whether '{login}' is a member of '{role}'");
         }
     }
 

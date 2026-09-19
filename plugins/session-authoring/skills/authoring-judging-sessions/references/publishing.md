@@ -75,11 +75,13 @@ could pull it did. Rotate to a new session or a new task.
 
 A module generated from the template carries `.gitea/workflows/publish-session.yml`. Pushed to the competition's
 Gitea with the platform's `scripts/gitea-push.sh` (which also stores the `REGISTRY_USERNAME`/`REGISTRY_TOKEN`
-secrets), every push to `main` runs the calibration test, `make-competitor-start.sh` in both modes,
-`build-image.sh both`, pushes both images to Gitea's registry as `localhost:3000/<owner>/<repo>-judge:sha-<7>` and
-`…-blackbox-judge:sha-<7>`, and copies both kits into the `skill-suite-starter-packages` volume, so the template
-folders `/starter-packages/<repo>/competitor-start` and `/starter-packages/<repo>-blackbox/competitor-start` are
-ready to pick in the session editor. A `v*` tag publishes under the version instead. The job runs on the runner
+secrets), every push to `main` runs the calibration test, `make-competitor-start.sh`, `build-image.sh both`,
+pushes both images to Gitea's registry as `localhost:3000/<owner>/<repo>-judge:sha-<7>` and
+`…-blackbox-judge:sha-<7>`, and copies the kit into the `skill-suite-starter-packages` volume, so the template
+folder `/starter-packages/<repo>/competitor-start` is ready to pick in the session editor. One kit serves both
+sessions — it is a whole solution and the judge swaps a single folder out of it — so both point at that same
+folder. Set the repository variable `STARTER_KIT_MODE=maintenance` when the kit's `*.Services` sources are
+authored rather than generated. A `v*` tag publishes under the version instead. The job runs on the runner
 attached to the competition host, so the images never leave it — the private-registry rule holds by construction.
 Nothing is started: register the images and sessions in the UI as described below.
 
@@ -99,7 +101,8 @@ the UI before a session can use it:
 3. **Sessions** → pick that image, set the git credential, and set **template folder** to your generated
    `competitor-start/` directory — **not** the swapped folder inside it. That directory is pushed *as the
    repository root*, and `swap_dir` then looks for `<repo-root>/<SwappedFolder>`; point one level deeper and
-   every run exits 3 with "the submission has no <SwappedFolder> folder". The path must also be readable
+   every run exits 3 with "the submission has no <SwappedFolder> folder". The same folder serves a white-box
+   and a black-box session: the kit carries both projects and the judge only ever swaps one. The path must also be readable
    *inside the application container* — a host path is invisible to it and produces empty repositories.
 4. **Start** the session. It creates the organisation, seeds a template repository from the starter kit, copies
    it into one repository per competitor, and installs the signed push webhook last.

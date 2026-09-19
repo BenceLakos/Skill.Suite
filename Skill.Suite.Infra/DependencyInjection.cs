@@ -102,6 +102,7 @@ public static class DependencyInjection
         services.AddSingleton<IStarterPackageStore, FileSystemStarterPackageStore>();
         services.AddScoped<IGitClient, ProcessGitClient>();
         services.AddScoped<IContainerRunner, ProcessContainerRunner>();
+        services.AddScoped<IContainerServiceManager, ProcessContainerServiceManager>();
         services.AddScoped<IMsSqlAdminClient, SqlServerAdminClient>();
 
         services.AddHttpClient<IGitHostClient, GiteaGitHostClient>(

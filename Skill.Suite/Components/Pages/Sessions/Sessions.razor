@@ -1,5 +1,6 @@
 @page "/sessions"
 @attribute [Authorize(Roles = "Admin")]
+@implements IDisposable
 @inject ISender Mediator
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
@@ -21,6 +22,22 @@
         </MudButton>
     </Actions>
 </PageHeader>
+
+@*
+    Inline rather than a modal dialog: provisioning is resumable and the admin has nothing to decide while
+    it runs, so a dialog would only take the session list away from them for a minute. Sitting above the
+    grid, the bar stays visible next to the rows whose Start buttons it has disabled.
+*@
+@if (_starting)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">@T.Format("sessions.progress.session", _startingName)</MudText>
+        <ProvisioningProgress Label="@ProgressLabel"
+                              Completed="@(_progress?.Completed ?? 0)"
+                              Total="@(_progress?.Total ?? 0)"
+                              Indeterminate="@(_progress?.IsIndeterminate ?? true)"/>
+    </MudPaper>
+}
 
 <MudDataGrid T="SessionDto"
              Elevation="1"
@@ -89,8 +106,17 @@
     private bool _loading;
     private bool _starting;
     private string? _search;
+    private string _startingName = string.Empty;
+    private StartSessionProgress? _progress;
+    private RendererProgress<StartSessionProgress>? _progressSink;
 
     protected override async Task OnInitializedAsync() => await Load();
+
+    /// <summary>
+    /// Stops the running Start, if any, from reporting into a component that no longer exists — the admin
+    /// navigating away does not cancel provisioning, which keeps going on the server until it is done.
+    /// </summary>
+    public void Dispose() => _progressSink?.Dispose();
 
     private async Task Load()
     {
@@ -117,15 +143,26 @@
         if (ok != true) return;
 
         var result = await Mediator.Send(new CloseSessionCommand(session.Id));
-        if (result.IsSuccess)
-        {
-            Snackbar.Add(T["common.success.closed"], Severity.Success);
-            await Load();
-        }
-        else
+        if (result.IsFailure)
         {
             Snackbar.Add(result.Error.Message, Severity.Error);
+            return;
         }
+
+        var outcome = result.Value;
+
+        Snackbar.Add(
+            outcome.ServicesRemoved > 0
+                ? T.Format("sessions.closedServices", outcome.ServicesRemoved)
+                : T["common.success.closed"],
+            Severity.Success);
+
+        // The session is closed either way — this says the containers outlived it, which is the admin's to
+        // clear up and invisible from this page.
+        if (outcome.ServiceRemovalError is not null)
+            Snackbar.Add(T.Format("sessions.closeServicesFailed", outcome.ServiceRemovalError), Severity.Warning);
+
+        await Load();
     }
 
     /// <summary>
@@ -150,9 +187,22 @@
         if (ok != true) return;
 
         _starting = true;
+        _startingName = session.Name;
+        _progress = null;
+
+        // Disposed in the finally block AND in Dispose: the command keeps reporting for as long as it runs,
+        // whether this page is still on screen or not.
+        _progressSink = new RendererProgress<StartSessionProgress>(
+            InvokeAsync,
+            report =>
+            {
+                _progress = report;
+                StateHasChanged();
+            });
+
         try
         {
-            var result = await Mediator.Send(new StartSessionCommand(session.Id));
+            var result = await Mediator.Send(new StartSessionCommand(session.Id, _progressSink));
             if (result.IsFailure)
             {
                 Snackbar.Add(result.Error.Message, Severity.Error);
@@ -173,11 +223,50 @@
                 Snackbar.Add(
                     string.Format(T["sessions.startedPartially"],
                         outcome.Provisioned, outcome.Failed.Count,
-                        string.Join(", ", outcome.Failed.Select(f => f.Username))),
+                        string.Join(", ", outcome.Failed.Select(f => f.Subject))),
                     Severity.Warning);
 
                 foreach (var failure in outcome.Failed)
-                    Snackbar.Add($"{failure.Username}: {failure.Error}", Severity.Error);
+                    Snackbar.Add($"{StageLabel(failure.Stage)}: {failure.Subject}: {failure.Error}", Severity.Error);
+            }
+
+            // Reported separately from the repositories, and only for what the session is configured with:
+            // a session with no database or no services would otherwise read as having silently skipped them.
+            if (!string.IsNullOrWhiteSpace(session.DatabaseName))
+            {
+                Snackbar.Add(
+                    string.Format(T["sessions.started.databases"],
+                        outcome.DatabaseAccessGranted, session.DatabaseName),
+                    Severity.Info);
+            }
+
+            if (session.DockerImages.Count > 0)
+            {
+                Snackbar.Add(
+                    string.Format(T["sessions.started.services"], outcome.ServicesRunning),
+                    Severity.Info);
+            }
+
+            // Skipped is not failed: nothing was attempted for these competitors, because they have no
+            // account on the system in question and work they cannot reach is worse than none. Still shown,
+            // and shown separately, because otherwise a session reads as fully provisioned while some
+            // competitors have nowhere to push or no way into the database.
+            if (outcome.SkippedNoGitAccess.Count > 0)
+            {
+                Snackbar.Add(
+                    string.Format(T["sessions.startedSkipped"],
+                        outcome.SkippedNoGitAccess.Count,
+                        string.Join(", ", outcome.SkippedNoGitAccess)),
+                    Severity.Warning);
+            }
+
+            if (outcome.SkippedNoDatabaseLogin.Count > 0)
+            {
+                Snackbar.Add(
+                    string.Format(T["sessions.startedSkippedDatabase"],
+                        outcome.SkippedNoDatabaseLogin.Count,
+                        string.Join(", ", outcome.SkippedNoDatabaseLogin)),
+                    Severity.Warning);
             }
 
             await Load();
@@ -194,9 +283,40 @@
         }
         finally
         {
+            _progressSink?.Dispose();
+            _progressSink = null;
+            _progress = null;
+            _startingName = string.Empty;
             _starting = false;
         }
     }
+
+    /// <summary>
+    /// The stage the command is reporting, in the admin's words. Before the first report arrives the command
+    /// is loading the session and checking git accounts, which is still work worth naming.
+    /// </summary>
+    private string ProgressLabel => _progress is null
+        ? T["sessions.progress.starting"]
+        : _progress.Stage switch
+        {
+            StartSessionStage.Preparing => T["sessions.progress.preparing"],
+            StartSessionStage.Repositories => T.Format("sessions.progress.repositories",
+                _progress.Completed, _progress.Total, _progress.Percent),
+            StartSessionStage.Databases => T.Format("sessions.progress.databases",
+                _progress.Completed, _progress.Total, _progress.Percent),
+            StartSessionStage.DockerServices => T.Format("sessions.progress.dockerServices",
+                _progress.Completed, _progress.Total, _progress.Percent),
+            _ => T["sessions.progress.starting"],
+        };
+
+    /// <summary>The stage a failure came from, short enough to prefix the subject it happened to.</summary>
+    private string StageLabel(StartSessionStage stage) => stage switch
+    {
+        StartSessionStage.Repositories => T["sessions.stage.repositories"],
+        StartSessionStage.Databases => T["sessions.stage.databases"],
+        StartSessionStage.DockerServices => T["sessions.stage.dockerServices"],
+        _ => stage.ToString(),
+    };
 
     private Color StatusColor(SessionStatus status) => status switch
     {

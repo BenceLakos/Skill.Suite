@@ -1,4 +1,4 @@
-namespace Skill.Suite.Application.TestRuns.ExecuteTestRun;
+namespace Skill.Suite.Application.DockerImages;
 
 /// <summary>
 /// Extracts the registry hostname out of a docker image reference so we can pass it to

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Fills local-nuget/ with everything the offline restore needs: this module's Contracts package, plus the
-# judging packages it depends on. Run before any build or docker build.
+# Fills local-nuget/ with everything the offline restore needs: this module's Contracts package, the judging
+# packages it depends on, and the whole package closure of the test project (xunit, the test SDK, coverlet),
+# so the competitor kit restores with no network. Run before any build or docker build.
 #
 #   ./pack-contracts.sh
 #
@@ -113,5 +114,25 @@ dotnet pack "${DIR}/SkillSuite.Session.Contracts/SkillSuite.Session.Contracts.cs
 # Bust the global cache copy, or a re-pack of the same version is silently ignored and the image gets the
 # previous contract.
 rm -rf "${HOME}/.nuget/packages/skillsuite.session.contracts"
+
+# ---------------------------------------------------------------------------- the rest of the closure
+#
+# The competitor kit is a whole solution, test project included, and that project pulls xunit, the test SDK
+# and coverlet - none of which is a judging package. A venue machine without internet cannot restore them
+# from nuget.org, so everything the two projects need is vendored here too: a restore of the reference
+# projects into a scratch package directory downloads every .nupkg in the graph, and those are copied in.
+# The judge is unaffected either way - it restores from the cache warmed in the image - but the kit's own
+# verification build runs against local-nuget alone, which is what proves a competitor can build offline.
+echo "vendoring the test project's package closure"
+CLOSURE=$(mktemp -d)
+if ! dotnet restore "${DIR}/SkillSuite.Session.UnitTests/SkillSuite.Session.UnitTests.csproj" \
+        --packages "${CLOSURE}" >"${CLOSURE}/restore.log" 2>&1; then
+    cat "${CLOSURE}/restore.log" >&2
+    printf 'pack-contracts: could not restore the test project to collect its packages\n' >&2
+    rm -rf "${CLOSURE}"
+    exit 1
+fi
+find "${CLOSURE}" -name '*.nupkg' -not -name '*.snupkg' -exec cp -n {} "${DIR}/local-nuget/" \;
+rm -rf "${CLOSURE}"
 
 ls -1 "${DIR}/local-nuget"/*.nupkg

@@ -22,7 +22,8 @@ This is the one decision that changes everything downstream. Get it right before
 | swapped folder at run time | `*.Services` | `*.UnitTests` |
 | baked into the image | the hidden graded suite | the reference implementation, **as source** |
 | how marks are decided | aspects passed | line coverage × mutation kill rate |
-| starter kit handed out | stubbed implementation | wired-but-empty test project |
+| what the competitor fills in | the stubbed `*.Services` project | the wired-but-empty `*.UnitTests` project |
+| starter kit handed out | the same solution for both: `.sln`, both projects, the offline feed | ← |
 
 Both images come out of the same module, so a session can be either — but the *authoring* differs, and so
 does what leaks if you get the firewall wrong.
@@ -54,7 +55,8 @@ for `--allow-scripts` and hang outright in CI.
 JUDGING_FEED=<nuget-source> ./pack-contracts.sh
 ```
 
-This fills `local-nuget/` with your Contracts package plus the three judging packages. **Required before any
+This fills `local-nuget/` with your Contracts package, the three judging packages and the test project's whole
+package closure, so the competitor kit restores offline. **Required before any
 build** — the judge images restore offline and fail `NU1101` without it. Inside a checkout of the Skill.Suite
 repo, `JUDGING_ROOT` is discovered automatically and the packages are built from source instead; in a separate
 session repository you need `JUDGING_FEED`.
@@ -124,20 +126,29 @@ session ends up unable to distinguish real work from coverage theatre.
 Never hand-write this. It is derived, so it cannot drift out of step with the contract:
 
 ```bash
-./make-competitor-start.sh            # white-box: strips the implementation
-./make-competitor-start.sh blackbox   # black-box: empties the reference suite
+./make-competitor-start.sh
 ```
 
-The two modes are inverses because the two session types are. White-box keeps every public member's exact
-declaration with a `NotImplementedException` body and removes non-public members and non-const fields — a
-private helper's name gives away the decomposition, and a lookup table is the answer in data form. Black-box
-removes every method (the tests *are* the answer) while keeping the harness wiring: the private service field,
-the fixture constructor, the base list. Strip those and the delivered project cannot resolve the service under
-test.
+**One kit serves both session types.** It is a whole solution — `.gitignore`, `.sln`, the stubbed `*.Services`
+project, the emptied `*.UnitTests` project, and `local-nuget/` + `nuget.config` for the offline restore. The
+judge copies only the folder it swaps and ignores the rest of a submission, so the extra project cannot move a
+mark, while half a solution is something a competitor cannot open or build.
+
+The two rewrites are inverses because the two session types are. The services project keeps every public
+member's exact declaration with a `NotImplementedException` body and loses non-public members and non-const
+fields — a private helper's name gives away the decomposition, and a lookup table is the answer in data form.
+The test project loses every method (the tests *are* the answer) while keeping the harness wiring: the private
+service field, the fixture constructor, the base list. Strip those and the delivered project cannot resolve the
+service under test.
+
+For a **maintenance** session, where competitors inherit an authored, defective implementation rather than
+stubs, run `./make-competitor-start.sh maintenance`: the sources under `competitor-start/<Session>.Services/`
+are then yours to write and are left alone, and everything around them — that csproj included — is still
+regenerated.
 
 The script recreates the output directory rather than merging, so a stub for a member you have since deleted
-cannot survive into what competitors receive — and it compiles the result before finishing, because a starter
-kit that does not build costs every competitor the same confused ten minutes.
+cannot survive into what competitors receive — and it compiles the whole solution before finishing, because a
+starter kit that does not build costs every competitor the same confused ten minutes.
 
 Re-run it whenever the contract or the reference changes.
 
@@ -158,8 +169,8 @@ Then run a submission the way the platform will, before trusting anything:
 <path-to-skill-suite>/judging/tools/judge-run.sh <image> ./some-submission
 ```
 
-A submission is a directory containing **only the swapped folder**. This mirrors the platform's invocation
-exactly — read-only mount at `/workspace`, `-w /workspace`, two env vars — and prints the exit code and the
+A submission is a directory with **the swapped folder at its root**; anything beside it is ignored, so the
+generated `competitor-start/` is itself a valid submission. This mirrors the platform's invocation exactly — read-only mount at `/workspace`, `-w /workspace`, two env vars — and prints the exit code and the
 resulting events.
 
 In a white-box session, **red tests are a result, not a failed run**: expect exit 0 with failures recorded.

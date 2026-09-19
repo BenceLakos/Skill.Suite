@@ -183,13 +183,13 @@ jobs:
           # The hidden suite must pass against the reference implementation, or the template ships a session
           # that marks every competitor down for its own bug.
           dotnet test Ci.Template.sln -c Release
-          # Generates competitor-start/ and compiles it. A starter kit that does not build against the
-          # current contract costs every competitor the same confused ten minutes.
+          # Generates competitor-start/ - the whole solution, both projects - and compiles it. A starter kit
+          # that does not build against the current contract costs every competitor the same confused ten
+          # minutes.
           JUDGING_ROOT="${GITHUB_WORKSPACE}/judging" ./make-competitor-start.sh
-          # Both modes, because they are inverses and only one of them is the default: a black-box starter that
-          # keeps the reference suite's tests hands out the marks.
-          JUDGING_ROOT="${GITHUB_WORKSPACE}/judging" ./make-competitor-start.sh blackbox
           BASE_IMAGE=skill-suite-judge-base:9.0 ./build-image.sh
+          # The WHOLE kit is the submission, solution file and test project included: the judge copies only
+          # Ci.Template.Services out of it, so anything else a competitor's repository carries is ignored.
           mkdir -p /tmp/sub && cp -R competitor-start/. /tmp/sub/
           bash "${GITHUB_WORKSPACE}/judging/tools/judge-run.sh" ci-template-judge:1.0.0 /tmp/sub
 

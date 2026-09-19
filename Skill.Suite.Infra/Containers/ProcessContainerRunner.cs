@@ -26,39 +26,12 @@ internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> log
         Func<string, CancellationToken, Task> onStdoutLine,
         CancellationToken cancellationToken)
     {
-        // If the registry needs auth, log in before docker run pulls.
-        //
-        // The credentials go into a throwaway DOCKER_CONFIG directory rather than the daemon's shared store.
-        // That is what makes concurrent runs safe: `docker login` and `docker logout` both edit one global
-        // config file, so with a shared store one run's logout would revoke the credentials another run was
-        // in the middle of pulling with. It also keeps competition registry credentials out of the host's
-        // own docker config entirely.
-        string? dockerConfigDir = null;
-        if (request.RegistryAuth is not null)
-        {
-            dockerConfigDir = Directory.CreateTempSubdirectory("skill-suite-docker-").FullName;
-            await DockerLoginAsync(request.RegistryAuth, dockerConfigDir, cancellationToken);
-        }
+        // If the registry needs auth, log in before docker run pulls. The scope is inert when it does not,
+        // and disposing it is what revokes the credentials again.
+        await using var registryLogin =
+            await DockerRegistryLogin.OpenAsync(request.RegistryAuth, logger, cancellationToken);
 
-        try
-        {
-            return await RunInternalAsync(request, dockerConfigDir, onStdoutLine, cancellationToken);
-        }
-        finally
-        {
-            if (dockerConfigDir is not null)
-            {
-                await TryDockerLogoutAsync(request.RegistryAuth!.Server, dockerConfigDir);
-
-                // Deleting the directory is the real revocation; the logout above just keeps any credential
-                // helper informed.
-                try { Directory.Delete(dockerConfigDir, recursive: true); }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Could not remove the temporary docker config at {Path}", dockerConfigDir);
-                }
-            }
-        }
+        return await RunInternalAsync(request, registryLogin.ConfigDirectory, onStdoutLine, cancellationToken);
     }
 
     private async Task<ContainerRunResult> RunInternalAsync(
@@ -76,7 +49,7 @@ internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> log
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        ApplyDockerConfig(psi, dockerConfigDir);
+        DockerCli.ApplyConfigDirectory(psi, dockerConfigDir);
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var process = new Process { StartInfo = psi };
@@ -176,77 +149,6 @@ internal sealed class ProcessContainerRunner(ILogger<ProcessContainerRunner> log
             request.ContainerName, process.ExitCode, wasStopped);
 
         return new ContainerRunResult(process.ExitCode, stderr.Length == 0 ? null : stderr.ToString(), wasStopped);
-    }
-
-    /// <summary>
-    /// Scopes a docker invocation to a private credentials store, so concurrent runs cannot revoke each
-    /// other's login and registry credentials never touch the host's own docker config.
-    /// </summary>
-    private static void ApplyDockerConfig(ProcessStartInfo psi, string? dockerConfigDir)
-    {
-        if (dockerConfigDir is not null)
-            psi.Environment["DOCKER_CONFIG"] = dockerConfigDir;
-    }
-
-    private async Task DockerLoginAsync(RegistryAuth auth, string dockerConfigDir, CancellationToken cancellationToken)
-    {
-        var psi = new ProcessStartInfo("docker")
-        {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        ApplyDockerConfig(psi, dockerConfigDir);
-        psi.ArgumentList.Add("login");
-        psi.ArgumentList.Add("-u");
-        psi.ArgumentList.Add(auth.Username);
-        psi.ArgumentList.Add("--password-stdin");
-        if (!string.IsNullOrWhiteSpace(auth.Server))
-            psi.ArgumentList.Add(auth.Server);
-
-        using var login = Process.Start(psi)
-            ?? throw new InvalidOperationException("docker login could not be started.");
-
-        await login.StandardInput.WriteAsync(auth.Password);
-        login.StandardInput.Close();
-
-        await login.WaitForExitAsync(cancellationToken);
-
-        if (login.ExitCode != 0)
-        {
-            var stderr = await login.StandardError.ReadToEndAsync(cancellationToken);
-            logger.LogError("docker login failed (exit {ExitCode}) for {Server}: {Stderr}",
-                login.ExitCode, auth.Server ?? "<default>", stderr);
-            throw new InvalidOperationException($"docker login exited {login.ExitCode}.");
-        }
-    }
-
-    private async Task TryDockerLogoutAsync(string? server, string dockerConfigDir)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo("docker")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            ApplyDockerConfig(psi, dockerConfigDir);
-            psi.ArgumentList.Add("logout");
-            if (!string.IsNullOrWhiteSpace(server))
-                psi.ArgumentList.Add(server);
-
-            using var logout = Process.Start(psi);
-            if (logout is null) return;
-            await logout.WaitForExitAsync();
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "docker logout failed for {Server}", server ?? "<default>");
-        }
     }
 
     /// <summary>

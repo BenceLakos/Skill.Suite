@@ -23,6 +23,27 @@ public interface IMsSqlAdminClient
     Task<AccountProvisioning> EnsureLoginAndDatabaseAsync(
         MsSqlAccountRequest request, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Creates the database if it does not already exist.
+    /// </summary>
+    /// <remarks>
+    /// For a session's shared database, which belongs to nobody: no login is made its owner, and access to it
+    /// is handed out one competitor at a time by <see cref="GrantDatabaseAccessAsync"/>.
+    /// </remarks>
+    Task<AccountProvisioning> EnsureDatabaseAsync(
+        string database, BasicCredential admin, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes the login's read and write access inside the database match the request's flags.
+    /// </summary>
+    /// <remarks>
+    /// Converging rather than granting: a flag that is now <see langword="false"/> takes the access away, so an
+    /// admin who unticks a box and restarts the session gets what the box says. The database user the login
+    /// needs inside that database is created on the way if it is missing.
+    /// </remarks>
+    Task GrantDatabaseAccessAsync(
+        MsSqlDatabaseAccessRequest request, CancellationToken cancellationToken);
+
     /// <summary>Lists every SQL login and every database, for bulk status evaluation.</summary>
     Task<MsSqlAccountInventory> GetInventoryAsync(
         BasicCredential admin, CancellationToken cancellationToken);
