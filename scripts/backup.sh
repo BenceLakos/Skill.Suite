@@ -15,6 +15,10 @@
 #   3. The workdir       the cloned submissions and each run's events.jsonl. This is what an expert re-reads to
 #      volume           settle a dispute, and what ReprocessTestRunLog needs to rebuild a lost result.
 #
+# The starter packages volume is taken as well. It is reconstructible from the session repositories, but a
+# restored competition whose sessions point at empty template folders cannot enrol a late competitor, and the
+# packages are small.
+#
 # Restore with scripts/restore.sh, and REHEARSE it before the competition. An untested backup is a belief.
 
 set -euo pipefail
@@ -29,6 +33,7 @@ PG_USER=${PG_USER:-skillsuite}
 PG_DB=${PG_DB:-skillsuite}
 KEYS_VOLUME=${KEYS_VOLUME:-skill-suite-keys}
 WORKDIR_VOLUME=${WORKDIR_VOLUME:-skill-suite-workdir}
+STARTER_VOLUME=${STARTER_VOLUME:-skill-suite-starter-packages}
 
 # Helper image for reading docker-managed volumes. Defaults to the Postgres image, which is guaranteed present
 # because the database is running from it. It used to be alpine:3, which is not — and pulling it hung on a
@@ -71,6 +76,7 @@ backup_volume() {
 }
 
 backup_volume "${KEYS_VOLUME}" keys
+backup_volume "${STARTER_VOLUME}" starter-packages
 
 if [[ "${BACKUP_WORKDIR}" == "1" ]]; then
     backup_volume "${WORKDIR_VOLUME}" workdir
@@ -85,6 +91,7 @@ taken            ${STAMP}
 postgres         ${PG_DB} as ${PG_USER} from ${PG_CONTAINER}
 keys volume      ${KEYS_VOLUME}
 workdir volume   ${WORKDIR_VOLUME}
+starter volume   ${STARTER_VOLUME}
 migrations       $(docker exec "${PG_CONTAINER}" psql -U "${PG_USER}" -d "${PG_DB}" -tAc \
                    'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId" DESC LIMIT 1' 2>/dev/null || echo unknown)
 test_runs        $(docker exec "${PG_CONTAINER}" psql -U "${PG_USER}" -d "${PG_DB}" -tAc \

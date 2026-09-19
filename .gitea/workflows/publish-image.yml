@@ -42,9 +42,6 @@ name: publish-image
 # Variables (repository or owner level), all optional unless marked:
 #   SKILLSUITE_ADMIN_USER        REQUIRED for the deployment; the administrator's user name (not a credential,
 #                                so a variable, which is also where scripts/gitea-push.sh files it).
-#   SKILLSUITE_STARTER_PACKAGES  REQUIRED for the deployment. Directory ON THE DOCKER HOST holding the authored
-#                                sessions; mounted read-only into the platform. A path relative to the checkout
-#                                would be resolved inside the job container, where the host daemon cannot see it.
 #   DOMAIN, SKILLSUITE_GIT_INTERNAL_URL, SKILLSUITE_WEBHOOK_URL, SKILLSUITE_JUDGE_MEMORY, SKILLSUITE_JUDGE_CPUS,
 #   SKILLSUITE_JUDGE_PIDS, SKILLSUITE_CONCURRENT_RUNS, SKILLSUITE_BIND
 #                                the same knobs .env.example documents, with the same defaults when unset.
@@ -254,9 +251,10 @@ jobs:
 
   # The job container carries the host docker socket, so `docker compose up` here creates the platform
   # container on the HOST daemon, next to Gitea on the `skill-suite` network - exactly what
-  # `docker compose -f compose.yaml -f compose.production.yaml up -d` does when typed on that host. Only
-  # the compose FILES are read from the job's checkout; every bind mount source has to be a host path, which
-  # is why SKILLSUITE_STARTER_PACKAGES is required rather than defaulted below.
+  # `docker compose -f compose.yaml -f compose.production.yaml up -d` does when typed on that host. Only the
+  # compose FILES are read from the job's checkout: the production stack mounts docker volumes exclusively,
+  # never a host directory, because a path named here would be resolved by a daemon that cannot see the
+  # checkout - and, under Docker Desktop, cannot mount anything outside its shared folders at all.
   deploy:
     name: start the platform on this docker host
     needs: image
@@ -294,7 +292,6 @@ jobs:
           IMAGE_PLATFORMS: ${{ vars.IMAGE_PLATFORMS || 'linux/amd64' }}
           SKILLSUITE_ADMIN_USER: ${{ vars.SKILLSUITE_ADMIN_USER }}
           SKILLSUITE_ADMIN_PASSWORD: ${{ secrets.SKILLSUITE_ADMIN_PASSWORD }}
-          SKILLSUITE_STARTER_PACKAGES: ${{ vars.SKILLSUITE_STARTER_PACKAGES }}
           DOMAIN: ${{ vars.DOMAIN }}
           SKILLSUITE_GIT_INTERNAL_URL: ${{ vars.SKILLSUITE_GIT_INTERNAL_URL }}
           SKILLSUITE_WEBHOOK_URL: ${{ vars.SKILLSUITE_WEBHOOK_URL }}
@@ -311,14 +308,6 @@ jobs:
                  "production stack seeds its administrator from them. scripts/gitea-push.sh stores them from .env."
             exit 1
           fi
-          case "${SKILLSUITE_STARTER_PACKAGES:-}" in
-            /*) ;;
-            *)
-              echo "::error::variable SKILLSUITE_STARTER_PACKAGES must be an absolute path ON THE DOCKER HOST" \
-                   "(got '${SKILLSUITE_STARTER_PACKAGES:-}'). The platform mounts it read-only as /starter-packages."
-              exit 1
-              ;;
-          esac
 
           # The image was built for the first (usually only) platform in IMAGE_PLATFORMS; run it as that.
           SKILLSUITE_PLATFORM="${IMAGE_PLATFORMS%%,*}"

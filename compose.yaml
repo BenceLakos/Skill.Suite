@@ -35,6 +35,9 @@ services:
       # container restarts. Without this the key ring is regenerated on every boot
       # and the app fails with "The key {…} was not found in the key ring".
       DataProtection__KeyRingPath: /var/skill-suite/keys
+      # Where the session starter packages are mounted; the Starter packages admin page browses, uploads into
+      # and downloads from this directory, and Session.TemplateFolder values point below it.
+      StarterPackages__RootPath: /starter-packages
     volumes:
       # /var/run/docker.sock lets the app spawn judgement containers via the host daemon.
       # `workdir` is a docker-managed volume — the same volume is mounted by the daemon

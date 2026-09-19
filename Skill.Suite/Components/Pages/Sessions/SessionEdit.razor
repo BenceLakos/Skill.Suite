@@ -13,6 +13,7 @@
 @using Skill.Suite.Application.Sessions.CreateSession
 @using Skill.Suite.Application.Sessions.GetSession
 @using Skill.Suite.Application.Sessions.UpdateSession
+@using Skill.Suite.Application.StarterPackages.ListStarterPackages
 @using Skill.Suite.Components.Pages.Sessions.Drafts
 @using Skill.Suite.Domain.Credentials
 @using Skill.Suite.Domain.Sessions
@@ -93,9 +94,18 @@ else
 
             <MudTabPanel Text="@T["sessions.section.resources"]" Class="pa-0 pt-4">
                 <MudStack Spacing="3">
+                    @*
+                        Free text with suggestions rather than a picker: the folder only has to be readable
+                        by the application container, and a session can legitimately point at one that was
+                        mounted in rather than uploaded to the starter packages volume.
+                    *@
                     <LabeledField Label="@T["sessions.field.templateFolder"]" Help="@T["sessions.help.templateFolder"]">
-                        <MudTextField @bind-Value="_model.TemplateFolder"
-                                      Variant="Variant.Outlined" MaxLength="1000"/>
+                        <MudAutocomplete T="string" @bind-Value="_model.TemplateFolder"
+                                         Variant="Variant.Outlined" MaxLength="1000"
+                                         SearchFunc="SearchTemplateFolders"
+                                         CoerceText="true" CoerceValue="true"
+                                         ResetValueOnEmptyText="false"
+                                         Clearable="true"/>
                     </LabeledField>
                     <LabeledField Label="@T["sessions.field.judgementImage"]">
                         <MudSelect T="string" @bind-Value="_model.JudgementImage"
@@ -206,6 +216,7 @@ else
     private MudForm _form = null!;
     private SessionFormDraft _model = new();
     private List<string> _availableImages = [];
+    private List<string> _templateFolders = [];
     private List<CredentialDto> _giteaCredentials = [];
     private List<CredentialDto> _nexusCredentials = [];
     private bool _loading = true;
@@ -216,6 +227,19 @@ else
     {
         var imageOptions = await Mediator.Send(new ListDockerImageOptionsQuery());
         _availableImages = imageOptions.IsSuccess ? imageOptions.Value : [];
+
+        // Packages without a competitor-start folder are still offered, last: the folder may simply not have
+        // been uploaded yet, and a session cannot be started until it is there anyway.
+        var starterPackages = await Mediator.Send(new ListStarterPackagesQuery());
+        _templateFolders = starterPackages.IsSuccess
+            ?
+            [
+                .. starterPackages.Value
+                    .OrderByDescending(p => p.HasCompetitorStart)
+                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(p => p.TemplateFolder),
+            ]
+            : [];
 
         var gitea = await Mediator.Send(new ListCredentialsQuery(CredentialKind.Gitea, null));
         _giteaCredentials = gitea.IsSuccess ? gitea.Value : [];
@@ -246,6 +270,11 @@ else
 
         _loading = false;
     }
+
+    private Task<IEnumerable<string>> SearchTemplateFolders(string? value, CancellationToken cancellationToken) =>
+        Task.FromResult(string.IsNullOrWhiteSpace(value)
+            ? _templateFolders.AsEnumerable()
+            : _templateFolders.Where(folder => folder.Contains(value, StringComparison.OrdinalIgnoreCase)));
 
     private void AddDockerImage() =>
         _model.DockerImages.Add(new DockerImageDraft

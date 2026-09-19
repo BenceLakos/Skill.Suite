@@ -77,5 +77,6 @@ app.MapRazorComponents<App>()
 app.MapAccountEndpoints();
 app.MapWebhookEndpoints();
 app.MapTestRunEndpoints();
+app.MapStarterPackageEndpoints();
 
 app.Run();

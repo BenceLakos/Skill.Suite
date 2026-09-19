@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Application.Common;
+using Skill.Suite.Application.StarterPackages;
 using Skill.Suite.Application.Webhooks;
 using Skill.Suite.Infra.BackgroundTasks;
 using Skill.Suite.Infra.Containers;
@@ -13,6 +14,7 @@ using Skill.Suite.Infra.GitHost;
 using Skill.Suite.Infra.Identity;
 using Skill.Suite.Infra.Persistence;
 using Skill.Suite.Infra.Security;
+using Skill.Suite.Infra.StarterPackages;
 
 namespace Skill.Suite.Infra;
 
@@ -89,8 +91,10 @@ public static class DependencyInjection
         services.AddHostedService<IdentitySeeder>();
 
         services.Configure<WebhookOptions>(configuration.GetSection(WebhookOptions.SectionName));
+        services.Configure<StarterPackagesOptions>(configuration.GetSection(StarterPackagesOptions.SectionName));
         services.AddSingleton<IBackgroundTaskQueue, ChannelBackgroundTaskQueue>();
         services.AddSingleton<IActiveTestRunRegistry, ActiveTestRunRegistry>();
+        services.AddSingleton<IStarterPackageStore, FileSystemStarterPackageStore>();
         services.AddScoped<IGitClient, ProcessGitClient>();
         services.AddScoped<IContainerRunner, ProcessContainerRunner>();
 

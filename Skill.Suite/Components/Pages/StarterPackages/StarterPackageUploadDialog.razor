@@ -1,0 +1,155 @@
+@inject ISender Mediator
+@inject ISnackbar Snackbar
+@inject ITranslator T
+@inject IOptions<StarterPackagesOptions> PackageOptions
+
+@using System.Text.RegularExpressions
+@using Microsoft.Extensions.Options
+@using Skill.Suite.Application.StarterPackages
+@using Skill.Suite.Application.StarterPackages.UploadStarterPackage
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                @T["starterPackages.upload.help"]
+            </MudText>
+
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+                <MudFileUpload T="IBrowserFile" Accept="@ZipExtension" FilesChanged="OnFileChanged">
+                    <CustomContent Context="upload">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.AttachFile"
+                                   Disabled="_submitting"
+                                   OnClick="@(() => upload.OpenFilePickerAsync())">
+                            @T["starterPackages.upload.choose"]
+                        </MudButton>
+                    </CustomContent>
+                </MudFileUpload>
+
+                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                    @(_file is null
+                        ? T["starterPackages.upload.noFile"]
+                        : $"{_file.Name} ({ByteSizeFormatter.Format(_file.Size)})")
+                </MudText>
+            </MudStack>
+
+            <LabeledField Label="@T["starterPackages.field.name"]" Help="@T["starterPackages.upload.nameHelp"]">
+                <MudTextField @bind-Value="_name"
+                              Variant="Variant.Outlined"
+                              Immediate="true"
+                              Disabled="_submitting"
+                              MaxLength="StarterPackageName.MaxLength"/>
+            </LabeledField>
+
+            @if (NameExists)
+            {
+                <MudCheckBox T="bool" @bind-Value="_overwrite" Dense="true" Color="Color.Warning"
+                             Label="@T.Format("starterPackages.upload.overwrite", _name.Trim())"/>
+            }
+
+            @if (_submitting)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary"/>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_submitting">@T["common.cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.CloudUpload"
+                   OnClick="Submit" Disabled="@(_submitting || _file is null)">
+            @T["starterPackages.upload.confirm"]
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string ZipExtension = ".zip";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    /// <summary>Package names already in the volume — what turns the upload into a replace.</summary>
+    [Parameter] public List<string> ExistingNames { get; set; } = [];
+
+    private IBrowserFile? _file;
+    private string _name = string.Empty;
+    private string _suggestedName = string.Empty;
+    private bool _overwrite;
+    private bool _submitting;
+    private string? _error;
+
+    private bool NameExists =>
+        !string.IsNullOrWhiteSpace(_name) && ExistingNames.Contains(_name.Trim(), StringComparer.Ordinal);
+
+    private void OnFileChanged(IBrowserFile? file)
+    {
+        _file = file;
+        _error = null;
+
+        if (file is null) return;
+
+        // Only prefill while the name is still ours to set — an operator who typed one keeps it.
+        if (!string.IsNullOrWhiteSpace(_name) && _name != _suggestedName) return;
+
+        _suggestedName = SuggestName(file.Name);
+        _name = _suggestedName;
+    }
+
+    private async Task Submit()
+    {
+        if (_file is null)
+        {
+            _error = T["starterPackages.upload.noFile"];
+            return;
+        }
+
+        var name = _name.Trim();
+        if (!StarterPackageName.IsValid(name))
+        {
+            _error = T["starterPackages.upload.invalidName"];
+            return;
+        }
+
+        var maxBytes = PackageOptions.Value.MaxUploadBytes;
+        if (_file.Size > maxBytes)
+        {
+            _error = T.Format("starterPackages.upload.tooLarge", ByteSizeFormatter.Format(maxBytes));
+            return;
+        }
+
+        _submitting = true;
+        _error = null;
+
+        await using var archive = _file.OpenReadStream(maxBytes);
+        var result = await Mediator.Send(new UploadStarterPackageCommand(name, archive, _overwrite));
+        if (result.IsFailure)
+        {
+            _error = result.Error.Message;
+            _submitting = false;
+            return;
+        }
+
+        Snackbar.Add(T.Format("starterPackages.upload.success", name), Severity.Success);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    /// <summary>Turns "Fibonacci Session.zip" into a name the volume accepts, or nothing if it cannot.</summary>
+    private static string SuggestName(string fileName)
+    {
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var sanitised = Regex.Replace(stem, "[^A-Za-z0-9._-]", "-").Trim('-', '.', '_');
+
+        if (sanitised.Length > StarterPackageName.MaxLength)
+            sanitised = sanitised[..StarterPackageName.MaxLength];
+
+        return StarterPackageName.IsValid(sanitised) ? sanitised : string.Empty;
+    }
+}
