@@ -28,6 +28,7 @@ builder.Services.AddAuthentication(options =>
     .AddIdentityCookies();
 
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<Skill.Suite.Application.TestRuns.ITestRunChangeNotifier, TestRunChangeNotifier>();
@@ -77,5 +78,7 @@ app.MapRazorComponents<App>()
 app.MapAccountEndpoints();
 app.MapWebhookEndpoints();
 app.MapTestRunEndpoints();
+app.MapStarterPackageEndpoints();
+app.MapHealthChecks(HealthEndpoints.Liveness).AllowAnonymous();
 
 app.Run();

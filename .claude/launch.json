@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "skill-suite-dev",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "StarterPackages__RootPath=/private/tmp/claude-501/-Users-bence-Projects-Skills-Skill-Suite/a5c543f3-2d1e-43e6-8e21-f1adb770ab45/scratchpad/sp-root",
+        "ASPNETCORE_ENVIRONMENT=Development",
+        "ASPNETCORE_URLS=http://localhost:5189",
+        "dotnet", "run", "--project", "Skill.Suite", "--no-launch-profile"
+      ],
+      "port": 5189
+    }
+  ]
+}

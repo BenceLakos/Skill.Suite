@@ -3,9 +3,9 @@
 #
 #   scripts/restore.sh backups/20260803T120000Z
 #
-# DESTRUCTIVE: it drops and recreates the database and replaces both volumes. It refuses to run against a
-# stack with the application up, because restoring under a live app produces a database the app has half-cached
-# and a key ring it has already loaded.
+# DESTRUCTIVE: it drops and recreates the database and replaces every volume the snapshot carries. It refuses
+# to run against a stack with the application up, because restoring under a live app produces a database the
+# app has half-cached and a key ring it has already loaded.
 #
 # Rehearse this before the competition, into a clean stack, and check that the marks come back. A backup nobody
 # has restored is a belief rather than a plan — and the moment you need it is the worst moment to discover the
@@ -21,6 +21,7 @@ PG_USER=${PG_USER:-skillsuite}
 PG_DB=${PG_DB:-skillsuite}
 KEYS_VOLUME=${KEYS_VOLUME:-skill-suite-keys}
 WORKDIR_VOLUME=${WORKDIR_VOLUME:-skill-suite-workdir}
+STARTER_VOLUME=${STARTER_VOLUME:-skill-suite-starter-packages}
 APP_CONTAINER=${APP_CONTAINER:-skill-suite}
 # Same reasoning as backup.sh: an image already on the host, not one that needs pulling mid-incident.
 HELPER_IMAGE=${HELPER_IMAGE:-$(docker inspect --format '{{.Config.Image}}' "${PG_CONTAINER}" 2>/dev/null || echo postgres:18.4)}
@@ -41,7 +42,7 @@ fi
 
 [[ -f "${SRC}/keys.tar.gz" ]] || printf '  ! no keys.tar.gz — every stored credential and webhook secret will\n    be undecryptable after this restore. Continue only if that is expected.\n\n' >&2
 
-read -r -p "This replaces the database and both volumes. Type the database name to confirm: " confirm
+read -r -p "This replaces the database and the volumes in the snapshot. Type the database name to confirm: " confirm
 [[ "${confirm}" == "${PG_DB}" ]] || die "not confirmed"
 
 log "recreating ${PG_DB}"
@@ -72,6 +73,7 @@ restore_volume() {
 
 restore_volume "${KEYS_VOLUME}" keys.tar.gz
 restore_volume "${WORKDIR_VOLUME}" workdir.tar.gz
+restore_volume "${STARTER_VOLUME}" starter-packages.tar.gz
 
 printf '\n'
 ok "restore complete"

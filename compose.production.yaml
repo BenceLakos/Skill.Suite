@@ -47,10 +47,13 @@ services:
       Webhook__AllowUnsignedPushes: "false"
 
     volumes:
-      # Starter packages the session author produced. Session.TemplateFolder is read by THIS process, so a host
-      # path typed into that field is invisible to it and every competitor gets an empty repository. Point this
-      # at wherever the authored sessions live on the competition machine.
-      - "${SKILLSUITE_STARTER_PACKAGES:-./judging/samples}:/starter-packages:ro"
+      # Starter packages the session authors produced, in a docker-managed volume rather than a host directory.
+      # Session.TemplateFolder is read by THIS process, so the packages have to be where the process can see
+      # them, and a volume is the one place that is the same on a Linux, macOS or Windows docker host - a bind
+      # mount named from the deploy job would be a path the daemon in Docker Desktop's VM cannot share. Filled
+      # from the Starter packages page in the UI, or from a shell with scripts/starter-packages.sh; included in
+      # scripts/backup.sh snapshots. Read-write: the UI writes uploads into it.
+      - starter-packages:/starter-packages
 
     # Container logs are unbounded by default, and a judgement run is chatty. Filling the disk mid-competition
     # takes Postgres down with it.
@@ -61,8 +64,10 @@ services:
         max-file: "5"
 
     healthcheck:
-      # The login page is the cheapest endpoint that proves the app booted and can serve a request.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/Account/Login >/dev/null 2>&1 || exit 1"]
+      # /healthz is the anonymous liveness endpoint Program.cs maps; curl is installed into the image for this
+      # probe, because the aspnet runtime image carries neither curl nor wget and a missing tool reports as
+      # "unhealthy" indistinguishably from a dead application. The deploy job's `up --wait` blocks on this.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz >/dev/null || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -72,3 +77,7 @@ services:
       # 8080 only. 8081 is the HTTPS port the container does not terminate, and exposing it on a venue network
       # advertises a service that cannot answer.
       - "${SKILLSUITE_BIND:-0.0.0.0}:8080:8080"
+
+volumes:
+  starter-packages:
+    name: skill-suite-starter-packages

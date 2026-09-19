@@ -2,11 +2,14 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 # Run as root in the runtime stage so the bind-mounted /var/run/docker.sock is
 # accessible. git and docker are required by ProcessGitClient / ProcessContainerRunner,
 # which shell out to the CLIs to clone submissions and run judgement containers.
+# curl is for the compose healthcheck: the aspnet runtime image ships neither curl nor
+# wget, so a probe that shells out to one fails before it ever reaches the application.
 USER root
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         git \
         docker.io \
+        curl \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 EXPOSE 8080

@@ -1,0 +1,321 @@
+@page "/starter-packages"
+@attribute [Authorize(Roles = "Admin")]
+@inject ISender Mediator
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ITranslator T
+
+@using Skill.Suite.Application.StarterPackages
+@using Skill.Suite.Application.StarterPackages.BrowseStarterPackage
+@using Skill.Suite.Application.StarterPackages.DeleteStarterPackage
+@using Skill.Suite.Application.StarterPackages.ListStarterPackages
+
+<PageTitle>@T["starterPackages.title"]</PageTitle>
+
+<PageHeader Title="@T["starterPackages.title"]" Subtitle="@T["starterPackages.subtitle"]">
+    <Actions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.CloudUpload" OnClick="OpenUpload">
+            @T["starterPackages.upload"]
+        </MudButton>
+    </Actions>
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Dense="true" Class="mb-4">@_error</MudAlert>
+}
+
+@if (_path is null)
+{
+    <MudDataGrid T="StarterPackageDto"
+                 Elevation="1"
+                 Items="_packages"
+                 Loading="_loading"
+                 Hover="true"
+                 SortMode="SortMode.Multiple"
+                 Filterable="false">
+        <Columns>
+            <TemplateColumn Title="@T["starterPackages.field.name"]" Sortable="false">
+                <CellTemplate>
+                    <MudLink Typo="Typo.body2" OnClick="@(() => Open(context.Item.Name))">
+                        @context.Item.Name
+                    </MudLink>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["starterPackages.field.size"]" Sortable="false">
+                <CellTemplate>
+                    <MudText Typo="Typo.body2">@ByteSizeFormatter.Format(context.Item.SizeBytes)</MudText>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.ModifiedAt" Title="@T["starterPackages.field.modified"]"
+                            Format="yyyy-MM-dd HH:mm"/>
+            <TemplateColumn Title="@T["starterPackages.field.competitorStart"]" Sortable="false">
+                <CellTemplate>
+                    <MudTooltip Text="@(context.Item.HasCompetitorStart
+                                          ? T["starterPackages.competitorStart.present"]
+                                          : T["starterPackages.competitorStart.missing"])">
+                        <MudIcon Icon="@(context.Item.HasCompetitorStart
+                                           ? Icons.Material.Filled.CheckCircle
+                                           : Icons.Material.Filled.Warning)"
+                                 Color="@(context.Item.HasCompetitorStart ? Color.Success : Color.Warning)"
+                                 Size="Size.Small"/>
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["starterPackages.field.templateFolder"]" Sortable="false">
+                <CellTemplate>
+                    <MudTextField T="string"
+                                  Value="@context.Item.TemplateFolder"
+                                  ReadOnly="true"
+                                  Variant="Variant.Outlined"
+                                  Margin="Margin.Dense"
+                                  Adornment="Adornment.End"
+                                  AdornmentIcon="@Icons.Material.Filled.ContentCopy"
+                                  AdornmentAriaLabel="@T["starterPackages.copyTemplateFolder"]"
+                                  OnAdornmentClick="@(() => CopyTemplateFolder(context.Item.TemplateFolder))"
+                                  Style="min-width:320px;"/>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
+                <CellTemplate>
+                    <MudTooltip Text="@T["starterPackages.action.browse"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small"
+                                       OnClick="@(() => Open(context.Item.Name))"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@T["starterPackages.action.download"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" Color="Color.Primary"
+                                       OnClick="@(() => Download(context.Item.Name))"/>
+                    </MudTooltip>
+                    <MudTooltip Text="@T["common.delete"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => Delete(context.Item))"/>
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["starterPackages.empty"]</MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+}
+else
+{
+    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
+        <MudBreadcrumbs Items="_crumbs">
+            <ItemTemplate Context="crumb">
+                @if (crumb.Disabled)
+                {
+                    <MudText Typo="Typo.body2">@crumb.Text</MudText>
+                }
+                else
+                {
+                    <MudLink Typo="Typo.body2" OnClick="@(() => OpenCrumb(crumb))">@crumb.Text</MudLink>
+                }
+            </ItemTemplate>
+        </MudBreadcrumbs>
+        <MudStack Row="true" Spacing="2">
+            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="LoadPackages">
+                @T["starterPackages.backToPackages"]
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => Download(_path))">
+                @T["starterPackages.action.downloadFolder"]
+            </MudButton>
+        </MudStack>
+    </MudStack>
+
+    <MudDataGrid T="StarterPackageEntryDto"
+                 Elevation="1"
+                 Items="_entries"
+                 Loading="_loading"
+                 Hover="true"
+                 SortMode="SortMode.None"
+                 Filterable="false">
+        <Columns>
+            <TemplateColumn Title="@T["starterPackages.field.name"]" Sortable="false">
+                <CellTemplate>
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@(context.Item.IsDirectory
+                                           ? Icons.Material.Filled.Folder
+                                           : Icons.Material.Filled.InsertDriveFile)"
+                                 Color="@(context.Item.IsDirectory ? Color.Primary : Color.Default)"
+                                 Size="Size.Small"/>
+                        <MudLink Typo="Typo.body2" OnClick="@(() => OpenEntry(context.Item))">
+                            @context.Item.Name
+                        </MudLink>
+                    </MudStack>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@T["starterPackages.field.size"]" Sortable="false">
+                <CellTemplate>
+                    <MudText Typo="Typo.body2">@ByteSizeFormatter.Format(context.Item.SizeBytes)</MudText>
+                </CellTemplate>
+            </TemplateColumn>
+            <PropertyColumn Property="x => x.ModifiedAt" Title="@T["starterPackages.field.modified"]"
+                            Format="yyyy-MM-dd HH:mm"/>
+            <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
+                <CellTemplate>
+                    <MudTooltip Text="@T["starterPackages.action.download"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" Color="Color.Primary"
+                                       OnClick="@(() => Download(context.Item.RelativePath))"/>
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">@T["starterPackages.folderEmpty"]</MudText>
+        </NoRecordsContent>
+    </MudDataGrid>
+}
+
+@code {
+    private List<StarterPackageDto> _packages = [];
+    private List<StarterPackageEntryDto> _entries = [];
+    private List<BreadcrumbItem> _crumbs = [];
+
+    /// <summary>Folder being browsed, relative to the starter packages root; null shows the packages list.</summary>
+    private string? _path;
+
+    private bool _loading;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await LoadPackages();
+
+    private async Task LoadPackages()
+    {
+        _loading = true;
+        _error = null;
+
+        var result = await Mediator.Send(new ListStarterPackagesQuery());
+        if (result.IsSuccess)
+        {
+            _packages = [.. result.Value];
+        }
+        else
+        {
+            _packages = [];
+            _error = result.Error.Message;
+        }
+
+        _path = null;
+        _loading = false;
+    }
+
+    private async Task Open(string relativePath)
+    {
+        _loading = true;
+        _error = null;
+
+        var result = await Mediator.Send(new BrowseStarterPackageQuery(relativePath));
+        if (result.IsSuccess)
+        {
+            _entries = [.. result.Value];
+            _path = relativePath;
+            _crumbs = BuildCrumbs(relativePath);
+        }
+        else
+        {
+            _error = result.Error.Message;
+        }
+
+        _loading = false;
+    }
+
+    private async Task OpenEntry(StarterPackageEntryDto entry)
+    {
+        if (entry.IsDirectory)
+        {
+            await Open(entry.RelativePath);
+            return;
+        }
+
+        Download(entry.RelativePath);
+    }
+
+    private async Task OpenCrumb(BreadcrumbItem crumb)
+    {
+        if (string.IsNullOrEmpty(crumb.Href))
+        {
+            await LoadPackages();
+            return;
+        }
+
+        await Open(crumb.Href);
+    }
+
+    // forceLoad so the browser makes its own authenticated request for the file rather than the circuit
+    // trying to render it.
+    private void Download(string relativePath) =>
+        Nav.NavigateTo($"api/starter-packages/download?path={Uri.EscapeDataString(relativePath)}", forceLoad: true);
+
+    private async Task CopyTemplateFolder(string templateFolder)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", templateFolder);
+            Snackbar.Add(T["starterPackages.templateFolderCopied"], Severity.Success);
+        }
+        catch (JSException)
+        {
+            // The clipboard API is unavailable outside a secure context; the value is on screen either way.
+            Snackbar.Add(T["starterPackages.templateFolderCopyFailed"], Severity.Warning);
+        }
+    }
+
+    private async Task OpenUpload()
+    {
+        var parameters = new DialogParameters
+        {
+            ["ExistingNames"] = _packages.Select(p => p.Name).ToList(),
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+        var dialog = await Dialogs.ShowAsync<StarterPackageUploadDialog>(
+            T["starterPackages.upload.title"], parameters, options);
+
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await LoadPackages();
+    }
+
+    private async Task Delete(StarterPackageDto package)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["starterPackages.deleteConfirmTitle"],
+            Message = T.Format("starterPackages.deleteConfirm", package.Name),
+            YesText = T["common.delete"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        var result = await Mediator.Send(new DeleteStarterPackageCommand(package.Name));
+        if (result.IsSuccess)
+        {
+            Snackbar.Add(T["common.success.deleted"], Severity.Success);
+            await LoadPackages();
+        }
+        else
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+        }
+    }
+
+    private List<BreadcrumbItem> BuildCrumbs(string relativePath)
+    {
+        var crumbs = new List<BreadcrumbItem> { new(T["starterPackages.title"], string.Empty) };
+        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var path = string.Empty;
+
+        for (var i = 0; i < segments.Length; i++)
+        {
+            path = path.Length == 0 ? segments[i] : $"{path}/{segments[i]}";
+            crumbs.Add(new BreadcrumbItem(segments[i], path, disabled: i == segments.Length - 1));
+        }
+
+        return crumbs;
+    }
+}

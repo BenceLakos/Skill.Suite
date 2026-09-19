@@ -1,5 +1,16 @@
 name: skill-suite-infra
 
+# Shared infrastructure for a competition: the platform database, the SQL Server competitors build against,
+# the git host, the reverse proxy every device on the venue LAN goes through, and the Actions runners that
+# build the platform image.
+#
+#   cp infra/.env.example infra/.env && $EDITOR infra/.env
+#   docker compose -f infra/compose.yaml up -d
+#
+# Compose reads infra/.env because the project directory is the directory of the first -f file, so the
+# variables below resolve from there no matter which directory the command is run from. With no .env at all
+# the defaults still produce a working stack on *.localhost, which modern browsers resolve to loopback.
+
 services:
   postgres:
     container_name: skill-suite-postgres
@@ -27,6 +38,57 @@ services:
     networks:
       - skill-suite
 
+  # The single entrypoint for the whole competition. Everything else is reached by name through it:
+  # git.${DOMAIN}, suite.${DOMAIN}, traefik.${DOMAIN} over http, sql.${DOMAIN} over TDS. Plain http only - a
+  # venue LAN has no certificate authority, and a self-signed one would have to be trusted on every
+  # competitor machine.
+  traefik:
+    container_name: skill-suite-traefik
+    image: traefik:v3.5
+    restart: unless-stopped
+    command:
+      # Routes are discovered from container labels, so adding a service means labelling it, not editing a
+      # proxy configuration file. exposedbydefault=false keeps unlabelled containers (Postgres, the runners,
+      # every judgement container the platform spawns) off the proxy.
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=skill-suite
+      - --entrypoints.web.address=:80
+      # A TCP entrypoint per non-http service. http multiplexes many hosts on one port because Traefik reads
+      # the Host header; a raw TCP stream carries nothing comparable (the mssql labels explain why TDS has no
+      # SNI either), so each such service owns a port of its own on the proxy.
+      - --entrypoints.mssql.address=:1433
+      - --api.dashboard=true
+      - --log.level=INFO
+    volumes:
+      # Read-only: Traefik only needs to watch container events and read labels.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+      - "${MSSQL_PORT:-1433}:1433"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.dashboard.rule=Host(`traefik.${DOMAIN:-localhost}`)
+      - traefik.http.routers.dashboard.entrypoints=web
+      - traefik.http.routers.dashboard.service=api@internal
+      - traefik.http.routers.dashboard.middlewares=dashboard-auth
+      # htpasswd lines, comma-separated for several users. Generated with the command in infra/.env.example
+      # and single-quoted there, because compose interpolates $ inside unquoted .env values and a bcrypt hash
+      # is nothing but $-separated fields.
+      - traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_USERS:?set TRAEFIK_DASHBOARD_USERS in infra/.env (htpasswd format, see infra/.env.example)}
+    networks:
+      skill-suite:
+        # The public hostnames also resolve to Traefik from INSIDE the network. Every container on
+        # skill-suite - the runners, the job containers they spawn, a buildx builder attached to the network -
+        # then reaches git.${DOMAIN} and suite.${DOMAIN} at the proxy, which routes on the Host header exactly
+        # as it does for a browser on the LAN. Nothing inside docker depends on venue DNS or on the host's
+        # /etc/hosts, and a workflow can use the same registry hostname a human types. sql.${DOMAIN} works the
+        # same way, so a judge container and a competitor laptop use one connection string.
+        aliases:
+          - git.${DOMAIN:-localhost}
+          - suite.${DOMAIN:-localhost}
+          - sql.${DOMAIN:-localhost}
+
   gitea:
     container_name: skill-suite-gitea
     image: gitea/gitea:1.26
@@ -39,24 +101,165 @@ services:
       - GITEA__database__NAME=gitea
       - GITEA__database__USER=gitea
       - GITEA__database__PASSWD=gitea
-      - GITEA__server__DOMAIN=localhost
-      - GITEA__server__SSH_DOMAIN=localhost
-      - GITEA__server__ROOT_URL=http://localhost:3000/
+      # ROOT_URL is what Gitea writes into clone URLs, webhook payloads, the registry host shown in the UI and
+      # github.server_url inside a workflow. It has to be the name a browser and a runner both use, which is
+      # the Traefik route - not localhost, which only means anything on the host itself.
+      - GITEA__server__DOMAIN=git.${DOMAIN:-localhost}
+      - GITEA__server__SSH_DOMAIN=git.${DOMAIN:-localhost}
+      - GITEA__server__ROOT_URL=http://git.${DOMAIN:-localhost}/
       - GITEA__server__SSH_PORT=2222
       - GITEA__webhook__ALLOWED_HOST_LIST=skill-suite,*
+      # Explicit rather than relying on the image default, because the act_runner service below is useless
+      # without it and a disabled Actions subsystem fails as "no runner registered" rather than as itself.
+      - GITEA__actions__ENABLED=true
     volumes:
       - gitea-data:/data
     ports:
+      # 3000 stays published for local tooling that addresses Gitea directly - judging/verification/e2e uses
+      # http://localhost:3000 - and 2222 for ssh clones. Once everything goes through Traefik the 3000 mapping
+      # can be dropped; the e2e harness is the only thing still relying on it.
       - '3000:3000'
       - '2222:22'
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      # act-runner waits on this: registering against a Gitea that is still migrating its database fails, and
+      # a failed registration is a restart loop rather than a retry.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.gitea.rule=Host(`git.${DOMAIN:-localhost}`)
+      - traefik.http.routers.gitea.entrypoints=web
+      # Required: the container exposes both 3000 and 22, so Traefik has no single port to guess.
+      - traefik.http.services.gitea.loadbalancer.server.port=3000
+    networks:
+      - skill-suite
+
+  # The SQL Server competitors work against. Nothing in the stack itself uses it: the platform and Gitea live
+  # in Postgres. Reached as sql.${DOMAIN},1433 from the LAN and from inside the network alike - the port is
+  # published on Traefik, not here. sa is the operator's account only; each competitor gets a login and a
+  # database of their own, created by hand and handed out through the platform as a CredentialKind.MsSql
+  # credential (the T-SQL is in infra/.env.example).
+  mssql:
+    container_name: skill-suite-mssql
+    image: mcr.microsoft.com/mssql/server:2025-CU9-ubuntu-24.04
+    # Microsoft publishes amd64 only. Stated so an arm64 host pulls it instead of failing with "no matching
+    # manifest"; a no-op on amd64. An Apple silicon rehearsal machine runs it through Docker Desktop's
+    # "Use Rosetta for x86_64/amd64 emulation" setting - under plain QEMU SQL Server is unreliable.
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      - ACCEPT_EULA=Y
+      # Required rather than defaulted: the sa password is the one operator credential on this server, and
+      # SQL Server itself refuses to start when it fails the complexity policy. Applied only while mssql-data
+      # is empty - infra/.env.example says what changing it later actually does.
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in infra/.env (8+ chars, three of upper/lower/digit/symbol, see infra/.env.example)}
+      - MSSQL_PID=${MSSQL_PID:-Express}
+      # Code page 1250, so ő and ű survive in varchar columns; the Latin1 default silently degrades them.
+      # Mirrors the hu-HU initialisation of Postgres above. First boot only, like the sa password.
+      - MSSQL_COLLATION=${MSSQL_COLLATION:-Hungarian_CI_AS}
+      # What SQL Server's own memory manager believes the machine has; it targets about 80% of it for the
+      # buffer pool (Express caps that at ~1.4 GB regardless, so under Express the edition binds first). The
+      # cgroup limit below is what actually protects Postgres and the judge containers; keep it above this.
+      - MSSQL_MEMORY_LIMIT_MB=${MSSQL_MEMORY_LIMIT_MB:-2048}
+      - TZ=Europe/Budapest
+    deploy:
+      resources:
+        limits:
+          # About MSSQL_MEMORY_LIMIT_MB plus a gigabyte for what the memory manager does not count (thread
+          # stacks, the CLR, sqlcmd in the healthcheck). Set it lower and the kernel OOM-kills the engine
+          # instead of SQL Server trimming its caches. Four CPUs is also the most Express will use.
+          memory: ${MSSQL_CONTAINER_MEMORY:-3g}
+          cpus: "${MSSQL_CONTAINER_CPUS:-4}"
+    volumes:
+      # System and user databases, the error log and the server's own certificate. The image runs as the
+      # unprivileged mssql user and docker seeds the volume with the image's ownership, so no chown is needed.
+      - mssql-data:/var/opt/mssql
+    # A hard kill leaves the databases in recovery and the next start replays the transaction log for as long
+    # as it takes; SQL Server checkpoints on SIGTERM if given the time.
+    stop_grace_period: 60s
+    healthcheck:
+      # SQLCMDPASSWORD instead of -P keeps the password out of the container's process list. -C trusts the
+      # server's self-signed certificate, which tools18 otherwise rejects; -b turns a query error into a
+      # non-zero exit; -l bounds the login wait so a probe cannot outlive its timeout. $$ is a literal $ to
+      # compose, so the container's own variable is what expands.
+      test: ["CMD-SHELL", "SQLCMDPASSWORD=\"$$MSSQL_SA_PASSWORD\" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -l 10 -Q 'SELECT 1' >/dev/null || exit 1"]
+      # Each probe is a full ODBC connect and TLS handshake, which under emulation is not free, and nothing
+      # depends_on this service - so probe rarely and give it room rather than flap.
+      interval: 30s
+      timeout: 15s
+      # Cold start builds the system databases; under emulation it is slower still.
+      start_period: 90s
+      retries: 5
+    labels:
+      - traefik.enable=true
+      # TDS has no SNI for Traefik to read: the client sends a cleartext pre-login packet and negotiates TLS
+      # inside the protocol afterwards. HostSNI(`*`) is therefore the only host-matching rule that can apply,
+      # which is why this service has an entrypoint (a port) of its own instead of sharing one. Going through
+      # the proxy still buys one published surface, one hostname for the LAN and the network alike, and a
+      # place to fence access without touching SQL Server - AND a ClientIP(`<competitor subnet>`) onto this
+      # rule. The cost: SQL Server sees every client as Traefik's address, and a Traefik restart drops open
+      # connections. Router names are daemon-wide, so no other container may label itself `mssql`.
+      - traefik.tcp.routers.mssql.rule=HostSNI(`*`)
+      - traefik.tcp.routers.mssql.entrypoints=mssql
+      - traefik.tcp.services.mssql.loadbalancer.server.port=1433
+    networks:
+      - skill-suite
+
+  # Gitea Actions runners. These execute .gitea/workflows/, which is what builds and publishes the platform
+  # image into Gitea's own container registry.
+  #
+  # BOOTSTRAP ORDER. The registration token is issued by Gitea, so it cannot exist before Gitea does. On a
+  # fresh host the first `up -d` starts the runners with an empty token; each one fails to register and
+  # restarts, which is harmless noise. Then:
+  #
+  #   infra/runner-token.sh                          generates a token and writes it into infra/.env
+  #   docker compose -f infra/compose.yaml up -d      recreates the runners, which now register
+  #
+  # SCALING. Set GITEA_RUNNER_REPLICAS in infra/.env and run `up -d` again, or override it for one command
+  # with `docker compose -f infra/compose.yaml up -d --scale act-runner=20`. Each replica takes one job at a
+  # time (see capacity in act_runner/config.yaml), so replicas are the only parallelism knob that matters.
+  act-runner:
+    # No container_name: replicas need distinct names, and compose refuses a fixed one.
+    image: gitea/act_runner:latest
+    # TODO: pin to a digest or a released tag once a version has been validated against this Gitea.
+    restart: unless-stopped
+    depends_on:
+      gitea:
+        condition: service_healthy
+    deploy:
+      replicas: ${GITEA_RUNNER_REPLICAS:-1}
+    environment:
+      - CONFIG_FILE=/etc/act_runner/config.yaml
+      # The runner talks to Gitea over the docker network. What a workflow sees as github.server_url comes
+      # from Gitea's ROOT_URL regardless, so this being an internal name changes nothing for the jobs.
+      - GITEA_INSTANCE_URL=${GITEA_RUNNER_INSTANCE_URL:-http://gitea:3000}
+      - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_REGISTRATION_TOKEN:-}
+      - GITEA_RUNNER_LABELS=${GITEA_RUNNER_LABELS:-ubuntu-latest:docker://gitea/runner-images:ubuntu-latest}
+      # GITEA_RUNNER_NAME is deliberately unset: it then defaults to the container hostname, which compose
+      # makes unique per replica. A fixed name would have every replica register as the same runner.
+    volumes:
+      # Job containers are created on the host daemon by the runner, which also mounts this same socket into
+      # each of them on its own (see container.docker_host in act_runner/config.yaml), so the workflow's build
+      # steps reach the daemon too.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./act_runner/config.yaml:/etc/act_runner/config.yaml:ro
+    # No /data volume on purpose. act_runner stores its registration in a .runner file, and a shared volume
+    # would have every replica read and overwrite the same one - they would all claim a single registration.
+    # Each replica therefore registers itself on first start. The cost is that recreating the containers
+    # registers new runners and leaves the previous ones as stale offline entries in Gitea's runner list;
+    # delete them there when the list gets noisy.
     networks:
       - skill-suite
 
 volumes:
   postgres-data:
+  mssql-data:
   gitea-data:
 
 networks:
