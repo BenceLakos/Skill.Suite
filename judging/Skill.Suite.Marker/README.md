@@ -59,10 +59,9 @@ fixtures/
 
 A directory rather than `Name=path` pairs, because the caller is a shell script and coverlet buries its report
 under an unpredictable GUID directory. Each report is summed whole, with the same direct-child `<line>` rule
-the rollup uses, so the classes are comparable with one another. They are not always comparable with the
-`overall` line counts, which are summed over whatever files the caller globbed and can legitimately include the
-same report twice (a TRX attachment copy); the *rates* are unaffected either way. A class with no report gets
-**no event**, not a zero — nothing was measured, which is not the same as nothing was covered.
+the rollup uses, so the classes are comparable with one another **and with the `overall` line counts** beside
+them. A class with no report gets **no event**, not a zero — nothing was measured, which is not the same as
+nothing was covered.
 
 **Mutation** comes from the same single Stryker report as the rollup, via `testFiles[*].tests[]` (test id →
 name) and each mutant's `coveredBy` / `killedBy`. A class's `covered` is the mutants at least one of its tests
@@ -173,3 +172,11 @@ Keep stderr terse: on a non-zero container exit the platform pastes it into the 
 directly. `--fixture-coverage` takes exactly one directory, because its subdirectory names are the data. A
 missing or corrupt TRX, coverage or mutation report is skipped rather than fatal; only an unusable marking map
 or an unwritable events file fails the run.
+
+**Coverage reports are deduplicated by content hash**, so passing the same report twice is harmless. A glob
+over `TestResults` finds one: a run with `--logger trx` leaves coverlet's own
+`TestResults/<guid>/coverage.cobertura.xml` and a byte-identical copy attached to the TRX under
+`TestResults/<run>/In/<host>/`. Summing both doubled `total` and `covered` — the numbers the platform stores
+and displays — while leaving the rate, and so the score, untouched, which is why it went unnoticed. Two
+reports with *different* content still sum, so a multi-project run is unaffected. TRX files carry no such
+attachment copy of themselves and are not deduplicated.

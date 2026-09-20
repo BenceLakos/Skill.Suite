@@ -148,12 +148,23 @@ if 'qualityMin' in spec or 'qualityMax' in spec:
 
 # Coverage is asserted separately from quality for the "weak suite" case, where the whole point is that
 # coverage matches a good suite while the score does not.
+overall_coverage = next((e for e in events if e.get('event') == 'coverage'
+                         and not e.get('fixture') and e.get('part', 'overall') == 'overall'), None)
+
 if 'coverageMin' in spec:
-    coverage = next((e for e in events if e.get('event') == 'coverage'
-                     and not e.get('fixture') and e.get('part', 'overall') == 'overall'), None)
-    rate = (coverage or {}).get('value')
+    rate = (overall_coverage or {}).get('value')
     if not isinstance(rate, (int, float)) or rate < spec['coverageMin']:
         problems.append(f'line coverage {rate} below the expected minimum {spec["coverageMin"]}')
+
+# The one exact assertion in a file of bands, and it earns the exception: a line count is a property of the
+# implementation under test, so it is the same on every run - unlike a kill rate. It exists because the
+# judge used to glob the same cobertura report twice (coverlet's own copy and the TRX attachment) and report
+# double the real totals, with the rate - and so every band above - entirely unaffected.
+for key, field in (('coverageTotal', 'total'), ('coverageCovered', 'covered')):
+    if key in spec:
+        actual = (overall_coverage or {}).get(field)
+        if actual != spec[key]:
+            problems.append(f'overall coverage {field}={actual}, expected exactly {spec[key]}')
 
 # Per-test-class measurements. Asserted as "every class the harness opened has both, with a real number in
 # range" rather than against fixed values: the point is that the plumbing reaches every fixture, and exact
