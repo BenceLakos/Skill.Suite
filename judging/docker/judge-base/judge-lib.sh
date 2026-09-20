@@ -42,6 +42,9 @@ judge_configure() {
     : "${JUDGE_TIMEOUT_SECONDS:=300}"
     # Stryker re-runs the whole suite once per mutant, so it needs its own, much larger budget.
     : "${JUDGE_MUTATION_TIMEOUT_SECONDS:=900}"
+    # Per-fixture coverage runs the suite once per TEST CLASS, filtered. Each run is a fraction of the whole
+    # suite, so the budget is per class and small; one class that hangs is skipped rather than fatal.
+    : "${JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS:=120}"
     : "${JUDGE_FAIL_ON_RED:=false}"
     : "${JUDGE_LOCAL_FEED:=${JUDGE_APP_DIR}/local-nuget}"
     : "${JUDGE_NUGET_CACHE:=/root/.nuget/packages}"
@@ -642,6 +645,127 @@ run_tests() {
         judge_fatal 1 "test" "tests failed and JUDGE_FAIL_ON_RED is true."
     fi
 
+    return 0
+}
+
+# judge_test_classes <trx-file>... - the distinct fully-qualified test classes a run executed.
+#
+# grep and sed rather than a parser, for the same reason json_escape is parameter expansion: the sdk:9.0 image
+# ships neither jq, python3 nor xmllint, and adding one to the base image to read a single attribute would be a
+# large dependency for a small job.
+#
+# The TRX is the right source rather than the event stream: it is written by the runner, outside the
+# submission's process, so a suite cannot name classes here that it did not actually run. The trailing
+# `s/,.*$//` strips the assembly qualification some runners append ("Ns.Type, Assembly, Version=...").
+judge_test_classes() {
+    grep -ho 'className="[^"]*"' "$@" 2>/dev/null \
+        | sed -e 's/^className="//' -e 's/"$//' -e 's/,.*$//' -e 's/[[:space:]]*$//' \
+        | grep -v '^$' \
+        | sort -u
+}
+
+# judge_fixture_coverage <destination-dir> <trx-file>... - one filtered coverage run per test class.
+#
+# What it produces is exactly the layout `skill-marker score --fixture-coverage` reads: a directory per test
+# class, named by the class's SIMPLE name so it matches the fixture names already in the event stream, holding
+# that class's own cobertura report.
+#
+#     <destination-dir>/CalculatorTests/<guid>/coverage.cobertura.xml
+#
+# Three things here are load bearing:
+#
+#   1. LOG_DIRECTORY is REDIRECTED to a throwaway directory for the whole loop, exactly as the mutation step
+#      does it. Every one of these test hosts starts the xUnit harness, which opens $LOG_DIRECTORY/events.jsonl
+#      with FileMode.Create - so left alone, the first filtered run truncates the real event stream and the
+#      submission looks as though it executed the tests of one class and nothing else. The stream is copied and
+#      compared afterwards as well, because that failure mode has already survived one round of defences.
+#
+#   2. The filter carries a TRAILING DOT: `FullyQualifiedName~Ns.Class.` matches that class's test methods and
+#      not `Ns.ClassExtra`, which a bare contains-match would also claim.
+#
+#   3. A failing class run is logged and skipped. These are measurements shown beside a submission, never the
+#      submission's verdict, so one class whose run times out must not cost the competitor their mark. `dotnet
+#      test` also exits non-zero merely because tests failed, which here is not even an error.
+judge_fixture_coverage() {
+    judge_require JUDGE_TEST_PROJECT
+
+    local dest=$1
+    shift
+
+    # Without this, judge_test_classes would call grep with no file arguments and it would sit reading stdin
+    # forever - a hung container, from a step that is only ever decoration.
+    if (( $# == 0 )); then
+        printf 'judge: no TRX to read test classes from; skipping per-fixture coverage\n' >&2
+        return 0
+    fi
+
+    local classes
+    classes=$(judge_test_classes "$@")
+
+    if [[ -z "${classes}" ]]; then
+        printf 'judge: no test classes found in the TRX; skipping per-fixture coverage\n' >&2
+        return 0
+    fi
+
+    cd "${JUDGE_APP_DIR}"
+    mkdir -p "${dest}"
+
+    cp "${JUDGE_EVENT_FILE}" "${JUDGE_WORK}/events.before-fixture-coverage.jsonl" 2>/dev/null || true
+
+    local real_log_directory="${LOG_DIRECTORY}"
+    export LOG_DIRECTORY="${JUDGE_WORK}/fixture-coverage-logs"
+    mkdir -p "${LOG_DIRECTORY}"
+
+    local measured=0
+    local skipped=0
+    local class simple out log status child
+
+    while IFS= read -r class; do
+        [[ -n "${class}" ]] || continue
+
+        # The simple name, which is what FixtureScope<T> puts in start-fixture and therefore what the marker
+        # joins on. A nested class contributes its innermost name, again matching typeof(T).Name.
+        simple="${class##*.}"
+        simple="${simple##*+}"
+
+        out="${dest}/${simple}"
+        log="${JUDGE_WORK}/fixture-coverage-${simple}.log"
+        mkdir -p "${out}"
+
+        status=0
+        timeout --signal=TERM --kill-after=10s "${JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS}" \
+            dotnet test "${JUDGE_TEST_PROJECT}" -c Release --no-restore --no-build \
+            --filter "FullyQualifiedName~${class}." \
+            --collect:"XPlat Code Coverage" \
+            --results-directory "${out}" \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura \
+            >"${log}" 2>&1 &
+        child=$!
+        wait "${child}" || status=$?
+
+        if find "${out}" -name '*.cobertura.xml' -type f -print -quit 2>/dev/null | grep -q .; then
+            measured=$((measured + 1))
+        else
+            skipped=$((skipped + 1))
+            if (( status == 124 )); then
+                printf 'judge: per-fixture coverage for %s exceeded %ss; skipped\n' \
+                    "${simple}" "${JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS}" >&2
+            else
+                printf 'judge: per-fixture coverage for %s produced no report (exit %s): %s\n' \
+                    "${simple}" "${status}" "$(judge_errors "${log}")" >&2
+            fi
+        fi
+    done <<<"${classes}"
+
+    export LOG_DIRECTORY="${real_log_directory}"
+
+    if [[ -f "${JUDGE_WORK}/events.before-fixture-coverage.jsonl" ]] \
+        && ! cmp -s "${JUDGE_EVENT_FILE}" "${JUDGE_WORK}/events.before-fixture-coverage.jsonl"; then
+        printf 'judge: events.jsonl was modified during per-fixture coverage; restoring the pre-step stream\n' >&2
+        cp "${JUDGE_WORK}/events.before-fixture-coverage.jsonl" "${JUDGE_EVENT_FILE}"
+    fi
+
+    printf 'judge: per-fixture coverage measured %s class(es), skipped %s\n' "${measured}" "${skipped}"
     return 0
 }
 

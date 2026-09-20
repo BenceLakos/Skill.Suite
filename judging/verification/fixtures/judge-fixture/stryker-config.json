@@ -10,6 +10,7 @@
     "concurrency": 2,
     "additional-timeout": 5000,
     "verbosity": "info",
-    "disable-bail": false
+    "coverage-analysis": "perTest",
+    "disable-bail": true
   }
 }

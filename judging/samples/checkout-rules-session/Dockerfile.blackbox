@@ -68,8 +68,19 @@ ENV JUDGE_SOLUTION=Checkout.Rules.sln \
     JUDGE_MARKING_MAP=/app/marking-map.json \
     JUDGE_FAIL_ON_RED=false \
     JUDGE_EMIT_ASPECT_REPORT=false \
-    # Stryker re-runs the whole suite once per mutant, so it needs far more than the per-step budget.
+    # Stryker re-runs the suite once per mutant, so it needs far more than the per-step budget.
+    #
+    # stryker-config.json asks for "coverage-analysis": "perTest" and "disable-bail": true, which pull the
+    # runtime in opposite directions: per-test analysis runs only the tests that actually cover a mutant, which
+    # is a large saving, while bail off means those tests all run instead of stopping at the first kill. Both
+    # are required for the per-fixture mutation numbers - with bail on, Stryker stops at the first killing test
+    # and every OTHER test class that would have caught the same mutant is recorded as having missed it. On the
+    # verification fixture the two roughly cancel; a session with many tests per mutant should re-measure
+    # before trusting this budget.
     JUDGE_MUTATION_TIMEOUT_SECONDS=900 \
+    # Per-fixture coverage runs the suite once per TEST CLASS, filtered to that class. Each run is a slice of
+    # the whole suite, so this is per class and small; a class that exceeds it is skipped, never fatal.
+    JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS=120 \
     PATH="${PATH}:/root/.dotnet/tools"
 
 WORKDIR /app

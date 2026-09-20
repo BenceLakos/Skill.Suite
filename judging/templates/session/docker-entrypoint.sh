@@ -34,6 +34,10 @@ judge_seal_graded_assets
 
 TEST_RESULTS="${JUDGE_APP_DIR}/TestResults"
 STRYKER_OUTPUT="${JUDGE_APP_DIR}/StrykerOutput"
+# Deliberately NOT under TestResults. The scoring step globs that directory for coverage.cobertura.xml, and one
+# report per test class sitting inside it would be summed into the whole-suite coverage - inflating both the
+# numerator and the denominator of the number the score is actually computed from.
+FIXTURE_COVERAGE="${JUDGE_APP_DIR}/FixtureCoverage"
 
 swap_dir
 restore_offline
@@ -52,6 +56,23 @@ judge_assert_results
 # Verified BEFORE Stryker and the marker run: if the implementation was edited while the submission's tests were
 # executing, every number computed after this point is meaningless.
 judge_verify_graded_assets
+
+# ---------------------------------------------------------------------------- per-fixture coverage
+#
+# One filtered, no-build test run per test class, so the competitor can see which of THEIR classes covered what
+# rather than only a single number for the suite as a whole. Additive: the whole-suite coverage above is still
+# what the score is computed from.
+#
+# Placed here deliberately - after the seal check, before Stryker. After, because these runs execute the
+# submission's code again and the numbers they produce are only meaningful if the implementation they measure
+# was still intact when the suite ran. Before, because Stryker rewrites the sources it mutates and restoring
+# them is its business, not something to measure coverage in the middle of.
+#
+# judge_fixture_coverage redirects LOG_DIRECTORY for its runs; see the long note on it in judge-lib.sh, and the
+# one on the mutation step below - the events.jsonl clobbering failure mode is identical here.
+# shellcheck disable=SC2046
+judge_fixture_coverage "${FIXTURE_COVERAGE}" \
+    $(find "${TEST_RESULTS}" -name '*.trx' 2>/dev/null | tr '\n' ' ') || true
 
 # ---------------------------------------------------------------------------- mutation testing
 #
@@ -118,7 +139,8 @@ skill-marker score \
     --events "${JUDGE_EVENT_FILE}" \
     --trx $(find "${TEST_RESULTS}" -name '*.trx' 2>/dev/null | tr '\n' ' ') \
     --coverage $(find "${TEST_RESULTS}" -name 'coverage.cobertura.xml' 2>/dev/null | tr '\n' ' ') \
-    --mutation "${MUTATION_REPORT}"
+    --mutation "${MUTATION_REPORT}" \
+    --fixture-coverage "${FIXTURE_COVERAGE}"
 
 # The per-aspect report is only meaningful when the map declares aspects; for a pure measurement session it
 # is skipped.
