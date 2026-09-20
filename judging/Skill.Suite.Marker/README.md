@@ -59,7 +59,9 @@ fixtures/
 
 A directory rather than `Name=path` pairs, because the caller is a shell script and coverlet buries its report
 under an unpredictable GUID directory. Each report is summed whole, with the same direct-child `<line>` rule
-the rollup uses, so the numbers are comparable with each other and with `overall`. A class with no report gets
+the rollup uses, so the classes are comparable with one another. They are not always comparable with the
+`overall` line counts, which are summed over whatever files the caller globbed and can legitimately include the
+same report twice (a TRX attachment copy); the *rates* are unaffected either way. A class with no report gets
 **no event**, not a zero — nothing was measured, which is not the same as nothing was covered.
 
 **Mutation** comes from the same single Stryker report as the rollup, via `testFiles[*].tests[]` (test id →

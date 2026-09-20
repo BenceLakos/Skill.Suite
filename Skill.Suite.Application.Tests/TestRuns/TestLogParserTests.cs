@@ -109,6 +109,87 @@ public sealed class TestLogParserTests
     }
 
     [Fact]
+    public void FixtureScopedMetrics_LandOnTheTestClassItself()
+    {
+        var run = NewRun();
+
+        Apply(run, """{"event":"start-unit-test","fixture":"CalculatorTests","test":"Adds"}""");
+        Apply(run, """{"event":"finish-unit-test","fixture":"CalculatorTests","test":"Adds","outcome":"passed"}""");
+        Apply(run, """{"event":"coverage","value":0.75,"total":8,"covered":6,"fixture":"CalculatorTests"}""");
+        Apply(run, """{"event":"mutation","value":0.6667,"total":3,"covered":3,"killed":2,"fixture":"CalculatorTests"}""");
+
+        var fixture = Assert.Single(run.Fixtures);
+        Assert.Equal(TestFixtureKind.Tests, fixture.Kind);
+        Assert.Equal(0.75, fixture.LineCoverage);
+        Assert.Equal(0.6667, fixture.MutationScore);
+
+        // A measurement, never a verdict: quality is still only ever set by a part's score event.
+        Assert.Null(fixture.Quality);
+    }
+
+    [Fact]
+    public void FixtureScopedMetrics_DoNotCreateAMetricPart()
+    {
+        var run = NewRun();
+
+        Apply(run, """{"event":"coverage","part":"services","value":0.9,"total":10,"covered":9}""");
+        Apply(run, """{"event":"coverage","value":0.5,"total":10,"covered":5,"fixture":"services"}""");
+
+        // Same name, two meanings. Routing the fixture-scoped one by `part` would have merged a competitor's
+        // test class into the scoring part of the same name - exactly what TestFixtureKind exists to prevent.
+        Assert.Equal(2, run.Fixtures.Count);
+        Assert.Null(run.Fixtures.Single(f => f.Kind == TestFixtureKind.Metrics).LineCoverage);
+        Assert.Equal(0.5, run.Fixtures.Single(f => f.Kind == TestFixtureKind.Tests).LineCoverage);
+    }
+
+    [Fact]
+    public void FixtureScopedMetrics_CreateTheFixtureWhenTheStreamHadNone()
+    {
+        var run = NewRun();
+
+        // The marker appends after the test host has exited, so a class the harness never opened - one whose
+        // tests were all filtered out, say - can still have been measured.
+        Apply(run, """{"event":"mutation","value":1,"total":2,"covered":2,"killed":2,"fixture":"SmokeTests"}""");
+
+        var fixture = Assert.Single(run.Fixtures);
+        Assert.Equal(TestFixtureKind.Tests, fixture.Kind);
+        Assert.Equal("SmokeTests", fixture.Name);
+        Assert.Equal(1.0, fixture.MutationScore);
+    }
+
+    [Fact]
+    public void FixtureScopedMetrics_KeepTheirRawPayloadOnTheMetricsUnit()
+    {
+        var run = NewRun();
+
+        Apply(run, """{"event":"coverage","value":0.75,"total":8,"covered":6,"fixture":"CalculatorTests"}""");
+        Apply(run, """{"event":"mutation","value":0.5,"total":2,"covered":2,"killed":1,"fixture":"CalculatorTests"}""");
+
+        var unit = Assert.Single(run.Fixtures.Single().UnitTests);
+        Assert.Equal(TestRun.QualityUnitName, unit.Name);
+        Assert.Equal(2, unit.Events.Count);
+        Assert.All(unit.Events, e => Assert.Equal(TestEventKind.Metric, e.Kind));
+        Assert.Contains(unit.Events, e => e.Target == "coverage" && e.Payload!.Contains("\"fixture\":\"CalculatorTests\""));
+    }
+
+    [Fact]
+    public void PartScopedMetrics_AreUnchangedByFixtureScoping()
+    {
+        var run = NewRun();
+
+        Apply(run, """{"event":"coverage","part":"overall","value":0.9,"total":10,"covered":9}""");
+        Apply(run, """{"event":"score","part":"overall","value":0.8}""");
+
+        var fixture = Assert.Single(run.Fixtures);
+        Assert.Equal(TestFixtureKind.Metrics, fixture.Kind);
+        Assert.Equal(0.8, fixture.Quality);
+
+        // The part rollup's coverage stays a stored payload, not a column: only a fixture-scoped event fills
+        // LineCoverage, so the two can never be confused in the UI.
+        Assert.Null(fixture.LineCoverage);
+    }
+
+    [Fact]
     public void OverLongNames_AreTruncatedRatherThanLosingTheRun()
     {
         var run = NewRun();

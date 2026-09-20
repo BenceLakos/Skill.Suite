@@ -22,6 +22,9 @@ public sealed class TestFixtureResultConfiguration : IEntityTypeConfiguration<Te
         builder.Property(x => x.StartedAt).IsRequired();
         builder.Property(x => x.FinishedAt);
         builder.Property(x => x.Quality);
+        // Measurements of one test class, stored beside the part-level verdict but never mistaken for it.
+        builder.Property(x => x.LineCoverage);
+        builder.Property(x => x.MutationScore);
 
         builder.HasMany(x => x.UnitTests)
             .WithOne()

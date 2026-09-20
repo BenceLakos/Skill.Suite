@@ -27,6 +27,27 @@ public sealed class TestFixtureResult : Entity<Guid>
     /// </summary>
     public double? Quality { get; private set; }
 
+    /// <summary>
+    /// Line coverage in [0, 1] this fixture achieved on its own. Populated from a fixture-scoped
+    /// <c>coverage</c> metric event; null for scoring parts and for any fixture the judge did not measure
+    /// individually.
+    /// </summary>
+    /// <remarks>
+    /// A measurement, not a verdict — deliberately separate from <see cref="Quality"/>, which is a composite
+    /// the marking map authorises for a scoring part. Nothing computes a mark from this.
+    /// </remarks>
+    public double? LineCoverage { get; private set; }
+
+    /// <summary>
+    /// Mutation kill rate in [0, 1] for the mutants this fixture's tests reached. Populated from a
+    /// fixture-scoped <c>mutation</c> metric event; null when it was not measured.
+    /// </summary>
+    /// <remarks>
+    /// The denominator is what this fixture covered, not every mutant in the submission, so a small focused
+    /// test class is not scored against code it never claimed to test.
+    /// </remarks>
+    public double? MutationScore { get; private set; }
+
     public List<UnitTestResult> UnitTests { get; private set; } = new();
 
     internal static TestFixtureResult Start(
@@ -75,4 +96,10 @@ public sealed class TestFixtureResult : Entity<Guid>
 
     internal void SetQuality(double quality) =>
         Quality = Math.Clamp(quality, 0.0, 1.0);
+
+    internal void SetLineCoverage(double coverage) =>
+        LineCoverage = Math.Clamp(coverage, 0.0, 1.0);
+
+    internal void SetMutationScore(double mutationScore) =>
+        MutationScore = Math.Clamp(mutationScore, 0.0, 1.0);
 }

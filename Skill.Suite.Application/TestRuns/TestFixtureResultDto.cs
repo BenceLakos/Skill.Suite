@@ -13,4 +13,6 @@ public sealed record TestFixtureResultDto(
     DateTime StartedAt,
     DateTime? FinishedAt,
     double? Quality,
+    double? LineCoverage,
+    double? MutationScore,
     IReadOnlyList<UnitTestResultDto> UnitTests);

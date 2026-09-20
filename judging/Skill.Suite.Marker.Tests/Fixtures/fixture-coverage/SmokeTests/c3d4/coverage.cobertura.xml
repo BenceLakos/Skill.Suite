@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   A second class's run over the same code: 2 of 8 lines. Same denominator as WidgetTests, which is the point -
-  every per-fixture run measures the whole project, so the numbers are comparable with each other and with the
-  overall rollup.
+  every per-fixture run measures the whole project, so two classes' coverage is comparable.
 -->
 <coverage line-rate="0.25" branch-rate="1" version="1.9" timestamp="1757679335" lines-covered="2" lines-valid="8" branches-covered="0" branches-valid="0">
   <sources>

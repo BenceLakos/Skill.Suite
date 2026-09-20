@@ -9,6 +9,9 @@ public sealed class TestRun : AuditableEntity<Guid>
     /// Name of the synthetic unit the parser places metric events into. One per fixture
     /// (i.e. one per `part`), so a fixture's "quality" unit accumulates every metric
     /// event the judge emits for that part (coverage / mutation / score / test-summary).
+    /// A test-class fixture measured individually gets the same unit, holding its own
+    /// fixture-scoped coverage and mutation events - one name for "where metric events
+    /// live", whatever the fixture turns out to be.
     /// </summary>
     public const string QualityUnitName = "quality";
 
@@ -232,5 +235,71 @@ public sealed class TestRun : AuditableEntity<Guid>
     {
         var fixture = FindFixture(partName, TestFixtureKind.Metrics);
         fixture?.SetQuality(quality);
+    }
+
+    /// <summary>
+    /// Records a measurement the judge made of one <b>test class</b>, rather than of a scoring part.
+    /// </summary>
+    /// <param name="fixtureName">The test class, named as the harness names it in <c>start-fixture</c>.</param>
+    /// <param name="metric">Which measurement <paramref name="value"/> is.</param>
+    /// <param name="eventType">The wire event kind, stored on the record's <c>Target</c> for the UI to label by.</param>
+    /// <param name="timestamp">When the judge emitted it.</param>
+    /// <param name="payloadJson">The raw event line, kept verbatim like every other metric record.</param>
+    /// <param name="value">The measured ratio in 0..1, or null when the event carried no number.</param>
+    /// <remarks>
+    /// <para>
+    /// The fixture is looked up as <see cref="TestFixtureKind.Tests"/> — the competitor's own class — and
+    /// <b>never</b> as <see cref="TestFixtureKind.Metrics"/>. That separation is the whole reason these events
+    /// carry a <c>fixture</c> rather than a <c>part</c>: a scoring part named after a real test class must not
+    /// end up sharing its row, or a part's quality would land on the class and vice versa.
+    /// </para>
+    /// <para>
+    /// The fixture is created when absent, because the ordering guarantee runs the other way round for a
+    /// judge-produced event than for a harness-produced one: the marker appends after the test host has exited,
+    /// and a class whose every test was filtered out of the event stream can still have been measured.
+    /// </para>
+    /// <para>
+    /// Unlike <see cref="SetFixtureQuality"/>, nothing downstream turns these into a mark. They are shown.
+    /// </para>
+    /// </remarks>
+    public void RecordFixtureMetric(
+        string fixtureName,
+        TestFixtureMetric metric,
+        string eventType,
+        DateTime timestamp,
+        string? payloadJson,
+        double? value)
+    {
+        if (string.IsNullOrWhiteSpace(fixtureName) || string.IsNullOrWhiteSpace(eventType))
+            return;
+
+        var fixture = FindFixture(fixtureName, TestFixtureKind.Tests)
+                      ?? StartFixture(fixtureName, timestamp, TestFixtureKind.Tests);
+        var unit = fixture.FindUnitTest(QualityUnitName) ?? fixture.StartUnitTest(QualityUnitName, timestamp);
+
+        unit.AppendEvent(new TestEventRecord(
+            Kind: TestEventKind.Metric,
+            Timestamp: timestamp,
+            Target: eventType,
+            Arguments: null,
+            Returned: null,
+            Threw: null,
+            AssertionKind: null,
+            Expected: null,
+            Actual: null,
+            Passed: null,
+            Payload: payloadJson));
+
+        if (value is not { } measured) return;
+
+        switch (metric)
+        {
+            case TestFixtureMetric.LineCoverage:
+                fixture.SetLineCoverage(measured);
+                break;
+            case TestFixtureMetric.MutationScore:
+                fixture.SetMutationScore(measured);
+                break;
+        }
     }
 }

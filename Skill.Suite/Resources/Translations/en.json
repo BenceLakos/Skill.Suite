@@ -328,6 +328,8 @@
   "testRuns.events.kind.assertion": "Assertion",
   "testRuns.events.kind.metric": "Metric",
   "testRuns.field.quality": "Quality",
+  "testRuns.field.coverage": "Coverage",
+  "testRuns.field.mutation": "Mutation",
   "testRuns.field.session": "Session",
   "testRuns.events.call": "Call",
   "testRuns.events.returned": "Returned",
