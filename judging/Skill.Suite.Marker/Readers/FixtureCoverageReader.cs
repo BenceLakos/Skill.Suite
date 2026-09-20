@@ -25,7 +25,9 @@ namespace Skill.Suite.Marker.Readers;
 /// <para>
 /// Parsing is <see cref="CoberturaReader"/>'s, not a second copy of it: the direct-child <c>&lt;line&gt;</c>
 /// counting rule that keeps Coverlet's duplicated lines from doubling both totals has to be identical, or a
-/// fixture's numbers would not be comparable with the part and <c>overall</c> numbers beside them.
+/// fixture's numbers would not be comparable with the part and <c>overall</c> numbers beside them. The same
+/// applies to its content-hash deduplication — the recursive search below would otherwise sum a TRX
+/// attachment copy of a report alongside the report itself.
 /// </para>
 /// </remarks>
 public static class FixtureCoverageReader
