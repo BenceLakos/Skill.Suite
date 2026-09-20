@@ -9,11 +9,16 @@ namespace Skill.Suite.Application.Sessions.MySession;
 /// for the whole session — so a restarting server would blank the page that tells them what to connect to.
 /// <para>
 /// The login and the personal database share the competitor's username, which is how
-/// <c>IMsSqlAdminClient.EnsureLoginAndDatabaseAsync</c> creates them: one name to type.
+/// <c>IMsSqlAdminClient.EnsureLoginAndDatabaseAsync</c> creates them: one name to type. The session database
+/// is a second, separate one — named for the session and this competitor, and created by starting the
+/// session rather than by provisioning their account.
 /// </para>
 /// </remarks>
 /// <param name="Server">The server as this competitor's machine reaches it, or null when it cannot be derived.</param>
-/// <param name="SessionDatabase">The session's shared database, or null when the session has none.</param>
+/// <param name="SessionDatabase">
+/// This competitor's own database for the session, <c>{base}-{username}</c>, or null when the session
+/// configures none. Nobody else is granted anything on it.
+/// </param>
 public sealed record MySessionDatabaseDto(
     string? Server,
     string Login,

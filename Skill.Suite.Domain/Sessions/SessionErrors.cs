@@ -66,13 +66,44 @@ public static class SessionErrors
     public static readonly Error DatabaseAccessUnknown =
         Error.Failure("Session.DatabaseAccessUnknown",
             "The SQL Server's login list could not be read, so there is no way to tell which competitors can " +
-            "be granted access to the session database. The session was not started and nothing was created " +
-            "— check the SQL Server and its credential, then start it again.");
+            "be given a session database. The session was not started and nothing was created — check the " +
+            "SQL Server and its credential, then start it again.");
+
+    public static Error SeedScriptUnreadable(string path, string reason) =>
+        Error.Validation("Session.SeedScriptUnreadable",
+            $"The database seed script '{path}' could not be read from the starter packages volume: {reason} " +
+            "The session was not started — pick a script that is still there, or clear the field.");
+
+    public static readonly Error SeedScriptWithoutDatabase =
+        Error.Validation("Session.SeedScriptWithoutDatabase",
+            "This session has a database seed script but no database name, so there is nothing to run it " +
+            "against. Set the database name, or clear the seed script.");
 
     public static readonly Error MissingImagePullCredential =
         Error.Validation("Session.MissingImagePullCredential",
             "The image pull credential this session names no longer exists, so its docker services cannot be " +
             "pulled. Select a credential on the session, or remove the one it points at.");
+
+    public static Error ServicePortOutOfRange(int basePort, int ordinal) =>
+        Error.Validation("Session.ServicePortOutOfRange",
+            $"Host port {basePort} plus this competitor's position in the session ({ordinal}) is past 65535, " +
+            "so no port could be published for them. Lower the service's host port — it is a base that every " +
+            "competitor's own copy is counted up from.");
+
+    public static readonly Error NotClosedForMarking =
+        Error.Conflict("Session.NotClosedForMarking",
+            "Marking can only be started for a closed session. Close it first — a session that is still " +
+            "running, or only stopped, can be started again, and its competition containers hold the very " +
+            "host ports the marking containers publish.");
+
+    public static readonly Error NoServicesToMark =
+        Error.Validation("Session.NoServicesToMark",
+            "This session configures no docker services, so there is nothing to start for marking.");
+
+    public static readonly Error MarkingNeedsDatabaseName =
+        Error.Validation("Session.MarkingNeedsDatabaseName",
+            "A docker service of this session refers to the competitors' database, but the session has no " +
+            "database base name, so there is no database to point the marking containers at.");
 
     public static readonly Error NoCompetitorsWithGitAccess =
         Error.Validation("Session.NoCompetitorsWithGitAccess",

@@ -12,6 +12,9 @@ public static partial class SessionMapper
     [MapperIgnoreSource(nameof(Session.DomainEvents))]
     [MapperIgnoreSource(nameof(Session.WebhookSecret))]
     [MapperIgnoreSource(nameof(Session.Competitors))]
+    // Bookkeeping for the enrolment sequence, not configuration: it says nothing an administrator edits or
+    // reads, and the DTO it would land in is what the session form binds to.
+    [MapperIgnoreSource(nameof(Session.NextCompetitorOrdinal))]
     public static partial SessionDto ToDto(Session session);
 
     public static partial List<SessionDto> ToDtoList(IEnumerable<Session> sessions);

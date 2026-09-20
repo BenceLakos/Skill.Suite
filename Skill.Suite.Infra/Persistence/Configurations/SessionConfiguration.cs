@@ -21,6 +21,10 @@ public sealed class SessionConfiguration : IEntityTypeConfiguration<Session>
     {
         builder.ToTable("sessions");
 
+        // The enrolment sequence. Required rather than nullable: it is what keeps two competitors' service
+        // containers off each other's host ports, and an absent value would silently start both on the first.
+        builder.Property(x => x.NextCompetitorOrdinal).IsRequired();
+
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Name).IsRequired().HasMaxLength(200);
@@ -36,6 +40,7 @@ public sealed class SessionConfiguration : IEntityTypeConfiguration<Session>
         builder.Property(x => x.DatabaseName).HasMaxLength(120);
         builder.Property(x => x.DatabaseReadAccess).IsRequired();
         builder.Property(x => x.DatabaseWriteAccess).IsRequired();
+        builder.Property(x => x.DatabaseSeedScript).HasMaxLength(1000);
 
         builder.Property(x => x.GitCredentialId);
         builder.Property(x => x.JudgementImagePullCredentialId);

@@ -4,8 +4,8 @@ namespace Skill.Suite.Application.Sessions.StartSession;
 /// What starting the session managed to do, per stage.
 /// </summary>
 /// <remarks>
-/// Reports partial success rather than a bare pass/fail: with twenty competitors, three services and a shared
-/// database, "starting failed" is useless to whoever has to fix it before the competition begins.
+/// Reports partial success rather than a bare pass/fail: with twenty competitors, three services and a
+/// database each, "starting failed" is useless to whoever has to fix it before the competition begins.
 /// <see cref="Failed"/> carries the external system's own message per item, tagged with the stage it came
 /// from.
 /// <para>
@@ -18,6 +18,7 @@ namespace Skill.Suite.Application.Sessions.StartSession;
 public sealed record StartSessionResult(
     string Organization,
     int Provisioned,
+    /// <summary>Competitors left with their own session database and the access the session asks for.</summary>
     int DatabaseAccessGranted,
     int ServicesRunning,
     IReadOnlyList<SessionProvisioningFailure> Failed,

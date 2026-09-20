@@ -34,11 +34,8 @@ public static class StarterPackagePath
             return false;
 
         var segments = normalized.Split('/');
-        foreach (var segment in segments)
-        {
-            if (segment.Length == 0 || segment is "." or ".." || segment.Contains('\0'))
-                return false;
-        }
+        if (!segments.All(IsSafeSegment))
+            return false;
 
         var candidate = Path.GetFullPath(Path.Combine([resolvedRoot, .. segments]));
         var prefix = resolvedRoot.EndsWith(Path.DirectorySeparatorChar)
@@ -51,4 +48,33 @@ public static class StarterPackagePath
         fullPath = candidate;
         return true;
     }
+
+    /// <summary>
+    /// Whether a path could name something inside the volume at all, without resolving it.
+    /// </summary>
+    /// <remarks>
+    /// The segment half of <see cref="TryResolve"/>, exposed so a validator can refuse a traversal while the
+    /// administrator is still on the form: nothing there knows where the volume is mounted, and a rule that
+    /// only ran when the session was started would report the problem a competition too late. Resolution
+    /// still has the final say — this cannot see what the path actually lands on.
+    /// <para>
+    /// The root itself is not one: unlike <see cref="TryResolve"/>, which the packages list addresses with an
+    /// empty path, every caller of this means one named file or folder.
+    /// </para>
+    /// </remarks>
+    public static bool IsSafeRelativePath(string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return false;
+
+        var normalized = relativePath.Replace('\\', '/');
+
+        if (Path.IsPathRooted(normalized) || normalized.StartsWith('/'))
+            return false;
+
+        return normalized.Split('/').All(IsSafeSegment);
+    }
+
+    private static bool IsSafeSegment(string segment) =>
+        segment.Length > 0 && segment is not ("." or "..") && !segment.Contains('\0');
 }

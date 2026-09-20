@@ -20,6 +20,7 @@ public sealed class SessionEnrolmentTests
             DateTime.UtcNow.AddHours(-1), DateTime.UtcNow.AddDays(1),
             templateFolder: "/starter", judgementImage: "judge:1",
             databaseName: null, databaseReadAccess: true, databaseWriteAccess: true,
+            databaseSeedScript: null,
             gitCredentialId: Guid.NewGuid(), judgementImagePullCredentialId: null,
             dockerImages: []).Value;
 
@@ -114,10 +115,92 @@ public sealed class SessionEnrolmentTests
             DateTime.UtcNow.AddHours(-1), DateTime.UtcNow.AddDays(1),
             templateFolder: null, judgementImage: "judge:1",
             databaseName: null, databaseReadAccess: true, databaseWriteAccess: true,
+            databaseSeedScript: null,
             gitCredentialId: Guid.NewGuid(), judgementImagePullCredentialId: null,
             dockerImages: []).Value;
 
         Assert.Equal(SessionErrors.MissingTemplateFolder, session.Start([1, 2, 3]).Error);
+    }
+
+    [Fact]
+    public void TheFirstCompetitorEnrolledGetsOrdinalZero()
+    {
+        // Zero and not one: the ordinal is added to a service's configured host port, so a session with a
+        // single competitor publishes exactly the port the administrator typed.
+        var session = Draft();
+
+        Assert.Equal(Session.FirstOrdinal, session.EnrolCompetitor(Guid.NewGuid(), "alice").Ordinal);
+    }
+
+    [Fact]
+    public void EachNewCompetitorGetsTheNextOrdinal()
+    {
+        var session = Draft();
+
+        session.EnrolCompetitor(Guid.NewGuid(), "alice");
+        session.EnrolCompetitor(Guid.NewGuid(), "bob");
+        var third = session.EnrolCompetitor(Guid.NewGuid(), "carol");
+
+        Assert.Equal(2, third.Ordinal);
+        Assert.Equal([0, 1, 2], session.Competitors.Select(c => c.Ordinal));
+    }
+
+    [Fact]
+    public void ReEnrollingKeepsTheOrdinalTheCompetitorAlreadyHad()
+    {
+        // Re-running Start is the documented repair, and it must hand every competitor the host ports their
+        // containers already publish and they have already written down.
+        var session = Draft();
+        var competitor = Guid.NewGuid();
+
+        var first = session.EnrolCompetitor(competitor, "alice");
+        session.EnrolCompetitor(Guid.NewGuid(), "bob");
+
+        Assert.Equal(first.Ordinal, session.EnrolCompetitor(competitor, "alice").Ordinal);
+    }
+
+    [Fact]
+    public void AnOrdinalFreedByARemovedCompetitorIsNotHandedToTheNextOne()
+    {
+        // A counter that only goes up, not one past the highest ordinal still present: reusing a gap would
+        // give a newcomer the host ports the removed competitor's containers published, which an expert may
+        // still have written down against them.
+        var session = Draft();
+
+        session.EnrolCompetitor(Guid.NewGuid(), "alice");
+        var bob = session.EnrolCompetitor(Guid.NewGuid(), "bob");
+
+        session.Competitors.Remove(bob);
+
+        Assert.Equal(2, session.EnrolCompetitor(Guid.NewGuid(), "carol").Ordinal);
+    }
+
+    [Fact]
+    public void ReEnrollingDoesNotAdvanceTheSequence()
+    {
+        // A retry must not burn an ordinal, or re-running Start for a session of twenty competitors would
+        // walk every later competitor's host ports up by twenty.
+        var session = Draft();
+        var competitor = Guid.NewGuid();
+
+        session.EnrolCompetitor(competitor, "alice");
+        session.EnrolCompetitor(competitor, "alice");
+
+        Assert.Equal(1, session.NextCompetitorOrdinal);
+        Assert.Equal(1, session.EnrolCompetitor(Guid.NewGuid(), "bob").Ordinal);
+    }
+
+    [Fact]
+    public void NoTwoCompetitorsOfOneSessionShareAnOrdinal()
+    {
+        var session = Draft();
+
+        foreach (var name in new[] { "alice", "bob", "carol", "dave" })
+            session.EnrolCompetitor(Guid.NewGuid(), name);
+
+        var ordinals = session.Competitors.Select(c => c.Ordinal).ToList();
+
+        Assert.Equal(ordinals.Count, ordinals.Distinct().Count());
     }
 
     [Fact]

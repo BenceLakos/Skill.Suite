@@ -15,6 +15,7 @@ public sealed record UpdateSessionCommand(
     string? DatabaseName,
     bool DatabaseReadAccess,
     bool DatabaseWriteAccess,
+    string? DatabaseSeedScript,
     Guid? GitCredentialId,
     Guid? JudgementImagePullCredentialId,
     List<SessionDockerImage> DockerImages) : IRequest<Result>;

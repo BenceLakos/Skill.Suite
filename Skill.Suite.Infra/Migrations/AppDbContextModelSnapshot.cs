@@ -326,6 +326,10 @@ namespace Skill.Suite.Infra.Migrations
                     b.Property<bool>("DatabaseReadAccess")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("DatabaseSeedScript")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<bool>("DatabaseWriteAccess")
                         .HasColumnType("boolean");
 
@@ -353,6 +357,9 @@ namespace Skill.Suite.Infra.Migrations
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<int>("NextCompetitorOrdinal")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Slug")
                         .IsRequired()
@@ -399,6 +406,9 @@ namespace Skill.Suite.Infra.Migrations
 
                     b.Property<Guid>("CompetitorId")
                         .HasColumnType("uuid");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
 
                     b.Property<string>("ProvisionError")
                         .HasMaxLength(1000)

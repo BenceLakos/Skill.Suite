@@ -19,6 +19,22 @@ public interface IStarterPackageStore
         string relativePath,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Every file with the given extension, in every package, at any depth.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="BrowseAsync"/> rather than a flag on it: browsing answers "what is in this
+    /// folder" for a file manager, while this answers "which files of this kind exist at all" for a picker,
+    /// and the two disagree about recursion, about the root and about what is worth hiding.
+    /// </remarks>
+    /// <param name="extension">Including the dot, e.g. <c>.sql</c>. Matched case-insensitively.</param>
+    ValueTask<Result<IReadOnlyList<StarterPackageEntryDto>>> ListFilesAsync(
+        string extension,
+        CancellationToken cancellationToken);
+
+    /// <summary>Reads one file's text, for something in the application to act on rather than download.</summary>
+    ValueTask<Result<string>> ReadTextAsync(string relativePath, CancellationToken cancellationToken);
+
     /// <summary>Imports a zip archive as the package <paramref name="name"/>, replacing it when asked to.</summary>
     /// <remarks>
     /// Replacing is a swap, not a merge — the same semantics as <c>scripts/starter-packages.sh push</c>, so a

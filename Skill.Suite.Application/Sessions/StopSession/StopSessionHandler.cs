@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Application.Competitors.Accounts;
 using Skill.Suite.Application.Credentials;
+using Skill.Suite.Application.Sessions.Services;
 using Skill.Suite.Domain.Common;
 using Skill.Suite.Domain.Sessions;
 
@@ -13,7 +14,8 @@ using Skill.Suite.Domain.Sessions;
 /// Stops an active session and withdraws what competitors reach it through.
 /// </summary>
 /// <remarks>
-/// The session's shared database is deliberately left alone: the grants stay, and so does everything in it.
+/// The competitors' session databases are deliberately left alone: the grants stay, and so does everything
+/// in them.
 /// A stop is a pause, and a competitor whose SQL login was revoked and re-granted loses the connections and
 /// the session state they had open — while the repository access has to go, because that is the only thing
 /// stopping them committing more work while the session is suspended.
@@ -65,7 +67,8 @@ public sealed class StopSessionHandler(
 
         logger.LogInformation(
             "Session {SessionId} stopped: repository access revoked for {Revoked} competitors in {Org}, " +
-            "{Stopped} of {ConfiguredServices} services stopped, {Failed} failures",
+            "{Stopped} service containers stopped from {ConfiguredServices} configured services, " +
+            "{Failed} failures",
             session.Id, access.Succeeded, session.GitOrganization,
             services.Succeeded, session.DockerImages.Count, failures.Count);
 
@@ -164,18 +167,28 @@ public sealed class StopSessionHandler(
     /// Stops the session's service containers, leaving them in place to be started again.
     /// </summary>
     /// <remarks>
-    /// Found by the name the start derived from the slug and the image's position, not by label: unlike
-    /// closing, this is not a cleanup, so it acts on exactly the services the session is configured with.
+    /// Found by the names the start derived from the slug, the image's position and — for a service whose
+    /// configuration names a competitor — their username, not by label: unlike closing, this is not a
+    /// cleanup, so it acts on exactly the services the session is configured with.
+    /// <para>
+    /// A name is reconstructed for every enrolled competitor of a per-competitor service, including any the
+    /// start skipped for having no SQL login. Stopping a container that was never created is a no-op the
+    /// daemon reports as absent, while missing one leaves a service a competitor can still reach and a host
+    /// port still held after the session was suspended.
+    /// </para>
     /// </remarks>
     private async Task<SessionProvisioningStageOutcome> StopServicesAsync(
         StopSessionCommand request, Session session, CancellationToken cancellationToken)
     {
-        var images = session.DockerImages;
-        if (images.Count == 0)
+        if (session.DockerImages.Count == 0)
             return EmptyStage;
 
+        var usernames = await EnrolledUsernamesAsync(session, cancellationToken);
+
+        var containers = SessionServiceContainers.For(session, usernames, SessionRunMode.Competition);
+
         var failures = new List<SessionProvisioningFailure>();
-        var total = images.Count;
+        var total = containers.Count;
         var stopped = 0;
 
         Report(request, new SessionProvisioningProgress(
@@ -183,15 +196,15 @@ public sealed class StopSessionHandler(
 
         for (var index = 0; index < total; index++)
         {
-            var image = images[index];
+            var container = containers[index];
 
             try
             {
-                var outcome = await containerServices.StopAsync(
-                    SessionServiceNaming.ContainerName(session.Slug, index), cancellationToken);
+                var outcome = await containerServices.StopAsync(container.ContainerName, cancellationToken);
 
                 logger.LogInformation(
-                    "Session {SessionId} service {Image}: {Outcome}", session.Id, image.Image, outcome);
+                    "Session {SessionId} service {ContainerName}: {Outcome}",
+                    session.Id, container.ContainerName, outcome);
 
                 stopped++;
             }
@@ -199,11 +212,12 @@ public sealed class StopSessionHandler(
             {
                 // One service refusing to stop must not leave the others running.
                 logger.LogError(ex,
-                    "Could not stop the service {Image} of session {SessionId}", image.Image, session.Id);
+                    "Could not stop the service container {ContainerName} of session {SessionId}",
+                    container.ContainerName, session.Id);
 
                 failures.Add(new SessionProvisioningFailure(
                     SessionProvisioningStage.StoppingServices,
-                    image.Image,
+                    container.Subject,
                     ExternalMessage.Trim(ex.Message)));
             }
 
@@ -212,6 +226,27 @@ public sealed class StopSessionHandler(
         }
 
         return new SessionProvisioningStageOutcome(stopped, failures);
+    }
+
+    /// <summary>
+    /// The usernames a per-competitor service was started under, read from the competitor rows.
+    /// </summary>
+    /// <remarks>
+    /// From the competitor row rather than the enrolment's repository name, for the reason revoking access
+    /// reads it the same way: the two are set independently, and a container name built from the wrong one
+    /// silently leaves the real one running.
+    /// </remarks>
+    private async Task<List<string>> EnrolledUsernamesAsync(
+        Session session, CancellationToken cancellationToken)
+    {
+        var competitorIds = session.Competitors.Select(c => c.CompetitorId).ToList();
+
+        return await db.Competitors
+            .AsNoTracking()
+            .Where(c => competitorIds.Contains(c.Id))
+            .OrderBy(c => c.Username)
+            .Select(c => c.Username)
+            .ToListAsync(cancellationToken);
     }
 
     /// <summary>

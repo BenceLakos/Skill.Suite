@@ -107,7 +107,7 @@ internal sealed class SqlServerAdminClient(
     public async Task GrantDatabaseAccessAsync(
         MsSqlDatabaseAccessRequest request, CancellationToken cancellationToken)
     {
-        // Opened against the session database rather than master, because everything below is scoped to the
+        // Opened against the competitor's session database rather than master, because everything below is scoped to the
         // current database and none of it can say which one it means. USE is not an alternative: CREATE USER
         // has to be the first statement in its batch, and this client sends one statement per command anyway.
         await using var connection = Connect(request.Admin, request.Database);
@@ -135,6 +135,38 @@ internal sealed class SqlServerAdminClient(
         logger.LogInformation(
             "SQL Server access for {Login} on {Database}: read {Read}, write {Write}",
             login, request.Database, request.Read, request.Write);
+    }
+
+    public async Task ExecuteScriptAsync(
+        string database, string script, BasicCredential admin, CancellationToken cancellationToken)
+    {
+        var batches = SqlBatchSplitter.Split(script);
+        if (batches.Count == 0)
+        {
+            logger.LogInformation("The script for {Database} contains no statements; nothing was run", database);
+            return;
+        }
+
+        // Against the target database rather than master, for the same reason the grants are: nothing in an
+        // author's script names the database, and a USE cannot be prefixed onto a batch whose first statement
+        // has to be the first statement.
+        await using var connection = Connect(admin, database);
+        await connection.OpenAsync(cancellationToken);
+
+        for (var index = 0; index < batches.Count; index++)
+        {
+            // One connection for the whole script, sequentially: temporary tables, variables and settings a
+            // batch sets up for the next one live on the connection, so a script split across several would
+            // fail on statements that are correct.
+            await ExecuteAsync(
+                connection,
+                batches[index],
+                $"run batch {index + 1} of {batches.Count} of the script against '{database}'",
+                cancellationToken);
+        }
+
+        logger.LogInformation(
+            "Ran {Batches} script batches against the database {Database}", batches.Count, database);
     }
 
     public async Task<MsSqlAccountInventory> GetInventoryAsync(

@@ -9,7 +9,9 @@
 
 @using Skill.Suite.Application.Sessions
 @using Skill.Suite.Application.Sessions.CloseSession
+@using Skill.Suite.Application.Sessions.StartMarking
 @using Skill.Suite.Application.Sessions.StartSession
+@using Skill.Suite.Application.Sessions.StopMarking
 @using Skill.Suite.Application.Sessions.StopSession
 @using Skill.Suite.Application.Sessions.ListSessions
 @using Skill.Suite.Domain.Sessions
@@ -33,12 +35,54 @@
 {
     <MudPaper Outlined="true" Class="pa-4 mb-4">
         <MudText Typo="Typo.subtitle2" Class="mb-2">
-            @T.Format(_stopping ? "sessions.progress.stopSession" : "sessions.progress.session", _busyName)
+            @T.Format(BusyTitleKey, _busyName)
         </MudText>
         <ProvisioningProgress Label="@ProgressLabel"
                               Completed="@(_progress?.Completed ?? 0)"
                               Total="@(_progress?.Total ?? 0)"
                               Indeterminate="@(_progress?.IsIndeterminate ?? true)"/>
+    </MudPaper>
+}
+
+@*
+    Where to connect for each competitor, printed once marking is up. Inline and dismissable rather than a
+    modal: with twenty competitors and three services this is sixty numbers an expert reads off while moving
+    between machines, and a dialog would take the session list away from them for the whole of it.
+*@
+@if (_markingEndpoints.Count > 0)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-4">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudText Typo="Typo.subtitle2">@T.Format("sessions.marking.endpoints", _markingName)</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                           OnClick="@(() => _markingEndpoints = [])"/>
+        </MudStack>
+        <MudSimpleTable Dense="true" Hover="true" Striped="true" Elevation="0">
+            <thead>
+            <tr>
+                <th>@T["sessions.marking.competitor"]</th>
+                <th>@T["sessions.marking.service"]</th>
+                <th>@T["sessions.marking.container"]</th>
+                <th>@T["sessions.marking.ports"]</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var endpoint in _markingEndpoints)
+            {
+                <tr>
+                    <td>@(endpoint.CompetitorUsername ?? T["sessions.marking.shared"])</td>
+                    <td>@endpoint.ServiceNumber — @endpoint.Image</td>
+                    <td>@endpoint.ContainerName</td>
+                    <td>
+                        @(endpoint.Ports.Count == 0
+                            ? T["sessions.marking.noPorts"]
+                            : string.Join(", ", endpoint.Ports.Select(
+                                p => $"{p.HostPort}→{p.ContainerPort}/{p.Protocol.ToString().ToLowerInvariant()}")))
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </MudSimpleTable>
     </MudPaper>
 }
 
@@ -109,6 +153,23 @@
                                            Disabled="@Busy" OnClick="@(() => Close(context.Item))"/>
                         </MudTooltip>
                     }
+                    else
+                    {
+                        @*
+                            Marking belongs to a closed session and only to one: the competition containers
+                            are gone by then, so the marking copies can take the host ports they published,
+                            and nothing an expert connects to can be reopened underneath them.
+                        *@
+                        <MudTooltip Text="@T["sessions.action.startMarking"]">
+                            <MudIconButton Icon="@Icons.Material.Filled.Grading" Size="Size.Small"
+                                           Color="Color.Info" Disabled="@Busy"
+                                           OnClick="@(() => StartMarking(context.Item))"/>
+                        </MudTooltip>
+                        <MudTooltip Text="@T["sessions.action.stopMarking"]">
+                            <MudIconButton Icon="@Icons.Material.Filled.LayersClear" Size="Size.Small"
+                                           Disabled="@Busy" OnClick="@(() => StopMarking(context.Item))"/>
+                        </MudTooltip>
+                    }
                 </CellTemplate>
             </TemplateColumn>
         </Columns>
@@ -125,16 +186,20 @@
     private bool _loading;
     private bool _starting;
     private bool _stopping;
+    private bool _marking;
     private string? _search;
     private string _busyName = string.Empty;
+    private string _markingName = string.Empty;
+    private IReadOnlyList<MarkingEndpoint> _markingEndpoints = [];
     private SessionProvisioningProgress? _progress;
     private RendererProgress<SessionProvisioningProgress>? _progressSink;
 
     /// <summary>
-    /// Whether a start or a stop is running. One at a time: both talk to the same git host and docker
-    /// daemon about the same session, and they share the single progress panel above the grid.
+    /// Whether a start, a stop or a marking run is in progress. One at a time: they all talk to the same
+    /// git host and docker daemon about the same session, and they share the single progress panel above
+    /// the grid.
     /// </summary>
-    private bool Busy => _starting || _stopping;
+    private bool Busy => _starting || _stopping || _marking;
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -399,6 +464,115 @@
     }
 
     /// <summary>
+    /// Starts the marking copy of a closed session's docker services, one set per competitor.
+    /// </summary>
+    /// <remarks>
+    /// Runs inside this request like Start and Stop, and for the same reason: the expert finds out here
+    /// which competitors have a container to mark against, rather than trusting a queued job to have
+    /// managed it.
+    /// </remarks>
+    private async Task StartMarking(SessionDto session)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["sessions.startMarkingConfirmTitle"],
+            Message = T["sessions.startMarkingConfirm"],
+            YesText = T["common.confirm"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        _marking = true;
+        _busyName = session.Name;
+        _progress = null;
+        _markingEndpoints = [];
+
+        _progressSink = new RendererProgress<SessionProvisioningProgress>(
+            InvokeAsync,
+            report =>
+            {
+                _progress = report;
+                StateHasChanged();
+            });
+
+        try
+        {
+            var result = await Mediator.Send(new StartMarkingCommand(session.Id, _progressSink));
+            if (result.IsFailure)
+            {
+                Snackbar.Add(result.Error.Message, Severity.Error);
+                return;
+            }
+
+            var outcome = result.Value;
+
+            _markingName = session.Name;
+            _markingEndpoints = outcome.Endpoints;
+
+            Snackbar.Add(
+                string.Format(T["sessions.markingStarted"], outcome.ServicesRunning),
+                outcome.FullySucceeded ? Severity.Success : Severity.Warning);
+
+            foreach (var failure in outcome.Failed)
+                Snackbar.Add($"{StageLabel(failure.Stage)}: {failure.Subject}: {failure.Error}", Severity.Error);
+
+            if (outcome.SkippedNoDatabaseLogin.Count > 0)
+            {
+                Snackbar.Add(
+                    string.Format(T["sessions.markingSkippedDatabase"],
+                        outcome.SkippedNoDatabaseLogin.Count,
+                        string.Join(", ", outcome.SkippedNoDatabaseLogin)),
+                    Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Same circuit safety as Start: an unhandled exception here tears the Blazor circuit down with
+            // no message at all, and marking is re-runnable, so the repair is to press the button again.
+            Snackbar.Add(string.Format(T["sessions.markingFailed"], ex.Message), Severity.Error);
+        }
+        finally
+        {
+            _progressSink?.Dispose();
+            _progressSink = null;
+            _progress = null;
+            _busyName = string.Empty;
+            _marking = false;
+        }
+    }
+
+    /// <summary>Removes the marking containers, leaving everything else the session has alone.</summary>
+    private async Task StopMarking(SessionDto session)
+    {
+        var result = await Mediator.Send(new StopMarkingCommand(session.Id));
+        if (result.IsFailure)
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+            return;
+        }
+
+        var outcome = result.Value;
+
+        _markingEndpoints = [];
+
+        Snackbar.Add(
+            string.Format(T["sessions.markingStopped"], outcome.ServicesRemoved),
+            Severity.Success);
+
+        // Nothing else was touched — this says the containers outlived the request, which is the admin's to
+        // clear up on the docker host and invisible from this page.
+        if (outcome.ServiceRemovalError is not null)
+            Snackbar.Add(T.Format("sessions.markingStopFailed", outcome.ServiceRemovalError), Severity.Warning);
+    }
+
+    /// <summary>Which of the three running commands the progress panel is titled after.</summary>
+    private string BusyTitleKey => _marking
+        ? "sessions.progress.markSession"
+        : _stopping
+            ? "sessions.progress.stopSession"
+            : "sessions.progress.session";
+
+    /// <summary>
     /// The stage the command is reporting, in the admin's words. Before the first report arrives the command
     /// is loading the session and resolving credentials, which is still work worth naming.
     /// </summary>
@@ -413,6 +587,8 @@
                 _progress.Completed, _progress.Total, _progress.Percent),
             SessionProvisioningStage.DockerServices => T.Format("sessions.progress.dockerServices",
                 _progress.Completed, _progress.Total, _progress.Percent),
+            SessionProvisioningStage.MarkingServices => T.Format("sessions.progress.markingServices",
+                _progress.Completed, _progress.Total, _progress.Percent),
             SessionProvisioningStage.RepositoryAccess => T.Format("sessions.progress.revokingAccess",
                 _progress.Completed, _progress.Total, _progress.Percent),
             SessionProvisioningStage.StoppingServices => T.Format("sessions.progress.stoppingServices",
@@ -421,9 +597,11 @@
         };
 
     /// <summary>What to say while the running command has not reported a stage it can be named by.</summary>
-    private string BusyLabel => _stopping
-        ? T["sessions.progress.stopping"]
-        : T["sessions.progress.starting"];
+    private string BusyLabel => _marking
+        ? T["sessions.progress.marking"]
+        : _stopping
+            ? T["sessions.progress.stopping"]
+            : T["sessions.progress.starting"];
 
     /// <summary>The stage a failure came from, short enough to prefix the subject it happened to.</summary>
     private string StageLabel(SessionProvisioningStage stage) => stage switch
@@ -431,6 +609,7 @@
         SessionProvisioningStage.Repositories => T["sessions.stage.repositories"],
         SessionProvisioningStage.Databases => T["sessions.stage.databases"],
         SessionProvisioningStage.DockerServices => T["sessions.stage.dockerServices"],
+        SessionProvisioningStage.MarkingServices => T["sessions.stage.markingServices"],
         SessionProvisioningStage.RepositoryAccess => T["sessions.stage.repositoryAccess"],
         SessionProvisioningStage.StoppingServices => T["sessions.stage.stoppingServices"],
         _ => stage.ToString(),

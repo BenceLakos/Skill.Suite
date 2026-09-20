@@ -27,8 +27,10 @@ public interface IMsSqlAdminClient
     /// Creates the database if it does not already exist.
     /// </summary>
     /// <remarks>
-    /// For a session's shared database, which belongs to nobody: no login is made its owner, and access to it
-    /// is handed out one competitor at a time by <see cref="GrantDatabaseAccessAsync"/>.
+    /// For a session database, which is one competitor's but is not owned by them: no login is made its
+    /// owner, and the access their login gets inside it is set by <see cref="GrantDatabaseAccessAsync"/> from
+    /// the session's read and write flags. That is the difference from
+    /// <see cref="EnsureLoginAndDatabaseAsync"/>, where the competitor owns their personal database outright.
     /// </remarks>
     Task<AccountProvisioning> EnsureDatabaseAsync(
         string database, BasicCredential admin, CancellationToken cancellationToken);
@@ -43,6 +45,24 @@ public interface IMsSqlAdminClient
     /// </remarks>
     Task GrantDatabaseAccessAsync(
         MsSqlDatabaseAccessRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs an administrator-supplied script against one database, batch by batch.
+    /// </summary>
+    /// <remarks>
+    /// The one method here that is NOT idempotent, because it cannot be: the script is the administrator's and
+    /// says what it says. That is why the caller only runs it on a database it has just created — re-running a
+    /// seed script over a database competitors have been working in would undo their work, not repair it.
+    /// <para>
+    /// Not wrapped in a transaction either. A seed script exported from a SQL client manages its own where it
+    /// wants one, and several of the statements such a script is made of — <c>CREATE DATABASE</c>,
+    /// <c>ALTER DATABASE</c>, a full-text index — cannot run inside one at all. An outer transaction would
+    /// therefore fail on exactly the scripts it was meant to protect. A script that fails halfway leaves what
+    /// it had done behind, which the caller reports as a failure against the database.
+    /// </para>
+    /// </remarks>
+    Task ExecuteScriptAsync(
+        string database, string script, BasicCredential admin, CancellationToken cancellationToken);
 
     /// <summary>Lists every SQL login and every database, for bulk status evaluation.</summary>
     Task<MsSqlAccountInventory> GetInventoryAsync(

@@ -20,6 +20,7 @@ public sealed class SessionStatusTransitionTests
             DateTime.UtcNow.AddHours(-1), DateTime.UtcNow.AddDays(1),
             templateFolder: "/starter", judgementImage: "judge:1",
             databaseName: null, databaseReadAccess: true, databaseWriteAccess: true,
+            databaseSeedScript: null,
             gitCredentialId: Guid.NewGuid(), judgementImagePullCredentialId: null,
             dockerImages: []).Value;
 

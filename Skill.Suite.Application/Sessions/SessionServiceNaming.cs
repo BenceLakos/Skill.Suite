@@ -1,6 +1,7 @@
 namespace Skill.Suite.Application.Sessions;
 
 using System.Globalization;
+using Skill.Suite.Application.Sessions.Services;
 
 /// <summary>
 /// Names a session's service containers, from the session slug and the image's position in its list.
@@ -15,6 +16,11 @@ using System.Globalization;
 /// and digests, none of which a container name may hold, and two services of one session may legitimately run
 /// the same image with different ports.
 /// </para>
+/// <para>
+/// A per-competitor service appends the username and marking appends a fixed suffix, so the three container
+/// sets one session can produce — shared, per competitor, and each of those again for marking — are
+/// nameable, distinct, and still reconstructible from values that cannot drift.
+/// </para>
 /// </remarks>
 internal static class SessionServiceNaming
 {
@@ -27,8 +33,29 @@ internal static class SessionServiceNaming
     /// <summary>Services are numbered the way the admin sees them listed, from one.</summary>
     private const int FirstServiceNumber = 1;
 
+    /// <summary>
+    /// Distinguishes the containers marking runs from the ones the competition ran.
+    /// </summary>
+    /// <remarks>
+    /// A suffix rather than a separate prefix so the session slug still leads the name and
+    /// <c>docker ps</c> keeps a session's containers together, whichever set they belong to.
+    /// </remarks>
+    private const string MarkingSuffix = "marking";
+
+    /// <summary>The shared competition container, as sessions have always named it.</summary>
     public static string ContainerName(string slug, int index) =>
-        $"{ContainerNamePrefix}{Separator}{slug}{Separator}{ServiceNumber(index)}";
+        ContainerName(slug, index, competitorUsername: null, SessionRunMode.Competition);
+
+    public static string ContainerName(
+        string slug, int index, string? competitorUsername, SessionRunMode mode)
+    {
+        var name = $"{ContainerNamePrefix}{Separator}{slug}{Separator}{ServiceNumber(index)}";
+
+        if (competitorUsername is not null)
+            name += Separator + competitorUsername;
+
+        return mode == SessionRunMode.Marking ? name + Separator + MarkingSuffix : name;
+    }
 
     /// <summary>The service's 1-based position, as the service label carries it.</summary>
     public static string ServiceNumber(int index) =>

@@ -16,6 +16,11 @@ public sealed class SessionCompetitorConfiguration : IEntityTypeConfiguration<Se
         builder.Property(x => x.CompetitorId).IsRequired();
         builder.Property(x => x.RepositoryName).IsRequired().HasMaxLength(200);
         builder.Property(x => x.RepositoryUrl).HasMaxLength(1000);
+
+        // Required with no default: the ordinal is what shifts one competitor's per-competitor service
+        // containers off everybody else's host ports, and a column that could silently default to the same
+        // value for a whole session would put twenty containers on one port.
+        builder.Property(x => x.Ordinal).IsRequired();
         builder.Property(x => x.ProvisionStatus).IsRequired().HasConversion<int>();
         builder.Property(x => x.ProvisionError).HasMaxLength(SessionCompetitor.MaxErrorLength);
         builder.Property(x => x.ProvisionedAt);

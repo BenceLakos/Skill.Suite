@@ -28,6 +28,7 @@ public sealed class CreateSessionHandler(IAppDbContext db)
             request.DatabaseName,
             request.DatabaseReadAccess,
             request.DatabaseWriteAccess,
+            request.DatabaseSeedScript,
             request.GitCredentialId,
             request.JudgementImagePullCredentialId,
             request.DockerImages);

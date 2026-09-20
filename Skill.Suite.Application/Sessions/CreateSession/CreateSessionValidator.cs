@@ -16,7 +16,8 @@ public sealed class CreateSessionValidator : AbstractValidator<CreateSessionComm
         RuleFor(x => x.EndsAt).GreaterThan(x => x.StartsAt);
         RuleFor(x => x.TemplateFolder).MaximumLength(1000);
         RuleFor(x => x.JudgementImage).MaximumLength(500);
-        RuleFor(x => x.DatabaseName).MaximumLength(120);
-        RuleFor(x => x.DockerImages).ValidDockerImages();
+        RuleFor(x => x.DatabaseName).ValidDatabaseBaseName();
+        RuleFor(x => x.DatabaseSeedScript).ValidSeedScript(x => x.DatabaseName);
+        RuleFor(x => x.DockerImages).ValidDockerImages(x => x.DatabaseName);
     }
 }

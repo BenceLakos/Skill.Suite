@@ -1,7 +1,7 @@
 namespace Skill.Suite.Infra.Sql;
 
 /// <summary>
-/// The T-SQL a login's access to a session's shared database is managed with.
+/// The T-SQL a login's access to its session database is managed with.
 /// </summary>
 /// <remarks>
 /// Same rules as <see cref="MsSqlAccountScripts"/>: one batch per method and never a <c>GO</c>. Nothing here

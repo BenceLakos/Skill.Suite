@@ -24,6 +24,7 @@ public sealed class UpdateSessionHandler(IAppDbContext db) : IRequestHandler<Upd
             request.DatabaseName,
             request.DatabaseReadAccess,
             request.DatabaseWriteAccess,
+            request.DatabaseSeedScript,
             request.GitCredentialId,
             request.JudgementImagePullCredentialId,
             request.DockerImages);

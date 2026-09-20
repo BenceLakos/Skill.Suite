@@ -24,12 +24,24 @@ public enum SessionProvisioningStage
     Repositories,
 
     /// <summary>
-    /// The session's shared database, then one access grant per competitor who holds a SQL login, counted.
+    /// One database per competitor who holds a SQL login — created, seeded and granted — counted.
     /// </summary>
     Databases,
 
-    /// <summary>One long-running container per docker image configured on the session, counted.</summary>
+    /// <summary>
+    /// One long-running container per docker service the session resolves to, counted.
+    /// </summary>
+    /// <remarks>
+    /// Containers rather than images, because a service whose configuration names a competitor is started
+    /// once per competitor: counting images would leave the bar at one of three while twenty containers came
+    /// up, which is the "is it stuck?" question the report exists to answer.
+    /// </remarks>
     DockerServices,
+
+    /// <summary>
+    /// One marking container per service the closed session resolves to, counted. Marking only.
+    /// </summary>
+    MarkingServices,
 
     /// <summary>One access revocation per provisioned competitor repository, counted. Stopping only.</summary>
     RepositoryAccess,

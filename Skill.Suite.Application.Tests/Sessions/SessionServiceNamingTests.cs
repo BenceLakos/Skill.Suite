@@ -1,6 +1,7 @@
 namespace Skill.Suite.Application.Tests.Sessions;
 
 using Skill.Suite.Application.Sessions;
+using Skill.Suite.Application.Sessions.Services;
 using Xunit;
 
 /// <summary>
@@ -63,5 +64,55 @@ public sealed class SessionServiceNamingTests
     {
         Assert.Equal("skill-suite.session", SessionServiceLabels.SessionKey);
         Assert.Equal("skill-suite.service", SessionServiceLabels.ServiceKey);
+        Assert.Equal("skill-suite.competitor", SessionServiceLabels.CompetitorKey);
+        Assert.Equal("skill-suite.marking", SessionServiceLabels.MarkingKey);
+    }
+
+    [Fact]
+    public void ThePlainNameIsTheSharedCompetitionContainer()
+    {
+        // The two-argument overload has to keep meaning exactly what it meant, or a session already running
+        // gains a second copy of every shared service on the next start.
+        Assert.Equal(
+            SessionServiceNaming.ContainerName("skill09", 0),
+            SessionServiceNaming.ContainerName("skill09", 0, competitorUsername: null, SessionRunMode.Competition));
+    }
+
+    [Fact]
+    public void APerCompetitorContainerCarriesTheUsername()
+    {
+        Assert.Equal(
+            "skill-suite-skill09-1-c01",
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition));
+    }
+
+    [Fact]
+    public void TwoCompetitorsOfOneServiceGetDifferentNames()
+    {
+        Assert.NotEqual(
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition),
+            SessionServiceNaming.ContainerName("skill09", 0, "c02", SessionRunMode.Competition));
+    }
+
+    [Fact]
+    public void AMarkingContainerCarriesTheSuffix()
+    {
+        Assert.Equal(
+            "skill-suite-skill09-1-marking",
+            SessionServiceNaming.ContainerName("skill09", 0, competitorUsername: null, SessionRunMode.Marking));
+
+        Assert.Equal(
+            "skill-suite-skill09-1-c01-marking",
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Marking));
+    }
+
+    [Fact]
+    public void AMarkingContainerNeverCollidesWithItsCompetitionCounterpart()
+    {
+        // Marking runs on a closed session whose containers were removed, but the two sets must stay
+        // separately nameable regardless: removing one by name must not take the other with it.
+        Assert.NotEqual(
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition),
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Marking));
     }
 }

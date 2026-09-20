@@ -9,6 +9,7 @@ using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Application.Competitors.Accounts;
 using Skill.Suite.Application.Credentials;
 using Skill.Suite.Application.DockerImages;
+using Skill.Suite.Application.Sessions.Services;
 using Skill.Suite.Application.Webhooks;
 using Skill.Suite.Domain.Common;
 using Skill.Suite.Domain.Competitors;
@@ -20,9 +21,11 @@ public sealed class StartSessionHandler(
     IGitHostClient gitHost,
     IGitClient git,
     IMsSqlAdminClient msSql,
+    IStarterPackageStore starterPackages,
     IContainerServiceManager containerServices,
     IPasswordVault vault,
     IOptions<WebhookOptions> webhookOptions,
+    IOptions<MsSqlOptions> msSqlOptions,
     ILogger<StartSessionHandler> logger)
     : IRequestHandler<StartSessionCommand, Result<StartSessionResult>>
 {
@@ -121,10 +124,12 @@ public sealed class StartSessionHandler(
         var failures = await ProvisionCompetitorsAsync(
             request, session, template, provisionable, admin, cancellationToken);
 
-        var databases = await GrantDatabaseAccessAsync(request, databasePlan.Value, cancellationToken);
+        var databases = await ProvisionCompetitorDatabasesAsync(request, databasePlan.Value, cancellationToken);
         failures.AddRange(databases.Failures);
 
-        var services = await StartServicesAsync(request, session, pullCredential.Value, cancellationToken);
+        var services = await StartServicesAsync(
+            request, session, provisionable, databasePlan.Value, pullCredential.Value, cancellationToken);
+
         failures.AddRange(services.Failures);
 
         // The webhook goes on LAST, deliberately. An organisation hook fires for the pushes provisioning
@@ -146,11 +151,12 @@ public sealed class StartSessionHandler(
 
         logger.LogInformation(
             "Session {SessionId} started: {Provisioned} repositories provisioned in {Org}, " +
-            "{Granted} database grants on {Database}, {Services} of {ConfiguredServices} services running, " +
+            "{Granted} competitor databases under the base name {Database}, " +
+            "{Services} service containers running from {ConfiguredServices} configured services, " +
             "{Failed} failures, {SkippedGit} skipped for having no git host account, " +
             "{SkippedDatabase} skipped for having no SQL login",
             session.Id, provisioned, organization,
-            databases.Succeeded, databasePlan.Value?.Database ?? NoDatabaseConfigured,
+            databases.Succeeded, databasePlan.Value?.BaseName ?? NoDatabaseConfigured,
             services.Succeeded, session.DockerImages.Count,
             failures.Count, skipped.Count, skippedNoDatabaseLogin.Count);
 
@@ -201,16 +207,16 @@ public sealed class StartSessionHandler(
     }
 
     /// <summary>
-    /// What the database stage will do, or null when the session has no shared database.
+    /// What the database stage will do, or null when the session configures no database at all.
     /// </summary>
     /// <remarks>
     /// Partitions the competitors who are getting a repository, not every competitor in the database: a
     /// competitor provisioning is skipping is not in this session at all, so reporting them as missing a SQL
     /// login would be noise about somebody who was never going to connect.
     /// <para>
-    /// Nobody holding a login is not an error, unlike the git side. The database itself is still worth
-    /// creating — the session's services may be the only thing that connects to it — and the skipped list
-    /// says plainly that no competitor was granted anything.
+    /// Nobody holding a login is not an error, unlike the git side. There is simply nothing to create: every
+    /// database this stage makes belongs to one competitor, so a session where none of them has a login ends
+    /// with no databases and a skipped list that says exactly why.
     /// </para>
     /// </remarks>
     private async Task<Result<DatabaseAccessPlan?>> PlanDatabaseAccessAsync(
@@ -238,6 +244,12 @@ public sealed class StartSessionHandler(
             return Result.Failure<DatabaseAccessPlan?>(SessionErrors.DatabaseAccessUnknown);
         }
 
+        // Read again here rather than carried over from preflight, which refuses rather than produces: the
+        // file is a few kilobytes on a mounted volume, and the copy that runs is the one read last.
+        var seed = await ReadSeedScriptAsync(session, cancellationToken);
+        if (seed.IsFailure)
+            return Result.Failure<DatabaseAccessPlan?>(seed.Error);
+
         var partition = AccountAccessPartitioner.Partition(provisionable, inventory.Logins);
 
         return Result.Success<DatabaseAccessPlan?>(new DatabaseAccessPlan(
@@ -245,6 +257,7 @@ public sealed class StartSessionHandler(
             session.DatabaseReadAccess,
             session.DatabaseWriteAccess,
             admin,
+            seed.Value,
             partition.Provisionable,
             partition.Skipped));
     }
@@ -287,6 +300,13 @@ public sealed class StartSessionHandler(
             return Result.Failure(SessionErrors.TemplateFolderNotFound);
         }
 
+        // Read while nothing has been created yet, and discarded: a seed script that is not on the volume any
+        // more is a mistake to report now, not after twenty repositories exist and the database is waiting
+        // for a script that cannot be loaded.
+        var seed = await ReadSeedScriptAsync(session, cancellationToken);
+        if (seed.IsFailure)
+            return Result.Failure(seed.Error);
+
         if (session.GitCredentialId is null)
             return Result.Failure(SessionErrors.MissingGitCredential);
 
@@ -299,6 +319,35 @@ public sealed class StartSessionHandler(
             .AnyAsync(s => s.Id != session.Id && s.Status == SessionStatus.Active, cancellationToken);
 
         return otherActive ? Result.Failure(SessionErrors.AnotherSessionActive) : Result.Success();
+    }
+
+    /// <summary>
+    /// Loads the session's database seed script off the starter packages volume, if it has one.
+    /// </summary>
+    /// <remarks>
+    /// A missing file is a refusal rather than a warning. The script is how the competitors' database comes
+    /// to have the tables and rows the test project is written against, so starting without it hands everyone
+    /// an empty database and a task nobody can complete — which only shows up once the competition has begun.
+    /// </remarks>
+    private async Task<Result<SeedScript?>> ReadSeedScriptAsync(
+        Session session, CancellationToken cancellationToken)
+    {
+        var path = session.DatabaseSeedScript;
+
+        if (string.IsNullOrWhiteSpace(path))
+            return Result.Success<SeedScript?>(null);
+
+        // Only reachable for a session saved before the field existed or edited around the validators: there
+        // is no database to run the script against, and running it against another session's would be worse
+        // than refusing.
+        if (string.IsNullOrWhiteSpace(session.DatabaseName))
+            return Result.Failure<SeedScript?>(SessionErrors.SeedScriptWithoutDatabase);
+
+        var script = await starterPackages.ReadTextAsync(path, cancellationToken);
+
+        return script.IsFailure
+            ? Result.Failure<SeedScript?>(SessionErrors.SeedScriptUnreadable(path, script.Error.Message))
+            : Result.Success<SeedScript?>(new SeedScript(path, script.Value));
     }
 
     /// <summary>
@@ -426,15 +475,21 @@ public sealed class StartSessionHandler(
     }
 
     /// <summary>
-    /// Creates the session's shared database and gives each competitor's login the configured access to it.
+    /// Gives every competitor who holds a SQL login a database of their own, seeded and granted.
     /// </summary>
     /// <remarks>
-    /// The database failing is recorded once, against the database itself, and the grants are abandoned rather
-    /// than attempted: every one of them would fail with the same cause, and N copies of one message buries
-    /// the repository failures the admin also has to read. The bar is still driven to the end so it does not
-    /// sit at zero while the next stage runs.
+    /// One database per competitor, named <c>{base}-{username}</c>, and not one shared between them. A
+    /// competitor's database is theirs alone: only their login is granted anything on it, so a task that
+    /// drops a table, fills it with test rows or leaves a transaction open costs that competitor and nobody
+    /// else. The session's "database name" is therefore a base name — it names no database on the server.
+    /// <para>
+    /// Every competitor is an independent unit of work, all the way down. A name that cannot be created, a
+    /// seed script that fails and a grant that is refused are all recorded against that one competitor and
+    /// the loop carries on, because the alternative — one competitor's broken database denying the other
+    /// nineteen theirs — is the failure this whole stage exists to avoid.
+    /// </para>
     /// </remarks>
-    private async Task<SessionProvisioningStageOutcome> GrantDatabaseAccessAsync(
+    private async Task<SessionProvisioningStageOutcome> ProvisionCompetitorDatabasesAsync(
         StartSessionCommand request, DatabaseAccessPlan? plan, CancellationToken cancellationToken)
     {
         if (plan is null)
@@ -443,47 +498,21 @@ public sealed class StartSessionHandler(
         var failures = new List<SessionProvisioningFailure>();
         var total = plan.WithLogin.Count;
         var completed = 0;
+        var granted = 0;
 
         Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Databases, completed, total));
 
-        try
-        {
-            await msSql.EnsureDatabaseAsync(plan.Database, plan.Admin, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "Could not create the session database {Database}", plan.Database);
-            failures.Add(new SessionProvisioningFailure(
-                SessionProvisioningStage.Databases, plan.Database, ExternalMessage.Trim(ex.Message)));
-
-            Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Databases, total, total));
-            return new SessionProvisioningStageOutcome(NothingSucceeded, failures);
-        }
-
-        var granted = 0;
-
         foreach (var competitor in plan.WithLogin)
         {
-            try
-            {
-                await msSql.GrantDatabaseAccessAsync(
-                    new MsSqlDatabaseAccessRequest(
-                        plan.Database, competitor.Username, plan.Read, plan.Write, plan.Admin),
-                    cancellationToken);
+            var outcome = await ProvisionDatabaseForAsync(plan, competitor.Username, cancellationToken);
 
+            if (outcome.Granted)
                 granted++;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // One competitor's grant failing must not deny the rest theirs.
-                logger.LogError(ex,
-                    "Could not grant {Username} access to the session database {Database}",
-                    competitor.Username, plan.Database);
 
-                failures.Add(new SessionProvisioningFailure(
-                    SessionProvisioningStage.Databases, competitor.Username, ExternalMessage.Trim(ex.Message)));
-            }
+            failures.AddRange(outcome.Failures);
 
+            // Counted whether the competitor got their database or not: the bar tracks competitors dealt
+            // with, so a failure reported afterwards must not leave it stalled short of the end.
             completed++;
             Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Databases, completed, total));
         }
@@ -492,85 +521,232 @@ public sealed class StartSessionHandler(
     }
 
     /// <summary>
-    /// Brings up the session's long-running service containers, one per configured image.
+    /// Creates one competitor's database, seeds it if this run is what created it, and grants them access.
+    /// </summary>
+    /// <remarks>
+    /// In that order, and the order matters. Seeding before the grant means the competitor never sees a
+    /// half-built schema; granting after a failed seed means they can still connect to whatever the script
+    /// did manage, which is something they and an expert can work with, unlike a database they are locked
+    /// out of.
+    /// </remarks>
+    private async Task<CompetitorDatabaseOutcome> ProvisionDatabaseForAsync(
+        DatabaseAccessPlan plan, string username, CancellationToken cancellationToken)
+    {
+        var failures = new List<SessionProvisioningFailure>();
+        var database = SessionDatabaseNaming.For(plan.BaseName, username);
+
+        // Checked before the server is asked, because the server's answer to an over-long identifier says
+        // nothing about which of the two halves the administrator has to shorten.
+        if (!SessionDatabaseNaming.FitsAnIdentifier(plan.BaseName, username))
+        {
+            logger.LogError(
+                "The database name {Database} for {Username} is longer than SQL Server allows, so no database "
+                + "was created for them", database, username);
+
+            failures.Add(new SessionProvisioningFailure(
+                SessionProvisioningStage.Databases,
+                username,
+                $"'{database}' is longer than the {SessionDatabaseNaming.MaxIdentifierLength} characters SQL "
+                + "Server allows for a database name. Shorten the session's database name."));
+
+            return new CompetitorDatabaseOutcome(false, failures);
+        }
+
+        AccountProvisioning provisioning;
+
+        try
+        {
+            provisioning = await msSql.EnsureDatabaseAsync(database, plan.Admin, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "Could not create the database {Database} for {Username}", database, username);
+
+            failures.Add(new SessionProvisioningFailure(
+                SessionProvisioningStage.Databases, username, ExternalMessage.Trim(ex.Message)));
+
+            return new CompetitorDatabaseOutcome(false, failures);
+        }
+
+        var seedFailure = await SeedDatabaseAsync(plan, username, database, provisioning, cancellationToken);
+        if (seedFailure is not null)
+            failures.Add(seedFailure);
+
+        try
+        {
+            await msSql.GrantDatabaseAccessAsync(
+                new MsSqlDatabaseAccessRequest(database, username, plan.Read, plan.Write, plan.Admin),
+                cancellationToken);
+
+            return new CompetitorDatabaseOutcome(true, failures);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // One competitor's grant failing must not deny the rest theirs.
+            logger.LogError(ex,
+                "Could not grant {Username} access to their database {Database}", username, database);
+
+            failures.Add(new SessionProvisioningFailure(
+                SessionProvisioningStage.Databases, username, ExternalMessage.Trim(ex.Message)));
+
+            return new CompetitorDatabaseOutcome(false, failures);
+        }
+    }
+
+    /// <summary>
+    /// Runs the session's seed script against one competitor's database, if this run is what created it.
+    /// </summary>
+    /// <remarks>
+    /// Re-running Start is the documented repair for a half-finished provision, and the seed script is the one
+    /// step that cannot be repeated safely: by the second run the competitor may already be working in their
+    /// database, and replaying an author's script over their work either fails on the objects it created the
+    /// first time or deletes what they have done since. "The database already existed" is therefore read as
+    /// "they may already be in it", and the script is skipped — loudly, because an administrator who edited
+    /// the script and pressed Start again has every reason to expect it to have run.
+    /// <para>
+    /// The decision is per competitor, which is what makes a re-run useful: a competitor whose database
+    /// failed to be created the first time gets a freshly created and freshly seeded one now, while
+    /// everybody already working keeps theirs untouched.
+    /// </para>
+    /// </remarks>
+    private async Task<SessionProvisioningFailure?> SeedDatabaseAsync(
+        DatabaseAccessPlan plan,
+        string username,
+        string database,
+        AccountProvisioning provisioning,
+        CancellationToken cancellationToken)
+    {
+        if (plan.Seed is null)
+            return null;
+
+        if (provisioning != AccountProvisioning.Created)
+        {
+            logger.LogInformation(
+                "The database {Database} already existed, so the seed script {Script} was NOT run for "
+                + "{Username}. Drop that database and start the session again to seed it from scratch.",
+                database, plan.Seed.Path, username);
+
+            return null;
+        }
+
+        try
+        {
+            await msSql.ExecuteScriptAsync(database, plan.Seed.Sql, plan.Admin, cancellationToken);
+
+            logger.LogInformation(
+                "Seeded the new database {Database} for {Username} from {Script}",
+                database, username, plan.Seed.Path);
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Recorded against the competitor rather than the script: one competitor's database is what is
+            // broken, the other nineteen may well have been seeded from the same file without complaint.
+            logger.LogError(ex,
+                "Could not run the seed script {Script} against {Database} for {Username}",
+                plan.Seed.Path, database, username);
+
+            return new SessionProvisioningFailure(
+                SessionProvisioningStage.Databases,
+                username,
+                $"{plan.Seed.Path}: {ExternalMessage.Trim(ex.Message)}");
+        }
+    }
+
+    /// <summary>
+    /// Brings up the session's long-running service containers: one per configured image, or one per
+    /// competitor for an image whose configuration names them.
     /// </summary>
     /// <remarks>
     /// Labelled with the session slug as they are started, because that label is the only thing closing the
     /// session has to find them by — including a service whose image was removed from the session after it
-    /// was started. A label the image itself carries is kept, but the session's own two win a collision: they
+    /// was started. A label the image itself carries is kept, but the session's own win a collision: they
     /// are what removal depends on.
+    /// <para>
+    /// How many containers each image becomes is <see cref="SessionServicePlanner"/>'s decision and nothing
+    /// is decided here, so stopping and marking cannot disagree with starting about the shape of a service.
+    /// The progress bar therefore counts containers rather than images: with twenty competitors, an image
+    /// that names one of them is twenty units of work, and counting it as one leaves the bar stuck at a
+    /// third while the daemon is busy for a minute.
+    /// </para>
     /// </remarks>
     private async Task<SessionProvisioningStageOutcome> StartServicesAsync(
         StartSessionCommand request,
         Session session,
+        IReadOnlyList<Competitor> provisionable,
+        DatabaseAccessPlan? databasePlan,
         BasicCredential? pullCredential,
         CancellationToken cancellationToken)
     {
-        var images = session.DockerImages;
-        if (images.Count == 0)
+        if (session.DockerImages.Count == 0)
             return EmptyStage;
 
-        var failures = new List<SessionProvisioningFailure>();
-        var total = images.Count;
-        var running = 0;
+        var plan = SessionServicePlanner.Plan(new SessionServicePlanRequest(
+            session,
+            SessionRunMode.Competition,
+            SessionProvisioningStage.DockerServices,
+            PlanCompetitors(session, provisionable, databasePlan),
+            databasePlan?.BaseName,
+            ServiceSqlServerName.For(msSqlOptions.Value.Server),
+            databasePlan?.Admin,
+            webhookOptions.Value.GitInternalBaseUrl));
 
-        Report(request, new SessionProvisioningProgress(SessionProvisioningStage.DockerServices, NothingSucceeded, total));
-
-        for (var index = 0; index < total; index++)
+        // Already reported by the database stage under the same names, so this is logged rather than
+        // returned: the same competitors, said twice, reads as two different problems.
+        if (plan.SkippedNoDatabaseLogin.Count > 0)
         {
-            var image = images[index];
-
-            // Started on the host daemon over the mounted socket, so a registry host that only exists on the
-            // docker network has to be restated. The session's own record of the image is left as it is.
-            var daemonImage = DaemonImageReference.ForDaemon(
-                image.Image, webhookOptions.Value.GitInternalBaseUrl);
-
-            if (!string.Equals(daemonImage, image.Image, StringComparison.Ordinal))
-            {
-                logger.LogInformation(
-                    "Session {SessionId} pulls {DaemonImage}; {StoredImage} names a host only the docker "
-                    + "network resolves.",
-                    session.Id, daemonImage, image.Image);
-            }
-
-            var labels = new Dictionary<string, string>(image.Labels)
-            {
-                [SessionServiceLabels.SessionKey] = session.Slug,
-                [SessionServiceLabels.ServiceKey] = SessionServiceNaming.ServiceNumber(index),
-            };
-
-            try
-            {
-                var outcome = await containerServices.EnsureRunningAsync(
-                    new ContainerServiceRequest(
-                        daemonImage,
-                        SessionServiceNaming.ContainerName(session.Slug, index),
-                        image.Env,
-                        labels,
-                        image.Volumes,
-                        image.PortMappings,
-                        RegistryAuthFactory.ForHostedImage(pullCredential, daemonImage)),
-                    cancellationToken);
-
-                logger.LogInformation(
-                    "Session {SessionId} service {Image}: {Outcome}", session.Id, image.Image, outcome);
-
-                running++;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // One service failing must not deny the session the rest of them.
-                logger.LogError(ex,
-                    "Could not start the service {Image} for session {SessionId}", image.Image, session.Id);
-
-                failures.Add(new SessionProvisioningFailure(
-                    SessionProvisioningStage.DockerServices, image.Image, ExternalMessage.Trim(ex.Message)));
-            }
-
-            Report(request, new SessionProvisioningProgress(SessionProvisioningStage.DockerServices, index + 1, total));
+            logger.LogInformation(
+                "Session {SessionId}: {Count} competitors get no database-backed service container because "
+                + "the SQL Server holds no login for them: {Usernames}",
+                session.Id, plan.SkippedNoDatabaseLogin.Count, string.Join(", ", plan.SkippedNoDatabaseLogin));
         }
 
-        return new SessionProvisioningStageOutcome(running, failures);
+        var run = await SessionServiceRunner.RunAsync(
+            containerServices,
+            logger,
+            plan,
+            SessionProvisioningStage.DockerServices,
+            session.Id,
+            pullCredential,
+            progress => Report(request, progress),
+            cancellationToken);
+
+        return run.Outcome;
+    }
+
+    /// <summary>
+    /// The competitors a service may be started for, with the two values the planner cannot look up itself.
+    /// </summary>
+    /// <remarks>
+    /// Only competitors who have an enrolment row, which by this point is every provisionable one: the
+    /// repository stage enrols them and saves each row as it goes, so the ordinal a container's host ports
+    /// are derived from exists before this stage runs. A competitor the repository stage never reached has
+    /// no ordinal, and a container whose ports were guessed would collide with somebody's.
+    /// </remarks>
+    private List<SessionServicePlanCompetitor> PlanCompetitors(
+        Session session, IReadOnlyList<Competitor> provisionable, DatabaseAccessPlan? databasePlan)
+    {
+        var ordinals = session.Competitors.ToDictionary(c => c.CompetitorId, c => c.Ordinal);
+
+        var withLogin = databasePlan is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : databasePlan.WithLogin.Select(c => c.Username).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return
+        [
+            .. provisionable
+                .Where(competitor => ordinals.ContainsKey(competitor.Id))
+                .Select(competitor => new SessionServicePlanCompetitor(
+                    competitor.Username,
+                    competitor.FullName,
+                    competitor.IpAddress,
+                    competitor.CountryCode,
+                    vault.Unprotect(competitor.EncryptedPassword),
+                    ordinals[competitor.Id],
+                    withLogin.Contains(competitor.Username))),
+        ];
     }
 
     /// <summary>

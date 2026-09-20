@@ -17,9 +17,36 @@ public sealed class Session : AuditableEntity<Guid>
     public string? TemplateFolder { get; private set; }
     public string? JudgementImage { get; private set; }
 
+    /// <summary>
+    /// Base name each competitor's own session database is derived from, as <c>{DatabaseName}-{username}</c>.
+    /// </summary>
+    /// <remarks>
+    /// A base rather than a database: no database of this name is ever created. Every competitor taking part
+    /// gets one of their own and is granted access to that one alone, so what a competitor does inside theirs
+    /// — dropping a table, filling it, leaving a transaction open — cannot reach anybody else's work.
+    /// </remarks>
     public string? DatabaseName { get; private set; }
+
+    /// <summary>Whether a competitor may read every table in their own session database.</summary>
     public bool DatabaseReadAccess { get; private set; }
+
+    /// <summary>Whether a competitor may write every table in their own session database.</summary>
     public bool DatabaseWriteAccess { get; private set; }
+
+    /// <summary>
+    /// Script run against each competitor's session database when that database is created, as a path
+    /// relative to the starter packages volume root — e.g. <c>my-package/seed/init.sql</c>.
+    /// </summary>
+    /// <remarks>
+    /// Relative rather than the absolute container path <see cref="TemplateFolder"/> holds, because unlike the
+    /// template folder this file is never anything but a starter package's: it is read back through the same
+    /// store that wrote it, which is what keeps the path from escaping the volume.
+    /// <para>
+    /// One script for the whole session, run once per competitor database. Every competitor therefore starts
+    /// from identical data, which is what makes their submissions comparable.
+    /// </para>
+    /// </remarks>
+    public string? DatabaseSeedScript { get; private set; }
 
     /// <summary>Credential used by the webhook to <c>git clone</c> competitor submissions.</summary>
     public Guid? GitCredentialId { get; private set; }
@@ -33,6 +60,17 @@ public sealed class Session : AuditableEntity<Guid>
     /// One repository per competitor, written by provisioning and read by the webhook to attribute a push.
     /// </summary>
     public List<SessionCompetitor> Competitors { get; private set; } = new();
+
+    /// <summary>
+    /// The ordinal the next competitor enrolled in this session will be given.
+    /// </summary>
+    /// <remarks>
+    /// A counter that only ever goes up, rather than one past the highest ordinal in
+    /// <see cref="Competitors"/>. The two agree until an enrolment row is deleted, and then the derived
+    /// version hands the freed ordinal to the next competitor — along with the host ports the removed
+    /// competitor's service containers published, which an expert may well have written down against them.
+    /// </remarks>
+    public int NextCompetitorOrdinal { get; private set; }
 
     /// <summary>
     /// HMAC key shared with the git host's webhook, generated at <see cref="Start"/>.
@@ -72,6 +110,7 @@ public sealed class Session : AuditableEntity<Guid>
         string? databaseName,
         bool databaseReadAccess,
         bool databaseWriteAccess,
+        string? databaseSeedScript,
         Guid? gitCredentialId,
         Guid? judgementImagePullCredentialId,
         IEnumerable<SessionDockerImage> dockerImages)
@@ -93,6 +132,7 @@ public sealed class Session : AuditableEntity<Guid>
             DatabaseName = NormalizeOptional(databaseName),
             DatabaseReadAccess = databaseReadAccess,
             DatabaseWriteAccess = databaseWriteAccess,
+            DatabaseSeedScript = NormalizeOptional(databaseSeedScript),
             GitCredentialId = gitCredentialId,
             JudgementImagePullCredentialId = judgementImagePullCredentialId,
             DockerImages = dockerImages.ToList(),
@@ -120,6 +160,7 @@ public sealed class Session : AuditableEntity<Guid>
         string? databaseName,
         bool databaseReadAccess,
         bool databaseWriteAccess,
+        string? databaseSeedScript,
         Guid? gitCredentialId,
         Guid? judgementImagePullCredentialId,
         IEnumerable<SessionDockerImage> dockerImages)
@@ -136,6 +177,7 @@ public sealed class Session : AuditableEntity<Guid>
         DatabaseName = NormalizeOptional(databaseName);
         DatabaseReadAccess = databaseReadAccess;
         DatabaseWriteAccess = databaseWriteAccess;
+        DatabaseSeedScript = NormalizeOptional(databaseSeedScript);
         GitCredentialId = gitCredentialId;
         JudgementImagePullCredentialId = judgementImagePullCredentialId;
         DockerImages = dockerImages.ToList();
@@ -219,10 +261,17 @@ public sealed class Session : AuditableEntity<Guid>
             return existing;
         }
 
-        var enrolment = SessionCompetitor.Create(Id, competitorId, repositoryName);
+        var enrolment = SessionCompetitor.Create(Id, competitorId, repositoryName, NextCompetitorOrdinal);
+        NextCompetitorOrdinal++;
         Competitors.Add(enrolment);
         return enrolment;
     }
+
+    /// <summary>
+    /// The first competitor's ordinal, and zero on purpose: with one competitor a per-competitor service
+    /// publishes exactly the host port the administrator typed.
+    /// </summary>
+    public const int FirstOrdinal = 0;
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

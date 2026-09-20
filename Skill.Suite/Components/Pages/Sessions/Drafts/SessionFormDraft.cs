@@ -18,6 +18,9 @@ public sealed class SessionFormDraft
     public bool DatabaseReadAccess { get; set; }
     public bool DatabaseWriteAccess { get; set; }
 
+    /// <summary>Path relative to the starter packages volume root, as the picker offers it.</summary>
+    public string? DatabaseSeedScript { get; set; }
+
     public Guid? GitCredentialId { get; set; }
     public Guid? JudgementImagePullCredentialId { get; set; }
 

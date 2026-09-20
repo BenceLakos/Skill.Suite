@@ -174,7 +174,6 @@ else
 
             <MudPaper Elevation="1" Class="pa-4">
                 <MudText Typo="Typo.h6">@T["mySession.services"]</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["mySession.services.shared"]</MudText>
 
                 @if (session.Services.Count == 0)
                 {
@@ -191,6 +190,15 @@ else
                                     <MudText Typo="Typo.body1" Style="flex:1;">@service.Image</MudText>
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@service.ContainerName</MudText>
                                 </MudStack>
+
+                                @*
+                                    Said per service, not once for the section: one session can run both
+                                    kinds at the same time, and "is this mine or everybody's?" changes what
+                                    a competitor may safely do to it.
+                                *@
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-2">
+                                    @T[service.PerCompetitor ? "mySession.services.mine" : "mySession.services.shared"]
+                                </MudText>
 
                                 @if (service.Ports.Count == 0)
                                 {

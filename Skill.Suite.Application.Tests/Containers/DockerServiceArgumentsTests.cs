@@ -90,6 +90,18 @@ public sealed class DockerServiceArgumentsTests
     }
 
     [Fact]
+    public void TheDockerHostIsAddressableFromInsideTheService()
+    {
+        var args = DockerServiceArguments.Build(Request());
+
+        // How a service reaches SQL Server, and anything else the stack publishes: it runs on the host
+        // daemon's default bridge, where the compose service names do not resolve and localhost is the
+        // container itself. Docker Desktop defines this alias already; Linux engines need the flag, and
+        // without it a service configured with {{database.server}} works on a laptop and fails at the venue.
+        AssertFlag(args, "--add-host", "host.docker.internal:host-gateway");
+    }
+
+    [Fact]
     public void PrivilegeEscalationIsBlocked()
     {
         var args = DockerServiceArguments.Build(Request());

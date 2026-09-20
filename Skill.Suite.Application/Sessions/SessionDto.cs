@@ -15,6 +15,8 @@ public sealed record SessionDto(
     string? DatabaseName,
     bool DatabaseReadAccess,
     bool DatabaseWriteAccess,
+    /// <summary>Path relative to the starter packages volume root, or null.</summary>
+    string? DatabaseSeedScript,
     Guid? GitCredentialId,
     Guid? JudgementImagePullCredentialId,
     List<SessionDockerImage> DockerImages,

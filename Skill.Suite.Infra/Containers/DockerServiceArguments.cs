@@ -29,6 +29,12 @@ internal static class DockerServiceArguments
 
     private const string ReadOnlySuffix = ":ro";
 
+    /// <summary>The name a container addresses the docker host by, matching <c>ServiceSqlServerName</c>.</summary>
+    private const string DockerHostAlias = "host.docker.internal";
+
+    /// <summary>Docker's own token for the host's gateway address on the container's network.</summary>
+    private const string HostGateway = "host-gateway";
+
     /// <summary>Builds the full argument list, in order, excluding the <c>docker</c> executable itself.</summary>
     internal static List<string> Build(ContainerServiceRequest request)
     {
@@ -39,6 +45,13 @@ internal static class DockerServiceArguments
             "--name", request.ContainerName,
             "--restart", RestartPolicy,
             "--security-opt", "no-new-privileges",
+
+            // The docker host, by the name Docker Desktop already gives it and Linux engines do not. A
+            // session service reaches SQL Server — and anything else the stack publishes — through the host's
+            // published ports, because it runs on the host daemon's default bridge where the compose service
+            // names do not resolve and `localhost` is the container itself. Without this, a service
+            // configured with {{database.server}} would work on a developer's Mac and fail at the venue.
+            "--add-host", $"{DockerHostAlias}:{HostGateway}",
         };
 
         foreach (var port in request.PortMappings)

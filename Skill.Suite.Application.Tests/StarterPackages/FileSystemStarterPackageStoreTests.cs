@@ -361,6 +361,114 @@ public sealed class FileSystemStarterPackageStoreTests : IDisposable
         Assert.True(Directory.Exists(_root));
     }
 
+    [Fact]
+    public async Task ListFilesFindsTheExtensionAnywhereInAnyPackage()
+    {
+        // A seed script is as likely to live in a db/ or seed/ folder as beside the starter kit, and the
+        // administrator picking one is choosing a script rather than walking a tree.
+        await WriteAsync($"{PackageName}/seed/init.sql", "CREATE TABLE dbo.Orders (Id INT);");
+        await WriteAsync($"{PackageName}/{CompetitorStart}/Program.cs", "class Program;");
+        await WriteAsync("other-session/reset.SQL", "DELETE FROM dbo.Orders;");
+        await WriteAsync("other-session/README.md", "# Other");
+
+        var files = await CreateStore().ListFilesAsync(".sql", CancellationToken.None);
+
+        Assert.True(files.IsSuccess);
+        Assert.Equal(
+            [$"{PackageName}/seed/init.sql", "other-session/reset.SQL"],
+            files.Value.Select(file => file.RelativePath));
+        Assert.Equal(["init.sql", "reset.SQL"], files.Value.Select(file => file.Name));
+        Assert.All(files.Value, file => Assert.False(file.IsDirectory));
+        Assert.All(files.Value, file => Assert.True(file.SizeBytes > 0));
+    }
+
+    [Fact]
+    public async Task ListFilesLeavesOutBuildOutputAndUploadsInProgress()
+    {
+        await WriteAsync($"{PackageName}/seed/init.sql", "CREATE TABLE dbo.Orders (Id INT);");
+        await WriteAsync($"{PackageName}/obj/generated.sql", "-- build output");
+        await WriteAsync($"{PackageName}/.git/hooks/pre-commit.sql", "-- repository metadata");
+        await WriteAsync($".{PackageName}.uploading-abcdef/seed/init.sql", "-- half an upload");
+
+        var files = await CreateStore().ListFilesAsync(".sql", CancellationToken.None);
+
+        Assert.Equal($"{PackageName}/seed/init.sql", Assert.Single(files.Value).RelativePath);
+    }
+
+    [Fact]
+    public async Task ListFilesOnAnEmptyVolumeIsAnEmptyListRatherThanAnError()
+    {
+        var files = await CreateStore().ListFilesAsync(".sql", CancellationToken.None);
+
+        Assert.True(files.IsSuccess);
+        Assert.Empty(files.Value);
+    }
+
+    [Fact]
+    public async Task ReadTextReturnsTheFileAsItWasWritten()
+    {
+        const string script = "CREATE TABLE dbo.Orders (Id INT);\nGO\nINSERT INTO dbo.Orders VALUES (1);\n";
+        await WriteAsync($"{PackageName}/seed/init.sql", script);
+
+        var text = await CreateStore().ReadTextAsync($"{PackageName}/seed/init.sql", CancellationToken.None);
+
+        Assert.True(text.IsSuccess);
+        Assert.Equal(script, text.Value);
+    }
+
+    [Fact]
+    public async Task ReadTextDecodesAScriptExportedAsUtf16()
+    {
+        // What Management Studio writes by default. Read as UTF-8 it arrives as statements with a null byte
+        // between every character, which the server rejects in a way that says nothing about the cause.
+        const string script = "CREATE TABLE dbo.Orders (Id INT);";
+        var path = Path.Combine(_root, PackageName, "seed");
+        Directory.CreateDirectory(path);
+        await File.WriteAllTextAsync(
+            Path.Combine(path, "init.sql"), script, new System.Text.UnicodeEncoding(false, true));
+
+        var text = await CreateStore().ReadTextAsync($"{PackageName}/seed/init.sql", CancellationToken.None);
+
+        Assert.Equal(script, text.Value);
+    }
+
+    [Fact]
+    public async Task ReadTextOfSomethingThatIsNotThereIsNotFound()
+    {
+        var text = await CreateStore().ReadTextAsync($"{PackageName}/seed/init.sql", CancellationToken.None);
+
+        Assert.Equal(StarterPackageErrors.NotFound($"{PackageName}/seed/init.sql"), text.Error);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("../etc/passwd")]
+    [InlineData("a-package/../../etc/passwd")]
+    [InlineData("/etc/passwd")]
+    public async Task ReadTextOutsideTheRootIsRefused(string relativePath)
+    {
+        var text = await CreateStore().ReadTextAsync(relativePath, CancellationToken.None);
+
+        Assert.Equal(StarterPackageErrors.InvalidPath, text.Error);
+    }
+
+    [Fact]
+    public async Task ReadTextOfADirectoryIsNotAFile()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, PackageName, "seed"));
+
+        var text = await CreateStore().ReadTextAsync($"{PackageName}/seed", CancellationToken.None);
+
+        Assert.Equal(StarterPackageErrors.NotFound($"{PackageName}/seed"), text.Error);
+    }
+
+    private async Task WriteAsync(string relativePath, string content)
+    {
+        var full = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        await File.WriteAllTextAsync(full, content);
+    }
+
     private FileSystemStarterPackageStore CreateStore(string? root = null, long maxUploadBytes = 16 * 1024 * 1024) =>
         new(Options.Create(new StarterPackagesOptions { RootPath = root ?? _root, MaxUploadBytes = maxUploadBytes }),
             NullLogger<FileSystemStarterPackageStore>.Instance);

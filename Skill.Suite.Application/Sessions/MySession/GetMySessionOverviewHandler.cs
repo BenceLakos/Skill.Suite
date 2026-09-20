@@ -2,7 +2,10 @@ namespace Skill.Suite.Application.Sessions.MySession;
 
 using Mediator;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Skill.Suite.Application.Abstractions;
+using Skill.Suite.Application.Competitors.Accounts;
+using Skill.Suite.Application.Sessions.Services;
 using Skill.Suite.Domain.Common;
 using Skill.Suite.Domain.Competitors;
 
@@ -20,7 +23,8 @@ using Skill.Suite.Domain.Competitors;
 public sealed class GetMySessionOverviewHandler(
     IAppDbContext db,
     IPasswordVault vault,
-    ICurrentUserService currentUser)
+    ICurrentUserService currentUser,
+    IOptions<MsSqlOptions> msSqlOptions)
     : IRequestHandler<GetMySessionOverviewQuery, Result<MySessionOverviewDto>>
 {
     public async ValueTask<Result<MySessionOverviewDto>> Handle(
@@ -57,7 +61,7 @@ public sealed class GetMySessionOverviewHandler(
                 sc => sc.SessionId == session.Id && sc.CompetitorId == competitorId, cancellationToken);
 
         // The enrolment row is what makes someone part of a session, and without one there is nothing of
-        // theirs here to describe. Everything below — the session's name, its shared database, the services'
+        // theirs here to describe. Everything below — the session's name, their session database, the services'
         // addresses and their environment — belongs to the competitors taking part, so it is withheld rather
         // than shown to a competitor the session was never started for.
         if (enrolment is null)
@@ -71,6 +75,12 @@ public sealed class GetMySessionOverviewHandler(
         // the access flags are still shown, so it is clear WHY there is nothing to paste.
         var hasSessionDatabaseAccess = session.DatabaseReadAccess || session.DatabaseWriteAccess;
 
+        // Derived through the same helper that provisioning names the database with, so what the competitor
+        // pastes is what was actually created for them — and nobody else's database is nameable from here.
+        var sessionDatabase = string.IsNullOrWhiteSpace(session.DatabaseName)
+            ? null
+            : SessionDatabaseNaming.For(session.DatabaseName, competitor.Username);
+
         var database = new MySessionDatabaseDto(
             server,
             competitor.Username,
@@ -78,23 +88,51 @@ public sealed class GetMySessionOverviewHandler(
             competitor.Username,
             MsSqlConnectionString.For(
                 server, competitor.Username, competitor.Username, credentials.Password),
-            session.DatabaseName,
+            sessionDatabase,
             session.DatabaseReadAccess,
             session.DatabaseWriteAccess,
             hasSessionDatabaseAccess
                 ? MsSqlConnectionString.For(
-                    server, session.DatabaseName, competitor.Username, credentials.Password)
+                    server, sessionDatabase, competitor.Username, credentials.Password)
                 : null);
 
-        // Numbered through the same helper the container name and the docker label use, so the service a
-        // competitor reports a problem with is the one an admin finds in `docker ps`.
-        var services = session.DockerImages
-            .Select((image, index) => new MySessionServiceDto(
-                SessionServiceNaming.ServiceNumber(index),
-                image.Image,
-                SessionServiceNaming.ContainerName(session.Slug, index),
-                image.Env,
-                image.PortMappings))
+        // Planned through the very code that started the containers, with this competitor as the only
+        // competitor in the session, so what the page shows is what their container actually got: the same
+        // name, the same resolved environment and the same host ports. Describing the images directly was
+        // fine while every service was shared and is a lie as soon as one of them is not.
+        //
+        // "Has a SQL login" is answered with "the session has a database", which is as close as this page can
+        // honestly get without an outbound connection on its render path. A competitor who holds no login has
+        // no session database either, and the database card above already says so.
+        var plan = SessionServicePlanner.Plan(new SessionServicePlanRequest(
+            session,
+            SessionRunMode.Competition,
+            SessionProvisioningStage.DockerServices,
+            [
+                new SessionServicePlanCompetitor(
+                    competitor.Username,
+                    competitor.FullName,
+                    competitor.IpAddress,
+                    competitor.CountryCode,
+                    credentials.Password,
+                    enrolment.Ordinal,
+                    sessionDatabase is not null),
+            ],
+            session.DatabaseName,
+            ServiceSqlServerName.For(msSqlOptions.Value.Server),
+            DatabaseAdmin: null,
+            // Null on purpose: this page prints the reference the session stores, which is what the
+            // administrator typed, not the one the host daemon was handed to pull with.
+            GitInternalBaseUrl: null));
+
+        var services = plan.Services
+            .Select(service => new MySessionServiceDto(
+                service.ServiceNumber,
+                service.ConfiguredImage,
+                service.ContainerName,
+                service.Environment,
+                service.PortMappings,
+                PerCompetitor: service.CompetitorUsername is not null))
             .ToList();
 
         return new MySessionOverviewDto(

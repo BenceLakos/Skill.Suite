@@ -14,6 +14,7 @@
 @using Skill.Suite.Application.Sessions.GetSession
 @using Skill.Suite.Application.Sessions.UpdateSession
 @using Skill.Suite.Application.StarterPackages.ListStarterPackages
+@using Skill.Suite.Application.StarterPackages.ListStarterPackageSqlFiles
 @using Skill.Suite.Components.Pages.Sessions.Drafts
 @using Skill.Suite.Domain.Credentials
 @using Skill.Suite.Domain.Sessions
@@ -151,16 +152,43 @@ else
 
             <MudTabPanel Text="@T["sessions.section.database"]" Class="pa-0 pt-4">
                 <MudStack Spacing="3">
-                    <LabeledField Label="@T["sessions.field.databaseName"]">
+                    @*
+                        A base name, not a database. Provisioning creates one database per competitor from
+                        it, so the field is capped at what leaves room for a username inside SQL Server's
+                        128-character identifier limit.
+                    *@
+                    <LabeledField Label="@T["sessions.field.databaseName"]"
+                                  Help="@T["sessions.help.databaseName"]">
                         <MudTextField @bind-Value="_model.DatabaseName"
-                                      Variant="Variant.Outlined" MaxLength="120"/>
+                                      Variant="Variant.Outlined" MaxLength="64"/>
                     </LabeledField>
-                    <MudStack Row="true" Spacing="6">
-                        <MudCheckBox T="bool" @bind-Value="_model.DatabaseReadAccess"
-                                     Label="@T["sessions.field.databaseRead"]" Dense="true"/>
-                        <MudCheckBox T="bool" @bind-Value="_model.DatabaseWriteAccess"
-                                     Label="@T["sessions.field.databaseWrite"]" Dense="true"/>
-                    </MudStack>
+                    <LabeledField Label="@T["sessions.field.databaseAccess"]"
+                                  Help="@T["sessions.help.databaseAccess"]">
+                        <MudStack Row="true" Spacing="6">
+                            <MudCheckBox T="bool" @bind-Value="_model.DatabaseReadAccess"
+                                         Label="@T["sessions.field.databaseRead"]" Dense="true"/>
+                            <MudCheckBox T="bool" @bind-Value="_model.DatabaseWriteAccess"
+                                         Label="@T["sessions.field.databaseWrite"]" Dense="true"/>
+                        </MudStack>
+                    </LabeledField>
+
+                    @*
+                        A picker rather than the free text the template folder uses, and deliberately: this
+                        file is read back through the starter package store when the session starts, so a
+                        path that is not on the volume can never be right. The one entry the volume does not
+                        account for is whatever this session already points at: it is added to the list on
+                        load, so an unrelated edit cannot quietly clear a script whose file was removed.
+                    *@
+                    <LabeledField Label="@T["sessions.field.databaseSeedScript"]"
+                                  Help="@T["sessions.help.databaseSeedScript"]">
+                        <MudSelect T="string" @bind-Value="_model.DatabaseSeedScript"
+                                   Variant="Variant.Outlined" Clearable="true" Dense="true">
+                            @foreach (var script in _seedScripts)
+                            {
+                                <MudSelectItem T="string" Value="@script">@script</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </LabeledField>
                 </MudStack>
             </MudTabPanel>
 
@@ -227,6 +255,7 @@ else
     private SessionFormDraft _model = new();
     private List<string> _availableImages = [];
     private List<string> _templateFolders = [];
+    private List<string> _seedScripts = [];
     private List<CredentialDto> _giteaCredentials = [];
     private List<CredentialDto> _nexusCredentials = [];
     private bool _loading = true;
@@ -256,6 +285,11 @@ else
             ]
             : [];
 
+        // Every .sql file on the volume, wherever it sits in its package: a seed script is as likely to be
+        // in a db/ or seed/ folder as beside the starter kit, and the session only ever runs one of them.
+        var sqlFiles = await Mediator.Send(new ListStarterPackageSqlFilesQuery());
+        _seedScripts = sqlFiles.IsSuccess ? [.. sqlFiles.Value.Select(file => file.RelativePath)] : [];
+
         var gitea = await Mediator.Send(new ListCredentialsQuery(CredentialKind.Gitea, null));
         _giteaCredentials = gitea.IsSuccess ? gitea.Value : [];
 
@@ -276,6 +310,12 @@ else
             if (result.IsSuccess)
             {
                 _model = LoadDraftFrom(result.Value);
+
+                if (!string.IsNullOrWhiteSpace(_model.DatabaseSeedScript)
+                    && !_seedScripts.Contains(_model.DatabaseSeedScript))
+                {
+                    _seedScripts.Add(_model.DatabaseSeedScript);
+                }
             }
             else
             {
@@ -338,6 +378,7 @@ else
                 Id!.Value, _model.Name, _model.Description, startsAt, endsAt,
                 _model.TemplateFolder, _model.JudgementImage,
                 _model.DatabaseName, _model.DatabaseReadAccess, _model.DatabaseWriteAccess,
+                _model.DatabaseSeedScript,
                 _model.GitCredentialId, _model.JudgementImagePullCredentialId,
                 dockerImages);
             var result = await Mediator.Send(cmd);
@@ -350,6 +391,7 @@ else
                 _model.Name, slug, _model.Description, startsAt, endsAt,
                 _model.TemplateFolder, _model.JudgementImage,
                 _model.DatabaseName, _model.DatabaseReadAccess, _model.DatabaseWriteAccess,
+                _model.DatabaseSeedScript,
                 _model.GitCredentialId, _model.JudgementImagePullCredentialId,
                 dockerImages);
             var result = await Mediator.Send(cmd);
@@ -379,6 +421,7 @@ else
         DatabaseName = dto.DatabaseName,
         DatabaseReadAccess = dto.DatabaseReadAccess,
         DatabaseWriteAccess = dto.DatabaseWriteAccess,
+        DatabaseSeedScript = dto.DatabaseSeedScript,
         GitCredentialId = dto.GitCredentialId,
         JudgementImagePullCredentialId = dto.JudgementImagePullCredentialId,
         DockerImages = dto.DockerImages.Select(d => new DockerImageDraft

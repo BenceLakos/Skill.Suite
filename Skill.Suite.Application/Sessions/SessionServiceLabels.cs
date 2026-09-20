@@ -16,4 +16,25 @@ internal static class SessionServiceLabels
 
     /// <summary>Carries the service's 1-based position in the session's image list.</summary>
     public const string ServiceKey = "skill-suite.service";
+
+    /// <summary>
+    /// Carries the username of the competitor a per-competitor container belongs to. Absent on shared ones.
+    /// </summary>
+    /// <remarks>
+    /// Not needed to find the container — the name already carries the username — but it is what makes
+    /// <c>docker ps --filter</c> able to answer "whose container is this?" without parsing names, which is
+    /// the question an expert asks at the machine while the competition is running.
+    /// </remarks>
+    public const string CompetitorKey = "skill-suite.competitor";
+
+    /// <summary>
+    /// Present only on marking containers, and carrying the session slug rather than a bare flag.
+    /// </summary>
+    /// <remarks>
+    /// The slug is the value, not the key, so stopping marking is one label filter: the daemon is asked for
+    /// containers marked as marking FOR THIS SESSION, which cannot catch another session's marking run and
+    /// cannot catch this session's competition containers. A bare <c>true</c> would have needed two filters
+    /// and a wider interface to pass them through.
+    /// </remarks>
+    public const string MarkingKey = "skill-suite.marking";
 }

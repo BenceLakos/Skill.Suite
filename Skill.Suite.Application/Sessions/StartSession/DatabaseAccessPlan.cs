@@ -11,14 +11,25 @@ using Skill.Suite.Domain.Competitors;
 /// a server whose login list cannot be read — refuse the Start while nothing has been created yet, instead of
 /// surfacing as N identical per-competitor failures after the repositories exist.
 /// </remarks>
-/// <param name="WithLogin">Competitors who hold a SQL login, so a grant against it can succeed.</param>
+/// <param name="BaseName">
+/// The session's database name, which names no database of its own: each competitor's is
+/// <c>SessionDatabaseNaming.For(BaseName, username)</c>, and is theirs alone.
+/// </param>
+/// <param name="Seed">
+/// The script to run against each competitor's database when this run is the one that creates it, or null
+/// when the session has none. Read here rather than at the point of use, so an unreadable script refuses the
+/// Start rather than failing once per competitor — and read ONCE for all of them, since the same text is
+/// what every one of those databases is seeded with.
+/// </param>
+/// <param name="WithLogin">Competitors who hold a SQL login, so a database and a grant are worth creating.</param>
 /// <param name="SkippedNoDatabaseLogin">
-/// Competitors who get a repository but no grant, because the SQL Server has no login for them.
+/// Competitors who get a repository but no database, because the SQL Server has no login for them.
 /// </param>
 internal sealed record DatabaseAccessPlan(
-    string Database,
+    string BaseName,
     bool Read,
     bool Write,
     BasicCredential Admin,
+    SeedScript? Seed,
     IReadOnlyList<Competitor> WithLogin,
     IReadOnlyList<string> SkippedNoDatabaseLogin);

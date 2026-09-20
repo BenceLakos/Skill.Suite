@@ -50,6 +50,14 @@ internal sealed class FileSystemStarterPackageStore(
         CancellationToken cancellationToken) =>
         ValueTask.FromResult(Browse(relativePath));
 
+    public ValueTask<Result<IReadOnlyList<StarterPackageEntryDto>>> ListFilesAsync(
+        string extension,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(ListFiles(extension));
+
+    public ValueTask<Result<string>> ReadTextAsync(string relativePath, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(ReadText(relativePath));
+
     public ValueTask<Result<StarterPackageDownload>> PrepareDownloadAsync(
         string relativePath,
         CancellationToken cancellationToken) =>
@@ -258,6 +266,80 @@ internal sealed class FileSystemStarterPackageStore(
         }
     }
 
+    /// <summary>
+    /// Every file of one extension under the volume, whichever package and however deep it is.
+    /// </summary>
+    /// <remarks>
+    /// The extension is matched here rather than handed to the enumerator as a glob: <c>*.sql</c> is
+    /// case-sensitive on Linux and not on Windows, and on Windows a three-letter extension glob also matches
+    /// longer ones. A picker whose contents depend on the host is worse than one extra pass over the names.
+    /// </remarks>
+    private Result<IReadOnlyList<StarterPackageEntryDto>> ListFiles(string extension)
+    {
+        var root = Root;
+        if (!Directory.Exists(root))
+            return StarterPackageErrors.RootUnavailable(root);
+
+        try
+        {
+            IReadOnlyList<StarterPackageEntryDto> files =
+            [
+                .. new DirectoryInfo(root)
+                    .EnumerateFiles("*", SearchOption.AllDirectories)
+                    .Select(file => (File: file, RelativePath: RelativePathOf(root, file.FullName)))
+                    .Where(candidate =>
+                        candidate.File.Name.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+                        && !IsSkipped(candidate.RelativePath)
+                        && !IsInHiddenFolder(candidate.RelativePath))
+                    .OrderBy(candidate => candidate.RelativePath, StringComparer.OrdinalIgnoreCase)
+                    .Select(candidate => new StarterPackageEntryDto(
+                        candidate.File.Name,
+                        candidate.RelativePath,
+                        false,
+                        candidate.File.Length,
+                        candidate.File.LastWriteTimeUtc)),
+            ];
+
+            return Result.Success(files);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return StarterPackageErrors.Failed(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Reads one file as text, decoding UTF-8 or the byte order mark the file carries.
+    /// </summary>
+    /// <remarks>
+    /// The mark matters for the one caller there is: a script exported from SQL Server Management Studio is
+    /// UTF-16, and read as UTF-8 it arrives as a statement with a null byte between every character.
+    /// </remarks>
+    private Result<string> ReadText(string relativePath)
+    {
+        var root = Root;
+        if (!Directory.Exists(root))
+            return StarterPackageErrors.RootUnavailable(root);
+
+        if (!StarterPackagePath.IsSafeRelativePath(relativePath) ||
+            !StarterPackagePath.TryResolve(root, relativePath, out var fullPath))
+        {
+            return StarterPackageErrors.InvalidPath;
+        }
+
+        if (!File.Exists(fullPath))
+            return StarterPackageErrors.NotFound(relativePath);
+
+        try
+        {
+            return Result.Success(File.ReadAllText(fullPath));
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return StarterPackageErrors.Failed(ex.Message);
+        }
+    }
+
     private Result<StarterPackageDownload> PrepareDownload(string relativePath)
     {
         var root = Root;
@@ -391,6 +473,23 @@ internal sealed class FileSystemStarterPackageStore(
 
         return path.Split(ContainerSeparator)
             .All(segment => segment.Length > 0 && segment is not ("." or "..") && !segment.Contains('\0'));
+    }
+
+    private static string RelativePathOf(string root, string fullPath) =>
+        Path.GetRelativePath(root, fullPath).Replace('\\', ContainerSeparator);
+
+    /// <summary>
+    /// Whether any folder on the way to the file is a hidden one.
+    /// </summary>
+    /// <remarks>
+    /// The same rule the packages list applies to the top level, carried down the tree: an upload in progress
+    /// stages itself in a dot-prefixed folder, and offering its half-written contents to be picked is worse
+    /// than waiting for the upload to land.
+    /// </remarks>
+    private static bool IsInHiddenFolder(string relativePath)
+    {
+        var segments = relativePath.Split(ContainerSeparator);
+        return segments[..^1].Any(segment => segment.StartsWith('.'));
     }
 
     private static bool IsSkipped(string relativePath)

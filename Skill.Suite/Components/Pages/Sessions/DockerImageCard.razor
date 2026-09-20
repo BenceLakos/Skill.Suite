@@ -1,3 +1,4 @@
+@using Skill.Suite.Application.Sessions.Services
 @using Skill.Suite.Components.Pages.Sessions.Drafts
 @inject ITranslator T
 
@@ -17,6 +18,26 @@
             <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Error" Size="Size.Small" OnClick="OnRemove"/>
         </MudTooltip>
     </MudStack>
+
+    @*
+        Stated on every service card rather than once at the top of the tab: the rule decides how many
+        containers this particular service becomes, and an administrator typing a placeholder into an
+        environment value is looking here, not at the tab heading.
+    *@
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+        <MudText Typo="Typo.caption">@T["sessions.placeholders.rule"]</MudText>
+        <MudText Typo="Typo.caption" Class="d-block mt-1">@T["sessions.placeholders.applyTo"]</MudText>
+        <div class="mt-2">
+            @foreach (var placeholder in ServicePlaceholders.All)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="ma-1"
+                         Color="@ScopeColor(ServicePlaceholders.ScopeOf(placeholder))">
+                    @ServicePlaceholders.TokenOf(placeholder)
+                </MudChip>
+            }
+        </div>
+        <MudText Typo="Typo.caption" Class="d-block mt-1">@T["sessions.placeholders.legend"]</MudText>
+    </MudAlert>
 
     <MudExpansionPanels MultiExpansion="true" Elevation="0" Dense="true">
         <MudExpansionPanel Text="@($"{T["sessions.dockerImage.env"]} ({Image.Env.Count})")">
@@ -38,6 +59,18 @@
     [Parameter, EditorRequired] public DockerImageDraft Image { get; set; } = null!;
     [Parameter, EditorRequired] public List<string> AvailableImages { get; set; } = [];
     [Parameter, EditorRequired] public EventCallback OnRemove { get; set; }
+
+    /// <summary>
+    /// Colours a placeholder by what it makes the service: session-scoped ones leave it a single shared
+    /// container, the others turn it into one per competitor.
+    /// </summary>
+    private static Color ScopeColor(ServicePlaceholderScope scope) => scope switch
+    {
+        ServicePlaceholderScope.Session => Color.Default,
+        ServicePlaceholderScope.Competitor => Color.Primary,
+        ServicePlaceholderScope.Database => Color.Secondary,
+        _ => Color.Default,
+    };
 
     private Task<IEnumerable<string>> SearchImages(string? value, CancellationToken cancellationToken) =>
         Task.FromResult(string.IsNullOrWhiteSpace(value)
