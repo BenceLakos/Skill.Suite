@@ -15,6 +15,26 @@
         <Authorized>
             <MudAppBar Elevation="1" Color="Color.Default" Class="app-bar-compact">
                 <MudText Typo="Typo.h6" Class="app-bar-title">@T["common.appName"]</MudText>
+                @*
+                    The competitor's whole navigation. NavMenu lives in the drawer, which only staff get, so
+                    without these two a competitor can reach a page nowhere but by typing its address.
+                *@
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="ml-4">
+                    <MudButton Href="my-test-runs"
+                               StartIcon="@Icons.Material.Filled.PlayCircleFilled"
+                               Variant="Variant.Text"
+                               Color="Color.Inherit"
+                               Class="app-bar-action">
+                        @T["nav.myTestRuns"]
+                    </MudButton>
+                    <MudButton Href="my-session"
+                               StartIcon="@Icons.Material.Filled.Badge"
+                               Variant="Variant.Text"
+                               Color="Color.Inherit"
+                               Class="app-bar-action">
+                        @T["nav.mySession"]
+                    </MudButton>
+                </MudStack>
                 <MudSpacer/>
                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="app-bar-actions">
                     <ThemeToggle Class="app-bar-action"/>

@@ -1,0 +1,57 @@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@*
+    A read-only value the reader is meant to take somewhere else: a username, a host name, a connection
+    string. Copying is the point, which is why the button is part of the field rather than something each page
+    rebuilds — a competitor typing a generated passphrase by hand under time pressure is the failure this
+    removes.
+*@
+<MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Style="width:100%;">
+    <MudTextField T="string"
+                  Value="@Value"
+                  Label="@Label"
+                  ReadOnly="true"
+                  Variant="Variant.Outlined"
+                  Margin="Margin.Dense"
+                  Style="flex:1;"
+                  InputType="@FieldInputType"
+                  Adornment="@(Secret ? Adornment.End : Adornment.None)"
+                  AdornmentIcon="@(_revealed ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                  AdornmentAriaLabel="@(_revealed ? T["common.hideSecret"] : T["common.showSecret"])"
+                  OnAdornmentClick="@(() => _revealed = !_revealed)"/>
+    <MudTooltip Text="@T["common.copy"]">
+        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                       Size="Size.Small"
+                       aria-label="@T["common.copy"]"
+                       OnClick="Copy"/>
+    </MudTooltip>
+</MudStack>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string? Value { get; set; }
+
+    /// <summary>Masks the value until the reader asks for it, for something that should not be read over a shoulder.</summary>
+    [Parameter] public bool Secret { get; set; }
+
+    private bool _revealed;
+
+    private InputType FieldInputType => Secret && !_revealed ? InputType.Password : InputType.Text;
+
+    // Best effort, the same way the starter packages page copies a path: the clipboard API is unavailable
+    // outside a secure context, and the value is on screen either way.
+    private async Task Copy()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", Value ?? string.Empty);
+            Snackbar.Add(T["common.copied"], Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add(T["common.copyFailed"], Severity.Warning);
+        }
+    }
+}

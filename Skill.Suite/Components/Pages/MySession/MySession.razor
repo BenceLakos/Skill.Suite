@@ -1,0 +1,290 @@
+@page "/my-session"
+@attribute [Authorize(Roles = Roles.Competitor)]
+@inject ISender Mediator
+@inject NavigationManager Nav
+@inject ITranslator T
+
+@using System.Globalization
+@using Skill.Suite.Application.Authorization
+@using Skill.Suite.Application.Sessions.MySession
+@using Skill.Suite.Domain.Sessions
+
+<PageTitle>@T["mySession.title"]</PageTitle>
+
+<PageHeader Title="@T["mySession.title"]" Subtitle="@T["mySession.subtitle"]"/>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" Class="ma-4"/>
+}
+else if (_overview is null)
+{
+    <MudAlert Severity="Severity.Error">@(_error ?? T["common.error"])</MudAlert>
+}
+else
+{
+    @* Taken into a local so the null check below narrows for everything that follows it. *@
+    var session = _overview.Session;
+
+    <MudStack Spacing="4">
+        <MudPaper Elevation="1" Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-3">@T["mySession.credentials"]</MudText>
+            <MudGrid Spacing="3">
+                <MudItem xs="12" md="6">
+                    <CopyableField Label="@T["mySession.field.username"]"
+                                   Value="@_overview.Credentials.Username"/>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <CopyableField Label="@T["mySession.field.password"]"
+                                   Value="@_overview.Credentials.Password"
+                                   Secret="true"/>
+                </MudItem>
+            </MudGrid>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3">
+                @T["mySession.credentials.help"]
+            </MudText>
+        </MudPaper>
+
+        @if (session is null && _overview.NotEnrolled)
+        {
+            <MudAlert Severity="Severity.Warning">@T["mySession.notEnrolled"]</MudAlert>
+        }
+        else if (session is null)
+        {
+            <MudAlert Severity="Severity.Info">@T["mySession.noActiveSession"]</MudAlert>
+        }
+        else
+        {
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3" Class="mb-3">
+                    <MudText Typo="Typo.h6" Style="flex:1;">@session.Name</MudText>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(session.Status)">
+                        @T[$"sessions.status.{session.Status.ToString().ToLowerInvariant()}"]
+                    </MudChip>
+                </MudStack>
+                <MudGrid Spacing="3">
+                    <MudItem xs="12" md="6">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@T["sessions.field.startsAt"]</MudText>
+                        <MudText Typo="Typo.body2">@session.StartsAt.ToString(TimestampFormat)</MudText>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@T["sessions.field.endsAt"]</MudText>
+                        <MudText Typo="Typo.body2">@session.EndsAt.ToString(TimestampFormat)</MudText>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-3">@T["mySession.repository"]</MudText>
+                @if (string.IsNullOrWhiteSpace(session.RepositoryUrl))
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+                        @T["mySession.repository.unavailable"]
+                    </MudAlert>
+                }
+                else
+                {
+                    <CopyableField Label="@T["mySession.field.repositoryUrl"]" Value="@session.RepositoryUrl"/>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3">
+                        @T["mySession.repository.help"]
+                    </MudText>
+                }
+            </MudPaper>
+
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-3">@T["mySession.database"]</MudText>
+
+                @if (session.Database.Server is null)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                        @T["mySession.database.noServer"]
+                    </MudAlert>
+                }
+
+                <MudGrid Spacing="3">
+                    @if (session.Database.Server is not null)
+                    {
+                        <MudItem xs="12" md="6">
+                            <CopyableField Label="@T["mySession.field.server"]" Value="@session.Database.Server"/>
+                        </MudItem>
+                    }
+                    <MudItem xs="12" md="6">
+                        <CopyableField Label="@T["mySession.field.login"]" Value="@session.Database.Login"/>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <CopyableField Label="@T["mySession.field.databasePassword"]"
+                                       Value="@session.Database.Password"
+                                       Secret="true"/>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <CopyableField Label="@T["mySession.field.personalDatabase"]"
+                                       Value="@session.Database.PersonalDatabase"/>
+                    </MudItem>
+                    @if (session.Database.PersonalConnectionString is not null)
+                    {
+                        <MudItem xs="12">
+                            <CopyableField Label="@T["mySession.field.personalConnectionString"]"
+                                           Value="@session.Database.PersonalConnectionString"
+                                           Secret="true"/>
+                        </MudItem>
+                    }
+
+                    @if (session.Database.SessionDatabase is null)
+                    {
+                        <MudItem xs="12">
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                @T["mySession.database.noSessionDatabase"]
+                            </MudText>
+                        </MudItem>
+                    }
+                    else
+                    {
+                        <MudItem xs="12" md="6">
+                            <CopyableField Label="@T["mySession.field.sessionDatabase"]"
+                                           Value="@session.Database.SessionDatabase"/>
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mt-2">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["mySession.field.access"]</MudText>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                         Color="@AccessColor(session.Database.SessionReadAccess)">
+                                    @T["sessions.field.databaseRead"]
+                                </MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                                         Color="@AccessColor(session.Database.SessionWriteAccess)">
+                                    @T["sessions.field.databaseWrite"]
+                                </MudChip>
+                            </MudStack>
+                        </MudItem>
+                        @if (session.Database.SessionConnectionString is not null)
+                        {
+                            <MudItem xs="12">
+                                <CopyableField Label="@T["mySession.field.sessionConnectionString"]"
+                                               Value="@session.Database.SessionConnectionString"
+                                               Secret="true"/>
+                            </MudItem>
+                        }
+                    }
+                </MudGrid>
+
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3">
+                    @T["mySession.database.help"]
+                </MudText>
+            </MudPaper>
+
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6">@T["mySession.services"]</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["mySession.services.shared"]</MudText>
+
+                @if (session.Services.Count == 0)
+                {
+                    <MudText Color="Color.Secondary" Class="mt-3">@T["mySession.services.empty"]</MudText>
+                }
+                else
+                {
+                    <MudStack Spacing="3" Class="mt-3">
+                        @foreach (var service in session.Services)
+                        {
+                            <MudPaper Outlined="true" Class="pa-3">
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-2">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@service.Number</MudChip>
+                                    <MudText Typo="Typo.body1" Style="flex:1;">@service.Image</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@service.ContainerName</MudText>
+                                </MudStack>
+
+                                @if (service.Ports.Count == 0)
+                                {
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">@T["mySession.service.noPorts"]</MudText>
+                                }
+                                else
+                                {
+                                    <MudGrid Spacing="2">
+                                        @foreach (var port in service.Ports)
+                                        {
+                                            <MudItem xs="12" md="6">
+                                                <CopyableField Label="@PortLabel(port)"
+                                                               Value="@Address(session.ServiceHost, port)"/>
+                                            </MudItem>
+                                        }
+                                    </MudGrid>
+                                }
+
+                                @if (service.Environment.Count > 0)
+                                {
+                                    <MudExpansionPanels Elevation="0" Dense="true" Class="mt-2">
+                                        <MudExpansionPanel Text="@($"{T["sessions.dockerImage.env"]} ({service.Environment.Count})")">
+                                            <MudSimpleTable Dense="true" Hover="true" Striped="true" Elevation="0">
+                                                <tbody>
+                                                @foreach (var setting in service.Environment.OrderBy(e => e.Key, StringComparer.Ordinal))
+                                                {
+                                                    <tr>
+                                                        <td>@setting.Key</td>
+                                                        <td>@setting.Value</td>
+                                                    </tr>
+                                                }
+                                                </tbody>
+                                            </MudSimpleTable>
+                                        </MudExpansionPanel>
+                                    </MudExpansionPanels>
+                                }
+                            </MudPaper>
+                        }
+                    </MudStack>
+                }
+            </MudPaper>
+        }
+    </MudStack>
+}
+
+@code {
+    private const string TimestampFormat = "yyyy-MM-dd HH:mm";
+
+    /// <summary>What separates a host from a published port for a human to paste. Not the SQL Server comma.</summary>
+    private const char HostPortSeparator = ':';
+
+    private MySessionOverviewDto? _overview;
+    private string? _error;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // The host the competitor reached this page on is the host everything else is published on, and it is
+        // the one thing the handler cannot work out for itself.
+        var result = await Mediator.Send(new GetMySessionOverviewQuery(RequestHost()));
+
+        if (result.IsSuccess)
+            _overview = result.Value;
+        else
+            _error = result.Error.Message;
+
+        _loading = false;
+    }
+
+    private string? RequestHost() =>
+        Uri.TryCreate(Nav.BaseUri, UriKind.Absolute, out var baseUri) ? baseUri.Host : null;
+
+    private string PortLabel(PortMapping port) =>
+        T.Format(
+            "mySession.service.port",
+            port.ContainerPort,
+            port.Protocol.ToString().ToUpperInvariant());
+
+    private static string Address(string? host, PortMapping port)
+    {
+        var publishedPort = port.HostPort.ToString(CultureInfo.InvariantCulture);
+
+        return string.IsNullOrWhiteSpace(host)
+            ? publishedPort
+            : $"{host}{HostPortSeparator}{publishedPort}";
+    }
+
+    private static Color StatusColor(SessionStatus status) => status switch
+    {
+        SessionStatus.Active => Color.Success,
+        SessionStatus.Stopped => Color.Warning,
+        SessionStatus.Closed => Color.Dark,
+        _ => Color.Default,
+    };
+
+    private static Color AccessColor(bool granted) => granted ? Color.Success : Color.Default;
+}

@@ -38,6 +38,19 @@ services:
       # platform. Wrong here is not silent - provisioning reports the connection failure on the row.
       MsSql__Server: "${SKILLSUITE_MSSQL_SERVER:-mssql,1433}"
 
+      # Which peer is allowed to tell this application who the client is, as a CIDR range — the docker network
+      # Traefik reaches it from. Only then is X-Forwarded-For read, and only its right-most entry, which is
+      # the address Traefik itself saw; anything a client put in front of that is ignored.
+      #
+      # Empty by default, which switches forwarded headers off entirely: with the header honoured from an
+      # untrusted peer, anyone able to reach the port could claim to be sitting at any workstation, and the
+      # sign-in page would hand them that competitor's password. Off, every request simply looks like it came
+      # from the proxy, and the sign-in page pre-fills nothing.
+      #
+      # The network has no fixed subnet, so read the one docker assigned and put it in .env:
+      #   docker network inspect skill-suite --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
+      ForwardedHeaders__KnownNetworks__0: "${SKILLSUITE_TRUSTED_PROXY_NETWORK:-}"
+
       # Domain the synthetic <username>@<domain> address of each Gitea user is built from. Gitea requires a
       # unique address per user and nothing is ever sent to it, so this must stay a domain no real mail server
       # will accept delivery for.

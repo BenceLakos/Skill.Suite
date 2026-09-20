@@ -1,7 +1,13 @@
 @page "/Account/Login"
 @layout Layout.AuthLayout
 @attribute [AllowAnonymous]
+@implements IDisposable
+@inject ISender Mediator
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PersistentComponentState PageState
 @inject ITranslator T
+
+@using Skill.Suite.Application.Competitors.GetLoginPrefill
 
 <PageTitle>@T["common.signIn"]</PageTitle>
 
@@ -14,6 +20,20 @@
             <MudAlert Severity="Severity.Error" Class="mb-4">@T["auth.login.invalid"]</MudAlert>
         }
 
+        @*
+            Shown only when the workstation was recognised. It names who is about to be signed in, so a
+            competitor at somebody else's desk notices before they submit, and a wrong IP address on a
+            competitor row shows up as the wrong name rather than as nothing happening. Nothing is said when
+            there is no match: an anonymous visitor learns neither which address we saw nor that the
+            application looks at it.
+        *@
+        @if (_prefill is not null)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-4">
+                @T.Format("auth.login.prefilled", _workstation ?? string.Empty, _prefill.Username)
+            </MudAlert>
+        }
+
         <form method="post" action="/Account/Login" class="d-flex flex-column gap-4">
             <input type="hidden" name="ReturnUrl" value="@ReturnUrl"/>
 
@@ -22,7 +42,7 @@
                     @T["auth.login.username"]
                 </label>
                 <div class="mud-input mud-input-outlined mud-input-underline mud-shrink mud-input-margin-dense" style="margin-top:0.5rem;">
-                    <input id="login-username" name="Username" type="text" autocomplete="username" required class="mud-input-slot mud-input-root mud-input-root-outlined" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--mud-palette-lines-inputs);border-radius:4px;background:transparent;color:inherit;"/>
+                    <input id="login-username" name="Username" type="text" autocomplete="username" required value="@_prefill?.Username" class="mud-input-slot mud-input-root mud-input-root-outlined" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--mud-palette-lines-inputs);border-radius:4px;background:transparent;color:inherit;"/>
                 </div>
             </div>
 
@@ -31,7 +51,7 @@
                     @T["auth.login.password"]
                 </label>
                 <div style="margin-top:0.5rem;">
-                    <input id="login-password" name="Password" type="password" required class="mud-input-slot" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--mud-palette-lines-inputs);border-radius:4px;background:transparent;color:inherit;"/>
+                    <input id="login-password" name="Password" type="password" autocomplete="current-password" required value="@_prefill?.Password" class="mud-input-slot" style="width:100%;padding:0.5rem 0.75rem;border:1px solid var(--mud-palette-lines-inputs);border-radius:4px;background:transparent;color:inherit;"/>
                 </div>
             </div>
 
@@ -48,8 +68,58 @@
 </MudContainer>
 
 @code {
+    /// <summary>Keys the pre-fill is carried under, from the prerender pass into the circuit.</summary>
+    private const string PrefillStateKey = "login.prefill";
+    private const string WorkstationStateKey = "login.workstation";
+
     [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
     [SupplyParameterFromQuery] public string? Error { get; set; }
 
+    private CompetitorLoginPrefillDto? _prefill;
+    private string? _workstation;
+    private PersistingComponentStateSubscription _persisting;
+
     private bool HasError => string.Equals(Error, "invalid", StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _persisting = PageState.RegisterOnPersisting(Persist);
+
+        // The interactive render runs on the circuit, which has no HTTP request and so no caller address. The
+        // prerender pass resolved it; this is that answer coming back. Without it the interactive render would
+        // find no pre-fill, and the diff against the prerendered markup would empty both fields the instant
+        // the page became interactive.
+        if (PageState.TryTakeFromJson<CompetitorLoginPrefillDto>(PrefillStateKey, out var restored))
+        {
+            _prefill = restored;
+            PageState.TryTakeFromJson<string>(WorkstationStateKey, out _workstation);
+            return;
+        }
+
+        var address = HttpContextAccessor.HttpContext?.Connection.RemoteIpAddress;
+        if (address is null)
+            return;
+
+        var result = await Mediator.Send(new GetCompetitorLoginPrefillByIpQuery(address.ToString()));
+        if (result.IsFailure || result.Value is null)
+            return;
+
+        _prefill = result.Value;
+        _workstation = address.ToString();
+    }
+
+    // Only when there is something to carry: an unrecognised visitor should not have a state blob written into
+    // their page, and with nothing persisted the circuit simply finds no pre-fill, which is the same answer.
+    private Task Persist()
+    {
+        if (_prefill is not null)
+        {
+            PageState.PersistAsJson(PrefillStateKey, _prefill);
+            PageState.PersistAsJson(WorkstationStateKey, _workstation);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose() => _persisting.Dispose();
 }
