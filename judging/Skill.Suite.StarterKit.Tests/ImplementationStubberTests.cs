@@ -120,19 +120,24 @@ public sealed class ImplementationStubberTests
         var stubbed = Stub(Reference);
 
         Assert.DoesNotContain("answer key", stubbed);
-        Assert.Contains("The implementation of the contract.", stubbed);
+        Assert.Contains("Implement the members below.", stubbed);
     }
 
     [Fact]
-    public void TheBannerDoesNotAssumeWhichSessionTypeTheCompetitorIsIn()
+    public void TheTypeBannerIsASingleLine()
     {
-        // One starter kit serves both session types, so this project is handed to a competitor who has to
-        // write it AND to one who only compiles against it while testing the hidden implementation. A banner
-        // that addresses only the first tells the second their tests run against something that throws.
-        var stubbed = Stub(Reference);
+        // Member-level docs are the contract and stay; the type's own banner is boilerplate every competitor
+        // scrolls past, so it is one line naming the two rules the harness enforces and nothing else.
+        var stubbed = Stub("""
+            /// <summary>Reference.</summary>
+            public sealed class Calc
+            {
+                public int Add(int a, int b) => a + b;
+            }
+            """);
+        var docLines = stubbed.Split('\n').Count(line => line.TrimStart().StartsWith("///"));
 
-        Assert.Contains("In an implementation session", stubbed);
-        Assert.Contains("In a testing session", stubbed);
+        Assert.Equal(1, docLines);
     }
 
     [Fact]
@@ -172,6 +177,6 @@ public sealed class ImplementationStubberTests
             """);
 
         Assert.DoesNotContain("Secret notes", stubbed);
-        Assert.Contains("The implementation of the contract.", stubbed);
+        Assert.Contains("Implement the members below.", stubbed);
     }
 }

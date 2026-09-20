@@ -63,6 +63,42 @@ internal sealed class ProcessContainerServiceManager(ILogger<ProcessContainerSer
         return recreated ? ContainerServiceStart.Recreated : ContainerServiceStart.Started;
     }
 
+    /// <summary>
+    /// Stops the container if it is running, and deliberately leaves it in place.
+    /// </summary>
+    /// <remarks>
+    /// Not removed, because a stopped session is meant to be started again. The container keeps its name and
+    /// the host ports it publishes, so nothing else claims them in the meantime, and
+    /// <see cref="EnsureRunningAsync"/> already removes and recreates a stopped container on the next start
+    /// — which is also how a changed image or port set is picked up.
+    /// </remarks>
+    public async Task<ContainerServiceStop> StopAsync(string containerName, CancellationToken cancellationToken)
+    {
+        var state = await InspectAsync(containerName, cancellationToken);
+
+        if (state == ContainerRunningState.Absent)
+            return ContainerServiceStop.Absent;
+
+        if (state == ContainerRunningState.Stopped)
+            return ContainerServiceStop.NotRunning;
+
+        var result = await DockerCli.RunAsync(
+            ["stop", containerName],
+            dockerConfigDirectory: null,
+            standardInput: null,
+            cancellationToken);
+
+        if (result.ExitCode != 0)
+        {
+            throw new ContainerServiceException(
+                $"Stopping service container '{containerName}' exited {result.ExitCode}: {Describe(result)}");
+        }
+
+        logger.LogInformation("Service container {ContainerName} stopped.", containerName);
+
+        return ContainerServiceStop.Stopped;
+    }
+
     public async Task<int> RemoveByLabelAsync(
         string labelKey,
         string labelValue,

@@ -19,6 +19,16 @@ public interface IContainerServiceManager
     Task<ContainerServiceStart> EnsureRunningAsync(ContainerServiceRequest request, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Stops the container if it is running, and leaves it in place. Idempotent.
+    /// </summary>
+    /// <remarks>
+    /// Stopping rather than removing, because a stopped session is meant to be started again:
+    /// <see cref="EnsureRunningAsync"/> recreates a stopped container on the next start, so the service
+    /// comes back with whatever image and ports the session carries by then.
+    /// </remarks>
+    Task<ContainerServiceStop> StopAsync(string containerName, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Force-removes every container carrying the label <paramref name="labelKey"/>=<paramref name="labelValue"/>.
     /// Returns how many were removed.
     /// </summary>

@@ -89,7 +89,12 @@ Nothing is started: register the images and sessions in the UI as described belo
 
 The platform reads the registry host off the image reference. A host must contain a `.` or a `:`, or be exactly
 `localhost` — otherwise `gitea/owner/img:tag` is parsed as a Docker Hub namespace and the pull fails with a
-confusing not-found. Use `gitea.example.com/owner/img:tag` or `gitea:3000/owner/img:tag`.
+confusing not-found. Use `gitea.example.com/owner/img:tag` or `localhost:3000/owner/img:tag`.
+
+The UI offers `localhost:3000/<owner>/<image>:<tag>`, not `gitea:3000/...`: pulls run on the *host* docker
+daemon whose socket is mounted into the platform container, and that daemon has neither DNS for a compose
+service name nor a reason to accept plain http from anything but `localhost`. A reference already stored
+against `gitea:3000` still works — it is rewritten to the daemon-facing host on the way to docker.
 
 ## Wiring it into a running platform
 
@@ -97,7 +102,9 @@ The judgement-image field is a dropdown fed from `DockerImage` records, so the i
 the UI before a session can use it:
 
 1. **Credentials** → a `Gitea` or `Nexus` credential for pulling, secret formatted `username:token`.
-2. **Docker images** → source `Pull`, the full immutable reference.
+2. **Docker images** → source `Pull`, the full immutable reference. Take it from the dropdown, which offers
+   `localhost:3000/<owner>/<image>:<tag>` — the registry as the host daemon sees it, since that is the daemon
+   that performs the pull.
 3. **Sessions** → pick that image, set the git credential, and set **template folder** to your generated
    `competitor-start/` directory — **not** the swapped folder inside it. That directory is pushed *as the
    repository root*, and `swap_dir` then looks for `<repo-root>/<SwappedFolder>`; point one level deeper and

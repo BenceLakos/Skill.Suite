@@ -107,7 +107,7 @@ public sealed class StartSessionHandler(
         var organization = session.GitOrganization;
         var template = new RepositoryReference(organization, Session.TemplateRepositoryName);
 
-        Report(request, StartSessionProgress.Indeterminate(StartSessionStage.Preparing));
+        Report(request, SessionProvisioningProgress.Indeterminate(SessionProvisioningStage.Preparing));
 
         await gitHost.EnsureOrganizationAsync(
             new EnsureOrganizationRequest(organization, session.Name, admin), cancellationToken);
@@ -347,7 +347,14 @@ public sealed class StartSessionHandler(
         }
     }
 
-    private async Task<List<StartSessionFailure>> ProvisionCompetitorsAsync(
+    /// <summary>
+    /// Copies the template into one repository per competitor and grants each of them access to their own.
+    /// </summary>
+    /// <remarks>
+    /// Both halves are needed for a competitor to be provisioned, and both are retried by re-running Start:
+    /// the copy is skipped for a repository that already exists, and the grant is applied again over itself.
+    /// </remarks>
+    private async Task<List<SessionProvisioningFailure>> ProvisionCompetitorsAsync(
         StartSessionCommand request,
         Session session,
         RepositoryReference template,
@@ -355,12 +362,12 @@ public sealed class StartSessionHandler(
         BasicCredential admin,
         CancellationToken cancellationToken)
     {
-        var failures = new List<StartSessionFailure>();
+        var failures = new List<SessionProvisioningFailure>();
 
         var total = competitors.Count;
         var completed = 0;
 
-        Report(request, new StartSessionProgress(StartSessionStage.Repositories, completed, total));
+        Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Repositories, completed, total));
 
         foreach (var competitor in competitors)
         {
@@ -385,6 +392,12 @@ public sealed class StartSessionHandler(
                     new GenerateRepositoryRequest(template, target, DefaultBranch, admin),
                     cancellationToken);
 
+                // The repository is private and lives in a private organisation, so creating it grants the
+                // competitor nothing: without this they cannot clone it, push to it, or even see it exists.
+                // A grant that fails is therefore a failed provision, not a warning — the same as no
+                // repository at all from where the competitor is sitting.
+                await gitHost.EnsureCollaboratorAsync(target, competitor.Username, admin, cancellationToken);
+
                 enrolment.MarkProvisioned(cloneUrl);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -392,8 +405,8 @@ public sealed class StartSessionHandler(
                 // One competitor's repository failing must not deny the rest theirs.
                 logger.LogError(ex, "Could not provision a repository for {Username}", competitor.Username);
                 enrolment.MarkFailed(ex.Message);
-                failures.Add(new StartSessionFailure(
-                    StartSessionStage.Repositories, competitor.Username, ExternalMessage.Trim(ex.Message)));
+                failures.Add(new SessionProvisioningFailure(
+                    SessionProvisioningStage.Repositories, competitor.Username, ExternalMessage.Trim(ex.Message)));
             }
 
             // Saved per competitor, not once at the end. The enrolment row is what the webhook resolves a push
@@ -406,7 +419,7 @@ public sealed class StartSessionHandler(
             // Counted whether the repository was created or not: the bar tracks competitors dealt with, and
             // a failure the admin is told about afterwards must not leave it stalled short of the end.
             completed++;
-            Report(request, new StartSessionProgress(StartSessionStage.Repositories, completed, total));
+            Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Repositories, completed, total));
         }
 
         return failures;
@@ -421,17 +434,17 @@ public sealed class StartSessionHandler(
     /// the repository failures the admin also has to read. The bar is still driven to the end so it does not
     /// sit at zero while the next stage runs.
     /// </remarks>
-    private async Task<StartSessionStageOutcome> GrantDatabaseAccessAsync(
+    private async Task<SessionProvisioningStageOutcome> GrantDatabaseAccessAsync(
         StartSessionCommand request, DatabaseAccessPlan? plan, CancellationToken cancellationToken)
     {
         if (plan is null)
             return EmptyStage;
 
-        var failures = new List<StartSessionFailure>();
+        var failures = new List<SessionProvisioningFailure>();
         var total = plan.WithLogin.Count;
         var completed = 0;
 
-        Report(request, new StartSessionProgress(StartSessionStage.Databases, completed, total));
+        Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Databases, completed, total));
 
         try
         {
@@ -440,11 +453,11 @@ public sealed class StartSessionHandler(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Could not create the session database {Database}", plan.Database);
-            failures.Add(new StartSessionFailure(
-                StartSessionStage.Databases, plan.Database, ExternalMessage.Trim(ex.Message)));
+            failures.Add(new SessionProvisioningFailure(
+                SessionProvisioningStage.Databases, plan.Database, ExternalMessage.Trim(ex.Message)));
 
-            Report(request, new StartSessionProgress(StartSessionStage.Databases, total, total));
-            return new StartSessionStageOutcome(NothingSucceeded, failures);
+            Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Databases, total, total));
+            return new SessionProvisioningStageOutcome(NothingSucceeded, failures);
         }
 
         var granted = 0;
@@ -467,15 +480,15 @@ public sealed class StartSessionHandler(
                     "Could not grant {Username} access to the session database {Database}",
                     competitor.Username, plan.Database);
 
-                failures.Add(new StartSessionFailure(
-                    StartSessionStage.Databases, competitor.Username, ExternalMessage.Trim(ex.Message)));
+                failures.Add(new SessionProvisioningFailure(
+                    SessionProvisioningStage.Databases, competitor.Username, ExternalMessage.Trim(ex.Message)));
             }
 
             completed++;
-            Report(request, new StartSessionProgress(StartSessionStage.Databases, completed, total));
+            Report(request, new SessionProvisioningProgress(SessionProvisioningStage.Databases, completed, total));
         }
 
-        return new StartSessionStageOutcome(granted, failures);
+        return new SessionProvisioningStageOutcome(granted, failures);
     }
 
     /// <summary>
@@ -487,7 +500,7 @@ public sealed class StartSessionHandler(
     /// was started. A label the image itself carries is kept, but the session's own two win a collision: they
     /// are what removal depends on.
     /// </remarks>
-    private async Task<StartSessionStageOutcome> StartServicesAsync(
+    private async Task<SessionProvisioningStageOutcome> StartServicesAsync(
         StartSessionCommand request,
         Session session,
         BasicCredential? pullCredential,
@@ -497,15 +510,28 @@ public sealed class StartSessionHandler(
         if (images.Count == 0)
             return EmptyStage;
 
-        var failures = new List<StartSessionFailure>();
+        var failures = new List<SessionProvisioningFailure>();
         var total = images.Count;
         var running = 0;
 
-        Report(request, new StartSessionProgress(StartSessionStage.DockerServices, NothingSucceeded, total));
+        Report(request, new SessionProvisioningProgress(SessionProvisioningStage.DockerServices, NothingSucceeded, total));
 
         for (var index = 0; index < total; index++)
         {
             var image = images[index];
+
+            // Started on the host daemon over the mounted socket, so a registry host that only exists on the
+            // docker network has to be restated. The session's own record of the image is left as it is.
+            var daemonImage = DaemonImageReference.ForDaemon(
+                image.Image, webhookOptions.Value.GitInternalBaseUrl);
+
+            if (!string.Equals(daemonImage, image.Image, StringComparison.Ordinal))
+            {
+                logger.LogInformation(
+                    "Session {SessionId} pulls {DaemonImage}; {StoredImage} names a host only the docker "
+                    + "network resolves.",
+                    session.Id, daemonImage, image.Image);
+            }
 
             var labels = new Dictionary<string, string>(image.Labels)
             {
@@ -517,13 +543,13 @@ public sealed class StartSessionHandler(
             {
                 var outcome = await containerServices.EnsureRunningAsync(
                     new ContainerServiceRequest(
-                        image.Image,
+                        daemonImage,
                         SessionServiceNaming.ContainerName(session.Slug, index),
                         image.Env,
                         labels,
                         image.Volumes,
                         image.PortMappings,
-                        RegistryAuthFactory.ForHostedImage(pullCredential, image.Image)),
+                        RegistryAuthFactory.ForHostedImage(pullCredential, daemonImage)),
                     cancellationToken);
 
                 logger.LogInformation(
@@ -537,14 +563,14 @@ public sealed class StartSessionHandler(
                 logger.LogError(ex,
                     "Could not start the service {Image} for session {SessionId}", image.Image, session.Id);
 
-                failures.Add(new StartSessionFailure(
-                    StartSessionStage.DockerServices, image.Image, ExternalMessage.Trim(ex.Message)));
+                failures.Add(new SessionProvisioningFailure(
+                    SessionProvisioningStage.DockerServices, image.Image, ExternalMessage.Trim(ex.Message)));
             }
 
-            Report(request, new StartSessionProgress(StartSessionStage.DockerServices, index + 1, total));
+            Report(request, new SessionProvisioningProgress(SessionProvisioningStage.DockerServices, index + 1, total));
         }
 
-        return new StartSessionStageOutcome(running, failures);
+        return new SessionProvisioningStageOutcome(running, failures);
     }
 
     /// <summary>
@@ -557,7 +583,7 @@ public sealed class StartSessionHandler(
     /// never worth abandoning a half-provisioned session for, so every sink fault is logged and swallowed.
     /// Cancellation is not read from here either; the next awaited git or database call observes the token.
     /// </remarks>
-    private void Report(StartSessionCommand request, StartSessionProgress progress)
+    private void Report(StartSessionCommand request, SessionProvisioningProgress progress)
     {
         if (request.Progress is null)
             return;
@@ -585,7 +611,7 @@ public sealed class StartSessionHandler(
     private const int NothingSucceeded = 0;
 
     /// <summary>A stage the session is not configured for: nothing attempted, nothing to report.</summary>
-    private static readonly StartSessionStageOutcome EmptyStage = new(NothingSucceeded, []);
+    private static readonly SessionProvisioningStageOutcome EmptyStage = new(NothingSucceeded, []);
 
     private static readonly TimeSpan TemplateVisibilityTimeout = TimeSpan.FromSeconds(30);
 }

@@ -6,12 +6,13 @@ namespace Skill.Suite.Application.Sessions.StartSession;
 /// <summary>
 /// Opens a session for submissions and provisions everything it runs on: a git organisation, a template
 /// repository seeded from the session's template folder, one repository per competitor who has an account on
-/// the git host, access to the session's shared database for every competitor who has a SQL login, the
-/// session's docker services, and a push webhook.
+/// the git host with that competitor granted write access to it, access to the session's shared database for
+/// every competitor who has a SQL login, the session's docker services, and a push webhook.
 /// </summary>
 /// <remarks>
 /// Safe to re-run. Every external step treats "already exists" as success, so starting a session whose
-/// provisioning partly failed retries only what did not get through.
+/// provisioning partly failed retries only what did not get through — and starting a stopped session is the
+/// same call, which is what restores the repository access and the services stopping it withdrew.
 /// <para>
 /// Competitors with no account on the git host are skipped rather than provisioned — they could not reach
 /// the repository anyway — and reported in <see cref="StartSessionResult.SkippedNoGitAccess"/>; competitors
@@ -33,4 +34,4 @@ namespace Skill.Suite.Application.Sessions.StartSession;
 /// </remarks>
 public sealed record StartSessionCommand(
     Guid Id,
-    IProgress<StartSessionProgress>? Progress = null) : IRequest<Result<StartSessionResult>>;
+    IProgress<SessionProvisioningProgress>? Progress = null) : IRequest<Result<StartSessionResult>>;

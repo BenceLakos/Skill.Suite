@@ -108,18 +108,18 @@ public sealed class TestSuiteSkeletonRewriterTests
 
         Assert.DoesNotContain("answer key", skeleton);
         Assert.DoesNotContain("calibration only", skeleton);
-        Assert.Contains("Your test suite.", skeleton);
+        Assert.Contains("Write your tests here", skeleton);
     }
 
     [Fact]
-    public void TheBannerDoesNotAssumeWhichSessionTypeTheCompetitorIsIn()
+    public void TheBannerIsASingleLine()
     {
-        // The same kit ships for both session types, so this project reaches a competitor whose suite is the
-        // graded artefact AND one who writes tests only to check their own implementation.
+        // The same kit ships for both session types and is read by every competitor; one line that names the
+        // two rules the harness enforces is what survives being scrolled past, a paragraph is not.
         var skeleton = Rewrite(ReferenceSuite);
+        var docLines = skeleton.Split('\n').Count(line => line.TrimStart().StartsWith("///"));
 
-        Assert.Contains("In a testing session", skeleton);
-        Assert.Contains("In an implementation session", skeleton);
+        Assert.Equal(1, docLines);
     }
 
     [Fact]

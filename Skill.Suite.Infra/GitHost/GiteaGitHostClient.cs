@@ -42,6 +42,15 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
     /// </summary>
     private const int MaxUserPages = 40;
 
+    /// <summary>
+    /// What a competitor is granted on their own repository: Gitea's read, clone and push level.
+    /// </summary>
+    /// <remarks>
+    /// Not "admin", which would let them delete the repository or change its collaborators, and not "read",
+    /// which is the one thing that makes the repository useless to them.
+    /// </remarks>
+    private const string CollaboratorPermission = "write";
+
     public async Task EnsureOrganizationAsync(
         EnsureOrganizationRequest request, CancellationToken cancellationToken)
     {
@@ -146,6 +155,51 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
         var refreshed = await GetRepositoryAsync(request.Target, request.Credential, cancellationToken);
         return refreshed?.CloneUrl
             ?? throw new GitHostException($"Repository '{owner}/{name}' reported no clone URL.");
+    }
+
+    public async Task EnsureCollaboratorAsync(
+        RepositoryReference repository,
+        string username,
+        BasicCredential credential,
+        CancellationToken cancellationToken)
+    {
+        // PUT is the grant and the update in one, so no existence check is needed: sending it for somebody
+        // who is already a collaborator at this permission answers 204 and changes nothing.
+        var body = new Dictionary<string, object?> { ["permission"] = CollaboratorPermission };
+
+        await api.SendAsync(HttpMethod.Put, CollaboratorPath(repository, username), body, credential,
+            $"grant '{username}' access to '{repository.Owner}/{repository.Name}'", cancellationToken);
+
+        logger.LogInformation("Granted {Username} {Permission} access to {Owner}/{Name}",
+            username, CollaboratorPermission, repository.Owner, repository.Name);
+    }
+
+    public async Task<AccountRemoval> RemoveCollaboratorAsync(
+        RepositoryReference repository,
+        string username,
+        BasicCredential credential,
+        CancellationToken cancellationToken)
+    {
+        var path = CollaboratorPath(repository, username);
+
+        // Asked first rather than deleting blind. DELETE on a non-collaborator is not distinguishable from
+        // DELETE on a repository the credential cannot see, and reporting the second as "already revoked"
+        // would leave a competitor with access while the session reads as stopped.
+        if (!await api.ExistsAsync(path, credential, cancellationToken))
+        {
+            logger.LogInformation("{Username} is not a collaborator on {Owner}/{Name}",
+                username, repository.Owner, repository.Name);
+
+            return AccountRemoval.AlreadyMissing;
+        }
+
+        await api.SendAsync(HttpMethod.Delete, path, null, credential,
+            $"revoke '{username}' access to '{repository.Owner}/{repository.Name}'", cancellationToken);
+
+        logger.LogInformation("Revoked {Username}'s access to {Owner}/{Name}",
+            username, repository.Owner, repository.Name);
+
+        return AccountRemoval.Removed;
     }
 
     public async Task EnsureOrganizationWebhookAsync(
@@ -302,6 +356,13 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
         logger.LogInformation("Deleted Gitea user {Username}", username);
         return AccountRemoval.Removed;
     }
+
+    /// <summary>
+    /// The one path that grants, reports and revokes a collaboration, by verb.
+    /// </summary>
+    private static string CollaboratorPath(RepositoryReference repository, string username) =>
+        $"repos/{GiteaApi.Escape(repository.Owner)}/{GiteaApi.Escape(repository.Name)}" +
+        $"/collaborators/{GiteaApi.Escape(username)}";
 
     internal async Task<GiteaRepository?> GetRepositoryAsync(
         RepositoryReference repository, BasicCredential credential, CancellationToken cancellationToken) =>

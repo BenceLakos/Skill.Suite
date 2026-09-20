@@ -112,8 +112,9 @@ dotnet pack "${DIR}/SkillSuite.Session.Contracts/SkillSuite.Session.Contracts.cs
     -c Release -o "${DIR}/local-nuget" >/dev/null
 
 # Bust the global cache copy, or a re-pack of the same version is silently ignored and the image gets the
-# previous contract.
-rm -rf "${HOME}/.nuget/packages/skillsuite.session.contracts"
+# previous contract. NUGET_PACKAGES relocates that folder - the Gitea workflows point it at a volume that
+# outlives the job, which is exactly where a stale 1.0.0 would otherwise survive from run to run.
+rm -rf "${NUGET_PACKAGES:-${HOME}/.nuget/packages}/skillsuite.session.contracts"
 
 # ---------------------------------------------------------------------------- the rest of the closure
 #

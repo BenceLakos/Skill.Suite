@@ -19,7 +19,6 @@ public sealed class UpdateSessionHandler(IAppDbContext db) : IRequestHandler<Upd
             request.Description,
             request.StartsAt,
             request.EndsAt,
-            request.Status,
             request.TemplateFolder,
             request.JudgementImage,
             request.DatabaseName,

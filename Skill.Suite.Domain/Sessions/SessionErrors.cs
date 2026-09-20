@@ -16,6 +16,9 @@ public static class SessionErrors
     public static readonly Error AlreadyClosed =
         Error.Conflict("Session.AlreadyClosed", "The session is already closed.");
 
+    public static readonly Error NotActive =
+        Error.Validation("Session.NotActive", "Only an active session can be stopped.");
+
     public static readonly Error MissingJudgementImage =
         Error.Validation("Session.MissingJudgementImage",
             "Select a judgement image before starting the session — without one no push can be marked.");

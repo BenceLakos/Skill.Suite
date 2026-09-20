@@ -66,11 +66,12 @@ else
                     @if (IsEdit)
                     {
                         @*
-                            Status is shown, not edited. Setting it here bypassed both guarded transitions:
-                            picking Active provisioned nothing — no organisation, no repositories, no webhook,
-                            no secret — leaving a session that looks live and judges nothing, and picking Closed
-                            cancelled no in-flight run. Start and Close on the sessions list are the only ways
-                            in, because they are the only ones that do the work the status implies.
+                            Status is shown, not edited — the update command no longer carries it at all.
+                            Setting it here bypassed every guarded transition: picking Active provisioned
+                            nothing — no organisation, no repositories, no webhook, no secret — leaving a
+                            session that looks live and judges nothing, and picking Closed cancelled no
+                            in-flight run. Start, Stop and Close on the sessions list are the only ways in,
+                            because they are the only ones that do the work the status implies.
                         *@
                         <MudGrid Spacing="3">
                             <MudItem xs="12" md="6">
@@ -79,6 +80,7 @@ else
                                              Color="@(_model.Status switch {
                                                  SessionStatus.Active => Color.Success,
                                                  SessionStatus.Draft => Color.Warning,
+                                                 SessionStatus.Stopped => Color.Info,
                                                  _ => Color.Dark })">
                                         @T[$"sessions.status.{_model.Status.ToString().ToLowerInvariant()}"]
                                     </MudChip>
@@ -333,7 +335,7 @@ else
         if (IsEdit)
         {
             var cmd = new UpdateSessionCommand(
-                Id!.Value, _model.Name, _model.Description, startsAt, endsAt, _model.Status,
+                Id!.Value, _model.Name, _model.Description, startsAt, endsAt,
                 _model.TemplateFolder, _model.JudgementImage,
                 _model.DatabaseName, _model.DatabaseReadAccess, _model.DatabaseWriteAccess,
                 _model.GitCredentialId, _model.JudgementImagePullCredentialId,

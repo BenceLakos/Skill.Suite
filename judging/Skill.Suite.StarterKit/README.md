@@ -45,9 +45,8 @@ survive into what competitors receive. Re-run it whenever the contract or the re
 A module's `make-competitor-start.sh` calls the tool **twice** — once per kind — because one starter kit
 serves both session types: the judge swaps a single folder out of a submission and ignores the rest, so
 shipping both projects costs nothing and gives every competitor a solution that opens and builds. The doc
-comment each mode writes onto the type is therefore worded for both audiences: the stubbed implementation
-says it is yours to write in an implementation session and a compile-time placeholder in a testing one, and
-the test skeleton says it is the graded artefact in a testing session and your own scratch suite otherwise.
+comment each mode writes onto the type is a single line naming the two rules the harness enforces — keep the
+folder and its csproj, add no package references — because the member-level docs already carry the contract.
 
 ## Exit codes
 

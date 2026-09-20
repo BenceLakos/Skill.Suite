@@ -10,6 +10,7 @@
 @using Skill.Suite.Application.Sessions
 @using Skill.Suite.Application.Sessions.CloseSession
 @using Skill.Suite.Application.Sessions.StartSession
+@using Skill.Suite.Application.Sessions.StopSession
 @using Skill.Suite.Application.Sessions.ListSessions
 @using Skill.Suite.Domain.Sessions
 
@@ -24,14 +25,16 @@
 </PageHeader>
 
 @*
-    Inline rather than a modal dialog: provisioning is resumable and the admin has nothing to decide while
-    it runs, so a dialog would only take the session list away from them for a minute. Sitting above the
-    grid, the bar stays visible next to the rows whose Start buttons it has disabled.
+    Inline rather than a modal dialog: both operations are resumable and the admin has nothing to decide
+    while one runs, so a dialog would only take the session list away from them for a minute. Sitting above
+    the grid, the bar stays visible next to the rows whose buttons it has disabled.
 *@
-@if (_starting)
+@if (Busy)
 {
     <MudPaper Outlined="true" Class="pa-4 mb-4">
-        <MudText Typo="Typo.subtitle2" Class="mb-2">@T.Format("sessions.progress.session", _startingName)</MudText>
+        <MudText Typo="Typo.subtitle2" Class="mb-2">
+            @T.Format(_stopping ? "sessions.progress.stopSession" : "sessions.progress.session", _busyName)
+        </MudText>
         <ProvisioningProgress Label="@ProgressLabel"
                               Completed="@(_progress?.Completed ?? 0)"
                               Total="@(_progress?.Total ?? 0)"
@@ -75,19 +78,35 @@
                     <MudTooltip Text="@T["common.edit"]">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Href="@($"sessions/{context.Item.Id}")"/>
                     </MudTooltip>
-                    @if (context.Item.Status != SessionStatus.Closed)
+                    @*
+                        One forward action per status, so the button on a row always says what happens next.
+                        An active session is stopped rather than started again: repairing a partial start is
+                        Stop then Start, which withdraws what the half-finished run left behind before
+                        redoing it, instead of provisioning over the top of it.
+                    *@
+                    @if (context.Item.Status is SessionStatus.Draft or SessionStatus.Stopped)
                     {
-                        @* Shown for Active too: provisioning is a network conversation per competitor, so a
-                           partial failure has to be resumable without rebuilding the session. *@
                         <MudTooltip Text="@(context.Item.Status == SessionStatus.Draft
                                               ? T["sessions.action.start"]
-                                              : T["sessions.action.reprovision"])">
+                                              : T["sessions.action.restart"])">
                             <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Size="Size.Small"
-                                           Color="Color.Success" Disabled="@_starting"
+                                           Color="Color.Success" Disabled="@Busy"
                                            OnClick="@(() => Start(context.Item))"/>
                         </MudTooltip>
+                    }
+                    else if (context.Item.Status == SessionStatus.Active)
+                    {
+                        <MudTooltip Text="@T["sessions.action.stop"]">
+                            <MudIconButton Icon="@Icons.Material.Filled.Stop" Size="Size.Small"
+                                           Color="Color.Warning" Disabled="@Busy"
+                                           OnClick="@(() => Stop(context.Item))"/>
+                        </MudTooltip>
+                    }
+                    @if (context.Item.Status != SessionStatus.Closed)
+                    {
                         <MudTooltip Text="@T["sessions.action.close"]">
-                            <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small" OnClick="@(() => Close(context.Item))"/>
+                            <MudIconButton Icon="@Icons.Material.Filled.Lock" Size="Size.Small"
+                                           Disabled="@Busy" OnClick="@(() => Close(context.Item))"/>
                         </MudTooltip>
                     }
                 </CellTemplate>
@@ -105,16 +124,23 @@
     private List<SessionDto> _items = [];
     private bool _loading;
     private bool _starting;
+    private bool _stopping;
     private string? _search;
-    private string _startingName = string.Empty;
-    private StartSessionProgress? _progress;
-    private RendererProgress<StartSessionProgress>? _progressSink;
+    private string _busyName = string.Empty;
+    private SessionProvisioningProgress? _progress;
+    private RendererProgress<SessionProvisioningProgress>? _progressSink;
+
+    /// <summary>
+    /// Whether a start or a stop is running. One at a time: both talk to the same git host and docker
+    /// daemon about the same session, and they share the single progress panel above the grid.
+    /// </summary>
+    private bool Busy => _starting || _stopping;
 
     protected override async Task OnInitializedAsync() => await Load();
 
     /// <summary>
-    /// Stops the running Start, if any, from reporting into a component that no longer exists — the admin
-    /// navigating away does not cancel provisioning, which keeps going on the server until it is done.
+    /// Stops the running command, if any, from reporting into a component that no longer exists — the admin
+    /// navigating away does not cancel it, and it keeps going on the server until it is done.
     /// </summary>
     public void Dispose() => _progressSink?.Dispose();
 
@@ -187,12 +213,12 @@
         if (ok != true) return;
 
         _starting = true;
-        _startingName = session.Name;
+        _busyName = session.Name;
         _progress = null;
 
         // Disposed in the finally block AND in Dispose: the command keeps reporting for as long as it runs,
         // whether this page is still on screen or not.
-        _progressSink = new RendererProgress<StartSessionProgress>(
+        _progressSink = new RendererProgress<SessionProvisioningProgress>(
             InvokeAsync,
             report =>
             {
@@ -286,35 +312,127 @@
             _progressSink?.Dispose();
             _progressSink = null;
             _progress = null;
-            _startingName = string.Empty;
+            _busyName = string.Empty;
             _starting = false;
         }
     }
 
     /// <summary>
+    /// Stops a session: closes it to pushes, takes the competitors' repository access away and stops the
+    /// session's docker services.
+    /// </summary>
+    /// <remarks>
+    /// Runs inside this request for the same reason Start does — the admin finds out here whether every
+    /// competitor was actually locked out, rather than trusting a queued job to have managed it.
+    /// </remarks>
+    private async Task Stop(SessionDto session)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["sessions.stopConfirmTitle"],
+            Message = T["sessions.stopConfirm"],
+            YesText = T["common.confirm"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        _stopping = true;
+        _busyName = session.Name;
+        _progress = null;
+
+        _progressSink = new RendererProgress<SessionProvisioningProgress>(
+            InvokeAsync,
+            report =>
+            {
+                _progress = report;
+                StateHasChanged();
+            });
+
+        try
+        {
+            var result = await Mediator.Send(new StopSessionCommand(session.Id, _progressSink));
+            if (result.IsFailure)
+            {
+                Snackbar.Add(result.Error.Message, Severity.Error);
+                return;
+            }
+
+            var outcome = result.Value;
+            if (outcome.FullySucceeded)
+            {
+                Snackbar.Add(
+                    string.Format(T["sessions.stopped"], outcome.AccessRevoked, outcome.ServicesStopped),
+                    Severity.Success);
+            }
+            else
+            {
+                // The session is stopped either way, which is why this is a warning: what is left is a
+                // competitor who can still push or a container still running, both named below.
+                Snackbar.Add(
+                    string.Format(T["sessions.stoppedPartially"],
+                        outcome.Failed.Count,
+                        string.Join(", ", outcome.Failed.Select(f => f.Subject))),
+                    Severity.Warning);
+
+                foreach (var failure in outcome.Failed)
+                    Snackbar.Add($"{StageLabel(failure.Stage)}: {failure.Subject}: {failure.Error}", Severity.Error);
+            }
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            // Same circuit safety as Start: the git host calls throw, and an unhandled exception here tears
+            // the Blazor circuit down with no message at all. The status is committed before anything
+            // external is touched, so the session is stopped even when this is reached.
+            Snackbar.Add(string.Format(T["sessions.stopFailed"], ex.Message), Severity.Error);
+            await Load();
+        }
+        finally
+        {
+            _progressSink?.Dispose();
+            _progressSink = null;
+            _progress = null;
+            _busyName = string.Empty;
+            _stopping = false;
+        }
+    }
+
+    /// <summary>
     /// The stage the command is reporting, in the admin's words. Before the first report arrives the command
-    /// is loading the session and checking git accounts, which is still work worth naming.
+    /// is loading the session and resolving credentials, which is still work worth naming.
     /// </summary>
     private string ProgressLabel => _progress is null
-        ? T["sessions.progress.starting"]
+        ? BusyLabel
         : _progress.Stage switch
         {
-            StartSessionStage.Preparing => T["sessions.progress.preparing"],
-            StartSessionStage.Repositories => T.Format("sessions.progress.repositories",
+            SessionProvisioningStage.Preparing => T["sessions.progress.preparing"],
+            SessionProvisioningStage.Repositories => T.Format("sessions.progress.repositories",
                 _progress.Completed, _progress.Total, _progress.Percent),
-            StartSessionStage.Databases => T.Format("sessions.progress.databases",
+            SessionProvisioningStage.Databases => T.Format("sessions.progress.databases",
                 _progress.Completed, _progress.Total, _progress.Percent),
-            StartSessionStage.DockerServices => T.Format("sessions.progress.dockerServices",
+            SessionProvisioningStage.DockerServices => T.Format("sessions.progress.dockerServices",
                 _progress.Completed, _progress.Total, _progress.Percent),
-            _ => T["sessions.progress.starting"],
+            SessionProvisioningStage.RepositoryAccess => T.Format("sessions.progress.revokingAccess",
+                _progress.Completed, _progress.Total, _progress.Percent),
+            SessionProvisioningStage.StoppingServices => T.Format("sessions.progress.stoppingServices",
+                _progress.Completed, _progress.Total, _progress.Percent),
+            _ => BusyLabel,
         };
 
+    /// <summary>What to say while the running command has not reported a stage it can be named by.</summary>
+    private string BusyLabel => _stopping
+        ? T["sessions.progress.stopping"]
+        : T["sessions.progress.starting"];
+
     /// <summary>The stage a failure came from, short enough to prefix the subject it happened to.</summary>
-    private string StageLabel(StartSessionStage stage) => stage switch
+    private string StageLabel(SessionProvisioningStage stage) => stage switch
     {
-        StartSessionStage.Repositories => T["sessions.stage.repositories"],
-        StartSessionStage.Databases => T["sessions.stage.databases"],
-        StartSessionStage.DockerServices => T["sessions.stage.dockerServices"],
+        SessionProvisioningStage.Repositories => T["sessions.stage.repositories"],
+        SessionProvisioningStage.Databases => T["sessions.stage.databases"],
+        SessionProvisioningStage.DockerServices => T["sessions.stage.dockerServices"],
+        SessionProvisioningStage.RepositoryAccess => T["sessions.stage.repositoryAccess"],
+        SessionProvisioningStage.StoppingServices => T["sessions.stage.stoppingServices"],
         _ => stage.ToString(),
     };
 
@@ -322,6 +440,7 @@
     {
         SessionStatus.Active => Color.Success,
         SessionStatus.Draft => Color.Warning,
+        SessionStatus.Stopped => Color.Info,
         SessionStatus.Closed => Color.Dark,
         _ => Color.Default,
     };
@@ -330,6 +449,7 @@
     {
         SessionStatus.Draft => T["sessions.status.draft"],
         SessionStatus.Active => T["sessions.status.active"],
+        SessionStatus.Stopped => T["sessions.status.stopped"],
         SessionStatus.Closed => T["sessions.status.closed"],
         _ => status.ToString(),
     };

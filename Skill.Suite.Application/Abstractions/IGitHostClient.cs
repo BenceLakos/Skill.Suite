@@ -32,6 +32,32 @@ public interface IGitHostClient
         GenerateRepositoryRequest request, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Gives the user write access to the repository, or leaves an equivalent grant alone.
+    /// </summary>
+    /// <remarks>
+    /// Not optional, and not a convenience. The session's repositories live in a private organisation the
+    /// competitor is not a member of, so without this grant the repository they were provisioned exists and
+    /// is invisible to them: cloning it asks for credentials their own account cannot satisfy. Write rather
+    /// than read, because the whole point is for them to push.
+    /// </remarks>
+    Task EnsureCollaboratorAsync(
+        RepositoryReference repository,
+        string username,
+        BasicCredential credential,
+        CancellationToken cancellationToken);
+
+    /// <summary>Takes the user's access to the repository away again. Idempotent.</summary>
+    /// <remarks>
+    /// The repository and its history are untouched: only the grant goes. Stopping a session must not cost
+    /// anybody the submissions a marking dispute is settled from.
+    /// </remarks>
+    Task<AccountRemoval> RemoveCollaboratorAsync(
+        RepositoryReference repository,
+        string username,
+        BasicCredential credential,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Installs a push webhook on the organisation, replacing any hook already pointing at the same URL.
     /// </summary>
     /// <remarks>

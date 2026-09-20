@@ -102,12 +102,19 @@ public sealed class Session : AuditableEntity<Guid>
         return session;
     }
 
+    /// <summary>
+    /// Edits the session's configuration. The status is deliberately not among it.
+    /// </summary>
+    /// <remarks>
+    /// Every status change is a guarded transition that does external work — <see cref="Start"/> provisions,
+    /// <see cref="Stop"/> withdraws access, <see cref="Close"/> ends the session. Letting an edit assign the
+    /// status bypassed all three, producing a session that reads as live and judges nothing.
+    /// </remarks>
     public Result UpdateDetails(
         string name,
         string? description,
         DateTime startsAt,
         DateTime endsAt,
-        SessionStatus status,
         string? templateFolder,
         string? judgementImage,
         string? databaseName,
@@ -124,7 +131,6 @@ public sealed class Session : AuditableEntity<Guid>
         Description = NormalizeOptional(description);
         StartsAt = startsAt;
         EndsAt = endsAt;
-        Status = status;
         TemplateFolder = NormalizeOptional(templateFolder);
         JudgementImage = NormalizeOptional(judgementImage);
         DatabaseName = NormalizeOptional(databaseName);
@@ -151,9 +157,10 @@ public sealed class Session : AuditableEntity<Guid>
         if (Status == SessionStatus.Closed)
             return Result.Failure(SessionErrors.AlreadyClosed);
 
-        // An already-active session may be started again, deliberately: provisioning talks to a git host
-        // over a network for every competitor, so a run that half-succeeded has to be resumable. Refusing
-        // here would have left the only repair being to close the session and rebuild it from scratch.
+        // Anything short of Closed may be started, deliberately. A stopped session is started again to resume
+        // the competition, and an active one because provisioning talks to a git host over a network for
+        // every competitor, so a run that half-succeeded has to be resumable. Refusing here would have left
+        // the only repair being to close the session and rebuild it from scratch.
         // The secret is regenerated and the hooks reinstalled with it, so a delivery already in flight and
         // signed with the previous secret is rejected - which is why this is an explicit admin action.
         if (string.IsNullOrWhiteSpace(JudgementImage))
@@ -165,6 +172,28 @@ public sealed class Session : AuditableEntity<Guid>
         Status = SessionStatus.Active;
         WebhookSecret = webhookSecret;
         RaiseDomainEvent(new SessionStartedEvent(Id));
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Suspends the session: it stops accepting pushes, without being closed for good.
+    /// </summary>
+    /// <remarks>
+    /// Reversible on purpose, which is the whole difference from <see cref="Close"/>: <see cref="Start"/> is
+    /// allowed again from here and restores everything stopping withdrew. Only an Active session can be
+    /// stopped — a Draft one has nothing to withdraw, and a Closed one is already past this.
+    /// <para>
+    /// Like <see cref="Start"/>, this only guards the transition. Revoking the competitors' access to their
+    /// repositories and stopping the service containers is the caller's work.
+    /// </para>
+    /// </remarks>
+    public Result Stop()
+    {
+        if (Status != SessionStatus.Active)
+            return Result.Failure(SessionErrors.NotActive);
+
+        Status = SessionStatus.Stopped;
+        RaiseDomainEvent(new SessionStoppedEvent(Id));
         return Result.Success();
     }
 

@@ -43,6 +43,13 @@ env:
   REGISTRY: ${{ vars.REGISTRY || 'localhost:3000' }}
   JUDGE_BASE_TAG: '9.0'
   JUDGE_SMOKE_TAG: '1'
+  # Every job runs in a fresh runner-images container, so anything installed into it is gone by the next run -
+  # which is why actions/setup-dotnet downloaded the SDK every time. act_runner mounts the docker volume
+  # act-toolcache at /opt/hostedtoolcache into every job container on this host; installing the SDK and
+  # keeping the NuGet package cache there makes both survive across runs and across runner replicas.
+  # setup-dotnet honours DOTNET_INSTALL_DIR and skips versions already present.
+  DOTNET_INSTALL_DIR: /opt/hostedtoolcache/dotnet
+  NUGET_PACKAGES: /opt/hostedtoolcache/nuget-packages
 
 jobs:
   packages:

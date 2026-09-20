@@ -29,6 +29,11 @@ public sealed class WebhookOptions
     /// like <c>http://localhost:3000</c> the app can't reach — while the path and
     /// query of the original URL are preserved. The original URL is kept on the
     /// TestRun for traceability.
+    /// <para>
+    /// The container-registry host the UI offers, and pulls with, is derived from this same setting as the
+    /// docker daemon sees it — <c>localhost:&lt;port&gt;</c> when this names a compose service, because the
+    /// daemon runs on the host and cannot resolve docker-network names.
+    /// </para>
     /// </summary>
     public string? GitInternalBaseUrl { get; set; }
 

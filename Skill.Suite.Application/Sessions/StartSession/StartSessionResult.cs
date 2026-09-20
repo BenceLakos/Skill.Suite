@@ -20,7 +20,7 @@ public sealed record StartSessionResult(
     int Provisioned,
     int DatabaseAccessGranted,
     int ServicesRunning,
-    IReadOnlyList<StartSessionFailure> Failed,
+    IReadOnlyList<SessionProvisioningFailure> Failed,
     IReadOnlyList<string> SkippedNoGitAccess,
     IReadOnlyList<string> SkippedNoDatabaseLogin)
 {

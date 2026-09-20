@@ -131,8 +131,18 @@ public sealed class ExecuteTestRunHandler(
             run.MarkRunning(DateTime.UtcNow);
             await db.SaveChangesAsync(token);
 
+            // The pull runs on the host daemon whose socket is mounted here, and that daemon does not share
+            // this container's DNS. What is stored stays on the run; only what is handed to docker is moved.
+            var daemonImage = DaemonImageReference.ForDaemon(run.JudgementImage, opts.GitInternalBaseUrl);
+            if (!string.Equals(daemonImage, run.JudgementImage, StringComparison.Ordinal))
+            {
+                logger.LogInformation(
+                    "Run {TestRunId} pulls {DaemonImage}; {StoredImage} names a host only the docker network resolves.",
+                    run.Id, daemonImage, run.JudgementImage);
+            }
+
             var registryAuth = await ResolveRegistryAuthAsync(
-                session?.JudgementImagePullCredentialId, run.JudgementImage, cancellationToken);
+                session?.JudgementImagePullCredentialId, daemonImage, cancellationToken);
 
             // Judgement image contract:
             //   COMPETITOR_DIRECTORY → readonly path to the competitor's checkout
@@ -145,7 +155,7 @@ public sealed class ExecuteTestRunHandler(
 
             var result = await runner.RunAsync(
                 new ContainerRunRequest(
-                    Image: run.JudgementImage,
+                    Image: daemonImage,
                     ContainerName: containerName,
                     WorkdirVolumeName: opts.WorkdirVolumeName,
                     WorkdirSubpath: run.FolderName,

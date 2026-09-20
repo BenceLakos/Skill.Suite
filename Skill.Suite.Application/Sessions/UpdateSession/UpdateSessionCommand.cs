@@ -10,7 +10,6 @@ public sealed record UpdateSessionCommand(
     string? Description,
     DateTime StartsAt,
     DateTime EndsAt,
-    SessionStatus Status,
     string? TemplateFolder,
     string? JudgementImage,
     string? DatabaseName,

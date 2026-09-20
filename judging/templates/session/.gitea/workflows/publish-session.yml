@@ -56,6 +56,13 @@ env:
   REGISTRY: ${{ vars.REGISTRY || 'localhost:3000' }}
   STARTER_VOLUME: ${{ vars.STARTER_VOLUME || 'skill-suite-starter-packages' }}
   HELPER_IMAGE: ${{ vars.HELPER_IMAGE || 'alpine:3' }}
+  # Every job runs in a fresh runner-images container, so anything installed into it is gone by the next run -
+  # which is why actions/setup-dotnet downloaded the SDK every time. act_runner mounts the docker volume
+  # act-toolcache at /opt/hostedtoolcache into every job container on this host; installing the SDK and
+  # keeping the NuGet package cache there makes both survive across runs and across runner replicas.
+  # setup-dotnet honours DOTNET_INSTALL_DIR and skips versions already present.
+  DOTNET_INSTALL_DIR: /opt/hostedtoolcache/dotnet
+  NUGET_PACKAGES: /opt/hostedtoolcache/nuget-packages
 
 jobs:
   publish:

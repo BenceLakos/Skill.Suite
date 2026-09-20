@@ -121,18 +121,11 @@ public sealed class ImplementationStubber : CSharpSyntaxRewriter
 
     private static SyntaxToken Semicolon() => SyntaxFactory.Token(SyntaxKind.SemicolonToken);
 
+    // One line, on purpose: the contract's own XML docs say what each member has to do, and a competitor
+    // reads a paragraph of boilerplate once and then scrolls past it every time after.
     private static readonly SyntaxTriviaList Banner = SyntaxFactory.ParseLeadingTrivia(
         """
-        /// <summary>
-        /// The implementation of the contract. In an implementation session it is yours to write, and every
-        /// member throws until you do. In a testing session it is a compile-time placeholder: the real
-        /// implementation is hidden, and your tests run against it in the judge.
-        /// </summary>
-        /// <remarks>
-        /// Keep this folder's name and its csproj: the judge replaces the whole folder with yours. Do not add
-        /// package references — the judge restores offline and a new reference fails the run. The contract
-        /// interface documents what each member has to satisfy, including that it must never throw once done.
-        /// </remarks>
+        /// <summary>Implement the members below. Keep this folder's name and its csproj, and add no package references.</summary>
 
         """);
 }

@@ -1,13 +1,13 @@
-namespace Skill.Suite.Application.Sessions.StartSession;
+namespace Skill.Suite.Application.Sessions;
 
 /// <summary>
-/// How far starting a session has got, reported as it happens rather than at the end.
+/// How far starting or stopping a session has got, reported as it happens rather than at the end.
 /// </summary>
 /// <remarks>
-/// Provisioning is a network conversation per competitor and runs inside the request, so without this the
+/// Both commands are a network conversation per competitor and run inside the request, so without this the
 /// admin watches a disabled button for a minute with no way to tell a slow git host from a stuck one.
 /// </remarks>
-public sealed record StartSessionProgress(StartSessionStage Stage, int Completed, int Total)
+public sealed record SessionProvisioningProgress(SessionProvisioningStage Stage, int Completed, int Total)
 {
     /// <summary>The full bar, and the upper bound of <see cref="Percent"/>.</summary>
     private const int PercentScale = 100;
@@ -44,6 +44,6 @@ public sealed record StartSessionProgress(StartSessionStage Stage, int Completed
     }
 
     /// <summary>A stage that has started but has nothing countable to report.</summary>
-    public static StartSessionProgress Indeterminate(StartSessionStage stage) =>
+    public static SessionProvisioningProgress Indeterminate(SessionProvisioningStage stage) =>
         new(stage, Uncounted, Uncounted);
 }

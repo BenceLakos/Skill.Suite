@@ -1,22 +1,22 @@
 namespace Skill.Suite.Application.Tests.Sessions;
 
-using Skill.Suite.Application.Sessions.StartSession;
+using Skill.Suite.Application.Sessions;
 using Xunit;
 
 /// <summary>
-/// The figures the start-session progress bar is drawn from.
+/// The figures the session progress bar is drawn from, for both starting and stopping.
 /// </summary>
 /// <remarks>
 /// The bar is the only thing the admin has to tell a slow git host from a stuck one, so the two ways it can
 /// lie are worth pinning down: a percentage computed from a total of zero, and a bar that reads as finished
 /// while repositories are still being created.
 /// </remarks>
-public sealed class StartSessionProgressTests
+public sealed class SessionProvisioningProgressTests
 {
     [Fact]
     public void PercentIsTheCompletedShareOfTheTotal()
     {
-        var progress = new StartSessionProgress(StartSessionStage.Repositories, 7, 20);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Repositories, 7, 20);
 
         Assert.Equal(35, progress.Percent);
     }
@@ -28,7 +28,7 @@ public sealed class StartSessionProgressTests
     [InlineData(1, 6, 17)]
     public void PercentRoundsToTheNearestWholePercent(int completed, int total, int expected)
     {
-        var progress = new StartSessionProgress(StartSessionStage.Repositories, completed, total);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Repositories, completed, total);
 
         Assert.Equal(expected, progress.Percent);
     }
@@ -37,7 +37,7 @@ public sealed class StartSessionProgressTests
     public void AStageWithWorkLeftNeverReadsAsFinished()
     {
         // Rounding alone would report 100% here, with a repository still to create.
-        var progress = new StartSessionProgress(StartSessionStage.Repositories, 199, 200);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Repositories, 199, 200);
 
         Assert.Equal(99, progress.Percent);
     }
@@ -45,7 +45,7 @@ public sealed class StartSessionProgressTests
     [Fact]
     public void PercentIsZeroBeforeAnythingIsDone()
     {
-        var progress = new StartSessionProgress(StartSessionStage.Repositories, 0, 20);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Repositories, 0, 20);
 
         Assert.Equal(0, progress.Percent);
         Assert.False(progress.IsIndeterminate);
@@ -54,7 +54,7 @@ public sealed class StartSessionProgressTests
     [Fact]
     public void PercentIsFullWhenEveryCompetitorIsDealtWith()
     {
-        var progress = new StartSessionProgress(StartSessionStage.Repositories, 20, 20);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Repositories, 20, 20);
 
         Assert.Equal(100, progress.Percent);
     }
@@ -62,7 +62,7 @@ public sealed class StartSessionProgressTests
     [Fact]
     public void PercentNeverExceedsTheFullBar()
     {
-        var progress = new StartSessionProgress(StartSessionStage.Repositories, 25, 20);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Repositories, 25, 20);
 
         Assert.Equal(100, progress.Percent);
     }
@@ -70,7 +70,7 @@ public sealed class StartSessionProgressTests
     [Fact]
     public void AZeroTotalIsIndeterminateRatherThanADivisionByZero()
     {
-        var progress = new StartSessionProgress(StartSessionStage.Preparing, 0, 0);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Preparing, 0, 0);
 
         Assert.True(progress.IsIndeterminate);
         Assert.Equal(0, progress.Percent);
@@ -79,9 +79,9 @@ public sealed class StartSessionProgressTests
     [Fact]
     public void AnIndeterminateStageCarriesNoCounts()
     {
-        var progress = StartSessionProgress.Indeterminate(StartSessionStage.Preparing);
+        var progress = SessionProvisioningProgress.Indeterminate(SessionProvisioningStage.Preparing);
 
-        Assert.Equal(StartSessionStage.Preparing, progress.Stage);
+        Assert.Equal(SessionProvisioningStage.Preparing, progress.Stage);
         Assert.Equal(0, progress.Completed);
         Assert.Equal(0, progress.Total);
         Assert.True(progress.IsIndeterminate);
@@ -90,7 +90,7 @@ public sealed class StartSessionProgressTests
     [Fact]
     public void ACountedStageIsNotIndeterminate()
     {
-        var progress = new StartSessionProgress(StartSessionStage.Repositories, 0, 1);
+        var progress = new SessionProvisioningProgress(SessionProvisioningStage.Repositories, 0, 1);
 
         Assert.False(progress.IsIndeterminate);
     }
