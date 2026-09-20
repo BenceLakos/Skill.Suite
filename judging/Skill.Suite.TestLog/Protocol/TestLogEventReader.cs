@@ -158,7 +158,8 @@ public static class TestLogEventReader
                 ReadString(root, nameof(CoverageEvent.Part)),
                 ReadDouble(root, nameof(CoverageEvent.Value)),
                 ReadNullableInt(root, nameof(CoverageEvent.Total)),
-                ReadNullableInt(root, nameof(CoverageEvent.Covered))),
+                ReadNullableInt(root, nameof(CoverageEvent.Covered)),
+                ReadString(root, nameof(CoverageEvent.Fixture))),
 
             [TestLogEventTypes.Of<MutationEvent>()] = root => new MutationEvent(
                 ReadString(root, nameof(MutationEvent.Part)),
@@ -169,7 +170,8 @@ public static class TestLogEventReader
                 ReadNullableInt(root, nameof(MutationEvent.Survived)),
                 ReadNullableInt(root, nameof(MutationEvent.Timeout)),
                 ReadNullableInt(root, nameof(MutationEvent.NoCoverage)),
-                ReadNullableInt(root, nameof(MutationEvent.Other))),
+                ReadNullableInt(root, nameof(MutationEvent.Other)),
+                ReadString(root, nameof(MutationEvent.Fixture))),
 
             [TestLogEventTypes.Of<ScoreEvent>()] = root => new ScoreEvent(
                 ReadString(root, nameof(ScoreEvent.Part)),
