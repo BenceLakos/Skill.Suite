@@ -40,13 +40,13 @@ public sealed class GetCompetitorAccountStatusesHandler(
             return new List<CompetitorAccountStatusDto>();
 
         var (giteaNames, giteaReason) = await LoadGiteaUsernamesAsync(cancellationToken);
-        var (logins, databases, msSqlReason) = await LoadMsSqlInventoryAsync(cancellationToken);
+        var (logins, msSqlReason) = await LoadMsSqlLoginsAsync(cancellationToken);
 
         return competitors
             .Select(c =>
             {
                 var gitea = AccountStatusEvaluator.Evaluate(c.Username, giteaNames, giteaReason);
-                var sql = AccountStatusEvaluator.EvaluateMsSql(c.Username, logins, databases, msSqlReason);
+                var sql = AccountStatusEvaluator.Evaluate(c.Username, logins, msSqlReason);
 
                 return new CompetitorAccountStatusDto(
                     c.Id, c.Username, gitea.Status, gitea.Detail, sql.Status, sql.Detail);
@@ -80,27 +80,29 @@ public sealed class GetCompetitorAccountStatusesHandler(
     }
 
     /// <summary>
-    /// The SQL Server logins and databases, or nulls plus the reason they could not be read.
+    /// The SQL Server logins, or null plus the reason they could not be read.
     /// </summary>
-    private async Task<(IReadOnlySet<string>? Logins, IReadOnlySet<string>? Databases, string? Reason)>
-        LoadMsSqlInventoryAsync(CancellationToken cancellationToken)
+    /// <remarks>
+    /// The inventory's database list is read and dropped. A competitor's account is the login; the databases
+    /// on the server belong to sessions, and a session that has not been started yet is not a broken account.
+    /// </remarks>
+    private async Task<(IReadOnlySet<string>? Logins, string? Reason)> LoadMsSqlLoginsAsync(
+        CancellationToken cancellationToken)
     {
         var credential = await db.FindByKindAsync(vault, CredentialKind.MsSql, cancellationToken);
         if (credential is null)
-            return (null, null, CompetitorAccountErrors.MissingMsSqlCredential.Message);
+            return (null, CompetitorAccountErrors.MissingMsSqlCredential.Message);
 
         try
         {
             var inventory = await msSql.GetInventoryAsync(credential, cancellationToken);
 
-            return (inventory.Logins.ToHashSet(StringComparer.OrdinalIgnoreCase),
-                inventory.Databases.ToHashSet(StringComparer.OrdinalIgnoreCase),
-                null);
+            return (inventory.Logins.ToHashSet(StringComparer.OrdinalIgnoreCase), null);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Could not read the SQL Server inventory for the competitor account status");
-            return (null, null, ExternalMessage.Trim(ex.Message));
+            return (null, ExternalMessage.Trim(ex.Message));
         }
     }
 }

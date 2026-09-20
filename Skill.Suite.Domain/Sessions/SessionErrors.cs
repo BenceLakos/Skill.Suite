@@ -96,6 +96,11 @@ public static class SessionErrors
             "running, or only stopped, can be started again, and its competition containers hold the very " +
             "host ports the marking containers publish.");
 
+    public static readonly Error CompetitorNotEnrolled =
+        Error.Validation("Session.CompetitorNotEnrolled",
+            "That competitor is not enrolled in this session, so there is nothing of theirs to mark. Only " +
+            "competitors the session was started for have a database, a repository and service containers.");
+
     public static readonly Error NoServicesToMark =
         Error.Validation("Session.NoServicesToMark",
             "This session configures no docker services, so there is nothing to start for marking.");

@@ -10,7 +10,7 @@ using Skill.Suite.Domain.Sessions;
 /// values behind the placeholders — a competitor's password, their connection string — have no business
 /// being unprotected to stop a container.
 /// <para>
-/// Deliberately names a container for EVERY enrolled competitor of a per-competitor service, including ones
+/// Deliberately names a container for EVERY enrolled competitor of every image, including competitors
 /// starting skipped for having no SQL login. Stopping a container that was never created is a no-op the
 /// daemon reports as absent, whereas leaving one running is a port still held and a service a competitor can
 /// still reach after the session was stopped.
@@ -26,16 +26,6 @@ internal static class SessionServiceContainers
         for (var index = 0; index < session.DockerImages.Count; index++)
         {
             var image = session.DockerImages[index];
-
-            if (!ServiceTemplate.Scan(image).IsPerCompetitor)
-            {
-                containers.Add(new SessionServiceContainer(
-                    SessionServiceNaming.ContainerName(session.Slug, index, competitorUsername: null, mode),
-                    image.Image,
-                    CompetitorUsername: null));
-
-                continue;
-            }
 
             containers.AddRange(usernames.Select(username => new SessionServiceContainer(
                 SessionServiceNaming.ContainerName(session.Slug, index, username, mode),

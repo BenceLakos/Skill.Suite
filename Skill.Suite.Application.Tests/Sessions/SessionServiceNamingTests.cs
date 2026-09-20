@@ -17,9 +17,13 @@ using Xunit;
 public sealed class SessionServiceNamingTests
 {
     [Fact]
-    public void TheContainerNameCarriesTheSlugAndTheOneBasedPosition()
+    public void TheContainerNameCarriesTheSlugThePositionAndTheCompetitor()
     {
-        Assert.Equal("skill-suite-skill09-1", SessionServiceNaming.ContainerName("skill09", 0));
+        // Every container belongs to exactly one competitor — a session's services are one per competitor,
+        // the same way its databases are — so the username is part of every name.
+        Assert.Equal(
+            "skill-suite-skill09-1-c01",
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition));
     }
 
     [Theory]
@@ -37,53 +41,16 @@ public sealed class SessionServiceNamingTests
         // Two services may legitimately run the same image with different ports, so the position — not the
         // image reference — is what has to separate them.
         Assert.NotEqual(
-            SessionServiceNaming.ContainerName("skill09", 0),
-            SessionServiceNaming.ContainerName("skill09", 1));
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition),
+            SessionServiceNaming.ContainerName("skill09", 1, "c01", SessionRunMode.Competition));
     }
 
     [Fact]
     public void TheSamePositionInTwoSessionsGetsDifferentNames()
     {
         Assert.NotEqual(
-            SessionServiceNaming.ContainerName("skill09", 0),
-            SessionServiceNaming.ContainerName("skill17", 0));
-    }
-
-    [Fact]
-    public void TheNameIsStableAcrossCalls()
-    {
-        // Start is re-runnable, and the name is the only handle the daemon is asked about. A name derived
-        // from anything per-call would silently start a second copy of the service on every retry.
-        Assert.Equal(
-            SessionServiceNaming.ContainerName("skill09", 2),
-            SessionServiceNaming.ContainerName("skill09", 2));
-    }
-
-    [Fact]
-    public void TheLabelKeysAreTheOnesRemovalFiltersOn()
-    {
-        Assert.Equal("skill-suite.session", SessionServiceLabels.SessionKey);
-        Assert.Equal("skill-suite.service", SessionServiceLabels.ServiceKey);
-        Assert.Equal("skill-suite.competitor", SessionServiceLabels.CompetitorKey);
-        Assert.Equal("skill-suite.marking", SessionServiceLabels.MarkingKey);
-    }
-
-    [Fact]
-    public void ThePlainNameIsTheSharedCompetitionContainer()
-    {
-        // The two-argument overload has to keep meaning exactly what it meant, or a session already running
-        // gains a second copy of every shared service on the next start.
-        Assert.Equal(
-            SessionServiceNaming.ContainerName("skill09", 0),
-            SessionServiceNaming.ContainerName("skill09", 0, competitorUsername: null, SessionRunMode.Competition));
-    }
-
-    [Fact]
-    public void APerCompetitorContainerCarriesTheUsername()
-    {
-        Assert.Equal(
-            "skill-suite-skill09-1-c01",
-            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition));
+            SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition),
+            SessionServiceNaming.ContainerName("skill17", 0, "c01", SessionRunMode.Competition));
     }
 
     [Fact]
@@ -95,12 +62,18 @@ public sealed class SessionServiceNamingTests
     }
 
     [Fact]
+    public void TheNameIsStableAcrossCalls()
+    {
+        // Start is re-runnable, and the name is the only handle the daemon is asked about. A name derived
+        // from anything per-call would silently start a second copy of the service on every retry.
+        Assert.Equal(
+            SessionServiceNaming.ContainerName("skill09", 2, "c01", SessionRunMode.Competition),
+            SessionServiceNaming.ContainerName("skill09", 2, "c01", SessionRunMode.Competition));
+    }
+
+    [Fact]
     public void AMarkingContainerCarriesTheSuffix()
     {
-        Assert.Equal(
-            "skill-suite-skill09-1-marking",
-            SessionServiceNaming.ContainerName("skill09", 0, competitorUsername: null, SessionRunMode.Marking));
-
         Assert.Equal(
             "skill-suite-skill09-1-c01-marking",
             SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Marking));
@@ -114,5 +87,14 @@ public sealed class SessionServiceNamingTests
         Assert.NotEqual(
             SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Competition),
             SessionServiceNaming.ContainerName("skill09", 0, "c01", SessionRunMode.Marking));
+    }
+
+    [Fact]
+    public void TheLabelKeysAreTheOnesRemovalFiltersOn()
+    {
+        Assert.Equal("skill-suite.session", SessionServiceLabels.SessionKey);
+        Assert.Equal("skill-suite.service", SessionServiceLabels.ServiceKey);
+        Assert.Equal("skill-suite.competitor", SessionServiceLabels.CompetitorKey);
+        Assert.Equal("skill-suite.marking", SessionServiceLabels.MarkingKey);
     }
 }

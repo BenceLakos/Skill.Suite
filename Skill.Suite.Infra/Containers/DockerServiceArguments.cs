@@ -54,6 +54,16 @@ internal static class DockerServiceArguments
             "--add-host", $"{DockerHostAlias}:{HostGateway}",
         };
 
+        // Only a routed service names one. The reverse proxy forwards to a container address, and a
+        // container on the daemon's default bridge has none the proxy's own network can reach — so a routed
+        // service that stayed there would be discovered, routed, and answer every request with a gateway
+        // error. Everything else is left exactly where session services have always been started.
+        if (!string.IsNullOrWhiteSpace(request.Network))
+        {
+            args.Add("--network");
+            args.Add(request.Network);
+        }
+
         foreach (var port in request.PortMappings)
         {
             args.Add("-p");

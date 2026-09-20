@@ -116,18 +116,6 @@ else
                                        Value="@session.Database.Password"
                                        Secret="true"/>
                     </MudItem>
-                    <MudItem xs="12" md="6">
-                        <CopyableField Label="@T["mySession.field.personalDatabase"]"
-                                       Value="@session.Database.PersonalDatabase"/>
-                    </MudItem>
-                    @if (session.Database.PersonalConnectionString is not null)
-                    {
-                        <MudItem xs="12">
-                            <CopyableField Label="@T["mySession.field.personalConnectionString"]"
-                                           Value="@session.Database.PersonalConnectionString"
-                                           Secret="true"/>
-                        </MudItem>
-                    }
 
                     @if (session.Database.SessionDatabase is null)
                     {
@@ -174,6 +162,7 @@ else
 
             <MudPaper Elevation="1" Class="pa-4">
                 <MudText Typo="Typo.h6">@T["mySession.services"]</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["mySession.services.mine"]</MudText>
 
                 @if (session.Services.Count == 0)
                 {
@@ -191,14 +180,17 @@ else
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@service.ContainerName</MudText>
                                 </MudStack>
 
-                                @*
-                                    Said per service, not once for the section: one session can run both
-                                    kinds at the same time, and "is this mine or everybody's?" changes what
-                                    a competitor may safely do to it.
-                                *@
-                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-2">
-                                    @T[service.PerCompetitor ? "mySession.services.mine" : "mySession.services.shared"]
-                                </MudText>
+                                @if (service.Url is not null)
+                                {
+                                    @*
+                                        The address to open. Only this competitor's machine reaches this
+                                        container at it — the proxy sends every other workstation to its
+                                        own competitor's copy — which is worth saying next to the link.
+                                    *@
+                                    <div class="mb-2">
+                                        <CopyableField Label="@T["mySession.service.url"]" Value="@service.Url"/>
+                                    </div>
+                                }
 
                                 @if (service.Ports.Count == 0)
                                 {

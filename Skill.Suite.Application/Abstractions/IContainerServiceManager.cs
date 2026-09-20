@@ -29,8 +29,18 @@ public interface IContainerServiceManager
     Task<ContainerServiceStop> StopAsync(string containerName, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Force-removes every container carrying the label <paramref name="labelKey"/>=<paramref name="labelValue"/>.
-    /// Returns how many were removed.
+    /// Force-removes every container carrying ALL of <paramref name="labels"/>. Returns how many were removed.
     /// </summary>
-    Task<int> RemoveByLabelAsync(string labelKey, string labelValue, CancellationToken cancellationToken);
+    /// <remarks>
+    /// A set rather than one pair, because one label is not always narrow enough to be safe. Removing a
+    /// session's containers is one label; removing the marking containers of ONE competitor within a session
+    /// is the marking label and the competitor label together, and matching either alone would take down
+    /// another expert's marking run or the whole session.
+    /// <para>
+    /// An empty set is refused rather than treated as "everything": the one thing this must never do is
+    /// remove containers that have nothing to do with the caller.
+    /// </para>
+    /// </remarks>
+    Task<int> RemoveByLabelsAsync(
+        IReadOnlyDictionary<string, string> labels, CancellationToken cancellationToken);
 }

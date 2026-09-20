@@ -1,0 +1,77 @@
+@using Skill.Suite.Application.Sessions.ListSessionCompetitors
+@inject ITranslator T
+
+@*
+    Picks a competitor and the machine their work will be marked from, and hands both back. Every decision
+    about what that means — which containers, which credentials, which proxy route — belongs to the command;
+    this only collects two values and says what they are for.
+*@
+<MudDialog>
+    <DialogContent>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+            @T["sessions.marking.oneAtATime"]
+        </MudAlert>
+
+        <MudStack Spacing="3">
+            <LabeledField Label="@T["sessions.marking.competitor"]">
+                <MudSelect T="Guid" @bind-Value="_competitorId"
+                           Variant="Variant.Outlined"
+                           Placeholder="@T["sessions.marking.selectCompetitor"]">
+                    @foreach (var competitor in Competitors)
+                    {
+                        <MudSelectItem Value="@competitor.CompetitorId">
+                            @competitor.Username — @competitor.FullName (@competitor.IpAddress)
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </LabeledField>
+
+            <LabeledField Label="@T["sessions.marking.ipAddress"]" Help="@T["sessions.help.markingIpAddress"]">
+                <MudTextField T="string" @bind-Value="_markingIpAddress"
+                              Variant="Variant.Outlined" Placeholder="10.0.0.42"
+                              Immediate="true"/>
+            </LabeledField>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">@T["common.cancel"]</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Outlined"
+                   Disabled="@(!HasCompetitor)" OnClick="Stop">
+            @T["sessions.marking.stopThis"]
+        </MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(!CanStart)" OnClick="Start">
+            @T["sessions.marking.start"]
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = null!;
+
+    [Parameter, EditorRequired] public IReadOnlyList<SessionCompetitorDto> Competitors { get; set; } = [];
+
+    private Guid _competitorId;
+    private string? _markingIpAddress;
+
+    private bool HasCompetitor => _competitorId != Guid.Empty;
+
+    /// <summary>
+    /// Both values present. The address is validated properly by the command's validator — repeating the
+    /// parse here would be a second rule to drift from <c>CompetitorRules</c>.
+    /// </summary>
+    private bool CanStart => HasCompetitor && !string.IsNullOrWhiteSpace(_markingIpAddress);
+
+    protected override void OnInitialized() =>
+        _competitorId = Competitors.Count > 0 ? Competitors[0].CompetitorId : Guid.Empty;
+
+    private void Start() =>
+        Dialog.Close(DialogResult.Ok(
+            new MarkingRequest(MarkingAction.Start, _competitorId, _markingIpAddress?.Trim() ?? string.Empty)));
+
+    private void Stop() =>
+        Dialog.Close(DialogResult.Ok(
+            new MarkingRequest(MarkingAction.Stop, _competitorId, string.Empty)));
+
+    private void Cancel() => Dialog.Cancel();
+}

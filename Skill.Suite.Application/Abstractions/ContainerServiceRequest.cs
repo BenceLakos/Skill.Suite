@@ -15,6 +15,15 @@ using Skill.Suite.Domain.Sessions;
 /// ones started by an earlier run of this application.
 /// </param>
 /// <param name="RegistryAuth">Credentials for the pull, or null for an image the host can already reach.</param>
+/// <param name="Network">
+/// Docker network to attach the container to, or null to leave it on the daemon's default bridge.
+/// </param>
+/// <remarks>
+/// A network is named only for a service the reverse proxy has to reach: the proxy forwards to a container
+/// address, and a container on the default bridge has none the proxy's network can route to. Everything else
+/// stays where session services have always been started, so published host ports and reachability from the
+/// host are unchanged.
+/// </remarks>
 public sealed record ContainerServiceRequest(
     string Image,
     string ContainerName,
@@ -22,4 +31,5 @@ public sealed record ContainerServiceRequest(
     IReadOnlyDictionary<string, string> Labels,
     IReadOnlyList<VolumeMount> Volumes,
     IReadOnlyList<PortMapping> PortMappings,
-    RegistryAuth? RegistryAuth);
+    RegistryAuth? RegistryAuth,
+    string? Network);

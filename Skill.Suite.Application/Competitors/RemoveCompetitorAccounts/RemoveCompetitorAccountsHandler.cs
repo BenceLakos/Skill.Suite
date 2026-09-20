@@ -15,9 +15,13 @@ using Skill.Suite.Domain.Credentials;
 /// </summary>
 /// <remarks>
 /// The in-use checks are the point of the command rather than a nicety. Deleting a git-host user takes their
-/// repositories with them, and dropping a database takes whatever the competitor built in it — both of which
-/// are the evidence a marking dispute is settled from. So each side is skipped, with a reason, rather than
-/// forced; the admin can clear the blocker and press the button again.
+/// repositories with them, and dropping the login somebody is connected with cuts them off mid-statement. So
+/// each side is skipped, with a reason, rather than forced; the admin can clear the blocker and press the
+/// button again.
+/// <para>
+/// Only the login goes. The session databases the competitor worked in are left untouched, because they hold
+/// the evidence a marking dispute is settled from and their lifetime belongs to the session.
+/// </para>
 /// </remarks>
 public sealed class RemoveCompetitorAccountsHandler(
     IAppDbContext db,
@@ -31,7 +35,7 @@ public sealed class RemoveCompetitorAccountsHandler(
     private const string StillOwnsRepositories = "The Gitea user still owns repositories.";
 
     /// <summary>Why the SQL Server login was left alone. Formatted with the connection count.</summary>
-    private const string StillConnectedFormat = "{0} open connection(s) to the login or its database.";
+    private const string StillConnectedFormat = "{0} open connection(s) for the login.";
 
     public async ValueTask<Result<RemoveCompetitorAccountsResult>> Handle(
         RemoveCompetitorAccountsCommand request, CancellationToken cancellationToken)
@@ -94,7 +98,7 @@ public sealed class RemoveCompetitorAccountsHandler(
                     string.Format(StillConnectedFormat, connections));
             }
 
-            var outcome = await msSql.DropLoginAndDatabaseAsync(username, credential, cancellationToken);
+            var outcome = await msSql.DropLoginAsync(username, credential, cancellationToken);
 
             return outcome == AccountRemoval.Removed
                 ? AccountActionResult.Removed()

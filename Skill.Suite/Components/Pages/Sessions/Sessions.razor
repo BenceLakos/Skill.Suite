@@ -9,6 +9,7 @@
 
 @using Skill.Suite.Application.Sessions
 @using Skill.Suite.Application.Sessions.CloseSession
+@using Skill.Suite.Application.Sessions.ListSessionCompetitors
 @using Skill.Suite.Application.Sessions.StartMarking
 @using Skill.Suite.Application.Sessions.StartSession
 @using Skill.Suite.Application.Sessions.StopMarking
@@ -45,41 +46,57 @@
 }
 
 @*
-    Where to connect for each competitor, printed once marking is up. Inline and dismissable rather than a
-    modal: with twenty competitors and three services this is sixty numbers an expert reads off while moving
-    between machines, and a dialog would take the session list away from them for the whole of it.
+    Where to connect, printed once a competitor's marking is up, and kept for every competitor started so
+    far. Inline and dismissable rather than a modal: an expert reads these off while moving between machines,
+    and a dialog would take the session list away from them for the whole of it.
 *@
-@if (_markingEndpoints.Count > 0)
+@if (_markingRuns.Count > 0)
 {
     <MudPaper Outlined="true" Class="pa-4 mb-4">
         <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-2">
             <MudText Typo="Typo.subtitle2">@T.Format("sessions.marking.endpoints", _markingName)</MudText>
             <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
-                           OnClick="@(() => _markingEndpoints = [])"/>
+                           OnClick="@(() => _markingRuns.Clear())"/>
         </MudStack>
         <MudSimpleTable Dense="true" Hover="true" Striped="true" Elevation="0">
             <thead>
             <tr>
                 <th>@T["sessions.marking.competitor"]</th>
+                <th>@T["sessions.marking.ipAddress"]</th>
                 <th>@T["sessions.marking.service"]</th>
+                <th>@T["sessions.marking.url"]</th>
                 <th>@T["sessions.marking.container"]</th>
                 <th>@T["sessions.marking.ports"]</th>
             </tr>
             </thead>
             <tbody>
-            @foreach (var endpoint in _markingEndpoints)
+            @foreach (var run in _markingRuns)
             {
-                <tr>
-                    <td>@(endpoint.CompetitorUsername ?? T["sessions.marking.shared"])</td>
-                    <td>@endpoint.ServiceNumber — @endpoint.Image</td>
-                    <td>@endpoint.ContainerName</td>
-                    <td>
-                        @(endpoint.Ports.Count == 0
-                            ? T["sessions.marking.noPorts"]
-                            : string.Join(", ", endpoint.Ports.Select(
-                                p => $"{p.HostPort}→{p.ContainerPort}/{p.Protocol.ToString().ToLowerInvariant()}")))
-                    </td>
-                </tr>
+                @foreach (var endpoint in run.Endpoints)
+                {
+                    <tr>
+                        <td>@run.CompetitorUsername</td>
+                        <td>@run.MarkingIpAddress</td>
+                        <td>@endpoint.ServiceNumber — @endpoint.Image</td>
+                        <td>
+                            @if (endpoint.Url is null)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["sessions.marking.noUrl"]</MudText>
+                            }
+                            else
+                            {
+                                <MudLink Href="@endpoint.Url" Target="_blank">@endpoint.Url</MudLink>
+                            }
+                        </td>
+                        <td>@endpoint.ContainerName</td>
+                        <td>
+                            @(endpoint.Ports.Count == 0
+                                ? T["sessions.marking.noPorts"]
+                                : string.Join(", ", endpoint.Ports.Select(
+                                    p => $"{p.HostPort}→{p.ContainerPort}/{p.Protocol.ToString().ToLowerInvariant()}")))
+                        </td>
+                    </tr>
+                }
             }
             </tbody>
         </MudSimpleTable>
@@ -160,14 +177,14 @@
                             are gone by then, so the marking copies can take the host ports they published,
                             and nothing an expert connects to can be reopened underneath them.
                         *@
-                        <MudTooltip Text="@T["sessions.action.startMarking"]">
+                        <MudTooltip Text="@T["sessions.action.marking"]">
                             <MudIconButton Icon="@Icons.Material.Filled.Grading" Size="Size.Small"
                                            Color="Color.Info" Disabled="@Busy"
-                                           OnClick="@(() => StartMarking(context.Item))"/>
+                                           OnClick="@(() => OpenMarking(context.Item))"/>
                         </MudTooltip>
-                        <MudTooltip Text="@T["sessions.action.stopMarking"]">
+                        <MudTooltip Text="@T["sessions.action.stopAllMarking"]">
                             <MudIconButton Icon="@Icons.Material.Filled.LayersClear" Size="Size.Small"
-                                           Disabled="@Busy" OnClick="@(() => StopMarking(context.Item))"/>
+                                           Disabled="@Busy" OnClick="@(() => StopMarking(context.Item, null))"/>
                         </MudTooltip>
                     }
                 </CellTemplate>
@@ -190,7 +207,15 @@
     private string? _search;
     private string _busyName = string.Empty;
     private string _markingName = string.Empty;
-    private IReadOnlyList<MarkingEndpoint> _markingEndpoints = [];
+
+    /// <summary>
+    /// One entry per competitor whose marking has been started from this page, newest last.
+    /// </summary>
+    /// <remarks>
+    /// Accumulated rather than replaced: several competitors are marked at once, from several machines, and
+    /// an expert who started the second one still needs the first one's addresses in front of them.
+    /// </remarks>
+    private readonly List<StartMarkingResult> _markingRuns = [];
     private SessionProvisioningProgress? _progress;
     private RendererProgress<SessionProvisioningProgress>? _progressSink;
 
@@ -464,28 +489,60 @@
     }
 
     /// <summary>
-    /// Starts the marking copy of a closed session's docker services, one set per competitor.
+    /// Asks which competitor is being marked and from which machine, then does it.
+    /// </summary>
+    /// <remarks>
+    /// A dialog rather than a confirmation, because marking needs a value nothing on the platform knows: the
+    /// address of the computer the expert is sitting at. That address is the whole of what makes the
+    /// service's domain lead to this competitor's container rather than somebody else's.
+    /// </remarks>
+    private async Task OpenMarking(SessionDto session)
+    {
+        var competitors = await Mediator.Send(new ListSessionCompetitorsQuery(session.Id));
+        if (competitors.IsFailure)
+        {
+            Snackbar.Add(competitors.Error.Message, Severity.Error);
+            return;
+        }
+
+        if (competitors.Value.Count == 0)
+        {
+            Snackbar.Add(T["sessions.marking.noCompetitors"], Severity.Warning);
+            return;
+        }
+
+        var parameters = new DialogParameters<MarkingDialog>
+        {
+            { dialog => dialog.Competitors, competitors.Value },
+        };
+
+        var dialog = await Dialogs.ShowAsync<MarkingDialog>(T["sessions.marking.title"], parameters);
+        var result = await dialog.Result;
+
+        if (result?.Canceled != false || result.Data is not MarkingRequest request)
+            return;
+
+        if (request.Action == MarkingAction.Stop)
+        {
+            await StopMarking(session, request.CompetitorId);
+            return;
+        }
+
+        await StartMarking(session, request);
+    }
+
+    /// <summary>
+    /// Starts one competitor's marking containers for the machine the dialog named.
     /// </summary>
     /// <remarks>
     /// Runs inside this request like Start and Stop, and for the same reason: the expert finds out here
-    /// which competitors have a container to mark against, rather than trusting a queued job to have
-    /// managed it.
+    /// whether there is anything to mark against, rather than trusting a queued job to have managed it.
     /// </remarks>
-    private async Task StartMarking(SessionDto session)
+    private async Task StartMarking(SessionDto session, MarkingRequest request)
     {
-        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
-        {
-            Title = T["sessions.startMarkingConfirmTitle"],
-            Message = T["sessions.startMarkingConfirm"],
-            YesText = T["common.confirm"],
-            CancelText = T["common.cancel"],
-        });
-        if (ok != true) return;
-
         _marking = true;
         _busyName = session.Name;
         _progress = null;
-        _markingEndpoints = [];
 
         _progressSink = new RendererProgress<SessionProvisioningProgress>(
             InvokeAsync,
@@ -497,7 +554,9 @@
 
         try
         {
-            var result = await Mediator.Send(new StartMarkingCommand(session.Id, _progressSink));
+            var result = await Mediator.Send(new StartMarkingCommand(
+                session.Id, request.CompetitorId, request.MarkingIpAddress, _progressSink));
+
             if (result.IsFailure)
             {
                 Snackbar.Add(result.Error.Message, Severity.Error);
@@ -507,21 +566,21 @@
             var outcome = result.Value;
 
             _markingName = session.Name;
-            _markingEndpoints = outcome.Endpoints;
+            _markingRuns.RemoveAll(run => run.CompetitorUsername == outcome.CompetitorUsername);
+            _markingRuns.Add(outcome);
 
             Snackbar.Add(
-                string.Format(T["sessions.markingStarted"], outcome.ServicesRunning),
+                string.Format(T["sessions.markingStarted"],
+                    outcome.ServicesRunning, outcome.CompetitorUsername, outcome.MarkingIpAddress),
                 outcome.FullySucceeded ? Severity.Success : Severity.Warning);
 
             foreach (var failure in outcome.Failed)
                 Snackbar.Add($"{StageLabel(failure.Stage)}: {failure.Subject}: {failure.Error}", Severity.Error);
 
-            if (outcome.SkippedNoDatabaseLogin.Count > 0)
+            if (outcome.DatabaseServicesSkipped)
             {
                 Snackbar.Add(
-                    string.Format(T["sessions.markingSkippedDatabase"],
-                        outcome.SkippedNoDatabaseLogin.Count,
-                        string.Join(", ", outcome.SkippedNoDatabaseLogin)),
+                    string.Format(T["sessions.markingSkippedDatabase"], outcome.CompetitorUsername),
                     Severity.Warning);
             }
         }
@@ -541,10 +600,16 @@
         }
     }
 
-    /// <summary>Removes the marking containers, leaving everything else the session has alone.</summary>
-    private async Task StopMarking(SessionDto session)
+    /// <summary>
+    /// Removes one competitor's marking containers, or every one of the session's.
+    /// </summary>
+    /// <remarks>
+    /// Per competitor is the ordinary case and the safe one: an expert finishing with one competitor must
+    /// not take down another expert's run, which is exactly what stopping the whole session's would do.
+    /// </remarks>
+    private async Task StopMarking(SessionDto session, Guid? competitorId)
     {
-        var result = await Mediator.Send(new StopMarkingCommand(session.Id));
+        var result = await Mediator.Send(new StopMarkingCommand(session.Id, competitorId));
         if (result.IsFailure)
         {
             Snackbar.Add(result.Error.Message, Severity.Error);
@@ -553,10 +618,14 @@
 
         var outcome = result.Value;
 
-        _markingEndpoints = [];
+        if (outcome.CompetitorUsername is null)
+            _markingRuns.Clear();
+        else
+            _markingRuns.RemoveAll(run => run.CompetitorUsername == outcome.CompetitorUsername);
 
         Snackbar.Add(
-            string.Format(T["sessions.markingStopped"], outcome.ServicesRemoved),
+            string.Format(T["sessions.markingStopped"],
+                outcome.ServicesRemoved, outcome.CompetitorUsername ?? T["sessions.marking.everyone"]),
             Severity.Success);
 
         // Nothing else was touched — this says the containers outlived the request, which is the admin's to

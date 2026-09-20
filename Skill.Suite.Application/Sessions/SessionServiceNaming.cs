@@ -17,9 +17,9 @@ using Skill.Suite.Application.Sessions.Services;
 /// the same image with different ports.
 /// </para>
 /// <para>
-/// A per-competitor service appends the username and marking appends a fixed suffix, so the three container
-/// sets one session can produce — shared, per competitor, and each of those again for marking — are
-/// nameable, distinct, and still reconstructible from values that cannot drift.
+/// Every container belongs to exactly one competitor, so every name carries their username; marking adds a
+/// fixed suffix on top. Both container sets one session can produce are therefore nameable, distinct, and
+/// reconstructible from values that cannot drift.
 /// </para>
 /// </remarks>
 internal static class SessionServiceNaming
@@ -42,17 +42,12 @@ internal static class SessionServiceNaming
     /// </remarks>
     private const string MarkingSuffix = "marking";
 
-    /// <summary>The shared competition container, as sessions have always named it.</summary>
-    public static string ContainerName(string slug, int index) =>
-        ContainerName(slug, index, competitorUsername: null, SessionRunMode.Competition);
-
     public static string ContainerName(
-        string slug, int index, string? competitorUsername, SessionRunMode mode)
+        string slug, int index, string competitorUsername, SessionRunMode mode)
     {
-        var name = $"{ContainerNamePrefix}{Separator}{slug}{Separator}{ServiceNumber(index)}";
-
-        if (competitorUsername is not null)
-            name += Separator + competitorUsername;
+        var name =
+            $"{ContainerNamePrefix}{Separator}{slug}{Separator}{ServiceNumber(index)}"
+            + Separator + competitorUsername;
 
         return mode == SessionRunMode.Marking ? name + Separator + MarkingSuffix : name;
     }

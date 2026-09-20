@@ -691,7 +691,11 @@ public sealed class StartSessionHandler(
             databasePlan?.BaseName,
             ServiceSqlServerName.For(msSqlOptions.Value.Server),
             databasePlan?.Admin,
-            webhookOptions.Value.GitInternalBaseUrl));
+            webhookOptions.Value.GitInternalBaseUrl,
+            webhookOptions.Value.ServiceNetwork,
+            // Competition containers are separated by the competitor's own workstation address; no marker is
+            // involved, so there is no address to be told.
+            MarkingIpAddress: null));
 
         // Already reported by the database stage under the same names, so this is logged rather than
         // returned: the same competitors, said twice, reads as two different problems.

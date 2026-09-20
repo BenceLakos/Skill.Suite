@@ -427,6 +427,7 @@ else
         DockerImages = dto.DockerImages.Select(d => new DockerImageDraft
         {
             Image = d.Image,
+            Domain = d.Domain,
             Env = d.Env.Select(kv => new KeyValueDraft { Key = kv.Key, Value = kv.Value }).ToList(),
             Labels = d.Labels.Select(kv => new KeyValueDraft { Key = kv.Key, Value = kv.Value }).ToList(),
             Volumes = d.Volumes.Select(v => new VolumeDraft { HostPath = v.HostPath, ContainerPath = v.ContainerPath, ReadOnly = v.ReadOnly }).ToList(),
@@ -440,5 +441,6 @@ else
         draft.Labels.Where(kv => !string.IsNullOrWhiteSpace(kv.Key)).ToDictionary(kv => kv.Key.Trim(), kv => kv.Value ?? string.Empty),
         draft.Volumes.Where(v => !string.IsNullOrWhiteSpace(v.HostPath) && !string.IsNullOrWhiteSpace(v.ContainerPath))
             .Select(v => new VolumeMount(v.HostPath.Trim(), v.ContainerPath.Trim(), v.ReadOnly)).ToList(),
-        draft.PortMappings.Select(p => new PortMapping(p.HostPort, p.ContainerPort, p.Protocol)).ToList());
+        draft.PortMappings.Select(p => new PortMapping(p.HostPort, p.ContainerPort, p.Protocol)).ToList(),
+        string.IsNullOrWhiteSpace(draft.Domain) ? null : draft.Domain.Trim().ToLowerInvariant());
 }

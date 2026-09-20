@@ -7,24 +7,25 @@ using Skill.Suite.Domain.Sessions;
 using Xunit;
 
 /// <summary>
-/// How many containers a session's images become, what they are called, and what is in them.
+/// Which containers a session's images become, what they are called, and what is in them.
 /// </summary>
 /// <remarks>
-/// The rule this suite exists for: a service whose environment values, label values or volume host paths
-/// mention any competitor- or database-scoped placeholder is started once per competitor, except that one
-/// mentioning the database is started only for competitors the SQL Server holds a login for; anything else
-/// stays the single shared container sessions have always had.
+/// The rule this suite exists for: EVERY service is started once per competitor, exactly as every competitor
+/// gets their own session database. Nothing is shared. The only subtraction is a service whose settings need
+/// a database, which is skipped for a competitor the SQL Server holds no login for.
 /// </remarks>
 public sealed class SessionServicePlannerTests
 {
     private const string BaseName = "round-1";
     private const string Server = "host.docker.internal,1433";
+    private const string Network = "skill-suite";
+    private const string MarkingIp = "10.9.9.9";
 
     private static readonly BasicCredential Admin = new("sa", "adm1n");
 
     private static SessionServicePlanCompetitor Competitor(
-        string username, int ordinal, bool hasLogin = true) =>
-        new(username, $"{username} Doe", "10.0.0.1", "HU", $"{username}-pass", ordinal, hasLogin);
+        string username, int ordinal, bool hasLogin = true, string ip = "10.0.0.1") =>
+        new(username, $"{username} Doe", ip, "HU", $"{username}-pass", ordinal, hasLogin);
 
     private static Session SessionWith(params SessionDockerImage[] images) =>
         Session.Create(
@@ -41,8 +42,9 @@ public sealed class SessionServicePlannerTests
         Dictionary<string, string>? env = null,
         Dictionary<string, string>? labels = null,
         List<VolumeMount>? volumes = null,
-        List<PortMapping>? ports = null) =>
-        new(image, env ?? [], labels ?? [], volumes ?? [], ports ?? []);
+        List<PortMapping>? ports = null,
+        string? domain = null) =>
+        new(image, env ?? [], labels ?? [], volumes ?? [], ports ?? [], domain);
 
     private static SessionServicePlan Plan(
         Session session,
@@ -58,26 +60,42 @@ public sealed class SessionServicePlannerTests
             BaseName,
             Server,
             Admin,
-            GitInternalBaseUrl: null));
+            GitInternalBaseUrl: null,
+            Network,
+            mode == SessionRunMode.Marking ? MarkingIp : null));
 
     [Fact]
-    public void AServiceWithNoPlaceholdersIsOneSharedContainerWhateverTheCompetitorCount()
+    public void AServiceWithNoPlaceholdersIsStillOneContainerPerCompetitor()
     {
+        // The rule that replaced "shared unless a placeholder says otherwise": a competition is N
+        // independent workspaces, and one container between twenty people is one competitor's restart
+        // costing the other nineteen their work.
         var plan = Plan(
             SessionWith(Image(env: new Dictionary<string, string> { ["MODE"] = "fixed" })),
             SessionRunMode.Competition,
             Competitor("c01", 0), Competitor("c02", 1));
 
-        var service = Assert.Single(plan.Services);
-
-        // Exactly the name sessions produced before placeholders existed, so an upgrade does not start a
-        // second copy of a service that is already running.
-        Assert.Equal("skill-suite-round-1-1", service.ContainerName);
-        Assert.Null(service.CompetitorUsername);
+        Assert.Equal(2, plan.Services.Count);
+        Assert.Equal(
+            ["skill-suite-round-1-1-c01", "skill-suite-round-1-1-c02"],
+            plan.Services.Select(s => s.ContainerName));
+        Assert.Equal(["c01", "c02"], plan.Services.Select(s => s.CompetitorUsername));
     }
 
     [Fact]
-    public void ASharedServiceStillResolvesTheSessionPlaceholders()
+    public void AServiceNamingACompetitorResolvesDifferentlyForEachOfThem()
+    {
+        var plan = Plan(
+            SessionWith(Image(env: new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" })),
+            SessionRunMode.Competition,
+            Competitor("c01", 0), Competitor("c02", 1));
+
+        Assert.Equal("c01", plan.Services[0].Environment["USER"]);
+        Assert.Equal("c02", plan.Services[1].Environment["USER"]);
+    }
+
+    [Fact]
+    public void TheSessionPlaceholdersStillResolve()
     {
         var plan = Plan(
             SessionWith(Image(env: new Dictionary<string, string> { ["NAME"] = "{{session.name}}" })),
@@ -85,21 +103,6 @@ public sealed class SessionServicePlannerTests
             Competitor("c01", 0));
 
         Assert.Equal("Round 1", Assert.Single(plan.Services).Environment["NAME"]);
-    }
-
-    [Fact]
-    public void AServiceNamingACompetitorIsOneContainerPerCompetitor()
-    {
-        var plan = Plan(
-            SessionWith(Image(env: new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" })),
-            SessionRunMode.Competition,
-            Competitor("c01", 0), Competitor("c02", 1));
-
-        Assert.Equal(2, plan.Services.Count);
-        Assert.Equal("skill-suite-round-1-1-c01", plan.Services[0].ContainerName);
-        Assert.Equal("skill-suite-round-1-1-c02", plan.Services[1].ContainerName);
-        Assert.Equal("c01", plan.Services[0].Environment["USER"]);
-        Assert.Equal("c02", plan.Services[1].Environment["USER"]);
     }
 
     [Fact]
@@ -135,14 +138,6 @@ public sealed class SessionServicePlannerTests
     }
 
     [Fact]
-    public void ASharedContainerCarriesNoCompetitorLabel()
-    {
-        var plan = Plan(SessionWith(Image()), SessionRunMode.Competition, Competitor("c01", 0));
-
-        Assert.False(Assert.Single(plan.Services).Labels.ContainsKey(SessionServiceLabels.CompetitorKey));
-    }
-
-    [Fact]
     public void ThePlatformsLabelsWinOverOnesTheImageCarriesItself()
     {
         // They are what Close and Stop Marking find the containers by; a session label an image set to its
@@ -162,9 +157,7 @@ public sealed class SessionServicePlannerTests
     public void EachCompetitorsCopyPublishesItsOwnHostPorts()
     {
         var plan = Plan(
-            SessionWith(Image(
-                env: new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" },
-                ports: [new PortMapping(5432, 5432, PortProtocol.Tcp)])),
+            SessionWith(Image(ports: [new PortMapping(5432, 5432, PortProtocol.Tcp)])),
             SessionRunMode.Competition,
             Competitor("c01", 0), Competitor("c02", 1), Competitor("c03", 2));
 
@@ -173,23 +166,10 @@ public sealed class SessionServicePlannerTests
     }
 
     [Fact]
-    public void ASharedServiceKeepsThePortsExactlyAsConfigured()
-    {
-        var plan = Plan(
-            SessionWith(Image(ports: [new PortMapping(5432, 5432, PortProtocol.Tcp)])),
-            SessionRunMode.Competition,
-            Competitor("c01", 0), Competitor("c02", 1));
-
-        Assert.Equal(5432, Assert.Single(plan.Services).PortMappings[0].HostPort);
-    }
-
-    [Fact]
     public void ACompetitorWhosePortWouldLeaveTheRangeIsRecordedAndTheRestAreStillPlanned()
     {
         var plan = Plan(
-            SessionWith(Image(
-                env: new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" },
-                ports: [new PortMapping(ServicePortAllocation.MaxPort, 80, PortProtocol.Tcp)])),
+            SessionWith(Image(ports: [new PortMapping(ServicePortAllocation.MaxPort, 80, PortProtocol.Tcp)])),
             SessionRunMode.Competition,
             Competitor("c01", 0), Competitor("c02", 1));
 
@@ -220,7 +200,7 @@ public sealed class SessionServicePlannerTests
     }
 
     [Fact]
-    public void ACompetitorServiceThatNeedsNoDatabaseIsStartedForEverybody()
+    public void AServiceThatNeedsNoDatabaseIsStartedForEverybody()
     {
         // A SQL login has nothing to do with a service that only wants their username.
         var plan = Plan(
@@ -249,21 +229,19 @@ public sealed class SessionServicePlannerTests
     public void MarkingSuffixesEveryContainerAndLabelsItWithTheSessionSlug()
     {
         var plan = Plan(
-            SessionWith(
-                Image(env: new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" }),
-                Image("redis:8")),
+            SessionWith(Image("postgres:17"), Image("redis:8")),
             SessionRunMode.Marking,
             Competitor("c01", 0));
 
-        Assert.Equal("skill-suite-round-1-1-c01-marking", plan.Services[0].ContainerName);
-
-        // The shared service gets a marking copy too, so the marking setup is complete on its own.
-        Assert.Equal("skill-suite-round-1-2-marking", plan.Services[1].ContainerName);
+        Assert.Equal(
+            ["skill-suite-round-1-1-c01-marking", "skill-suite-round-1-2-c01-marking"],
+            plan.Services.Select(s => s.ContainerName));
 
         Assert.All(plan.Services, service =>
         {
             Assert.Equal("round-1", service.Labels[SessionServiceLabels.MarkingKey]);
             Assert.Equal("round-1", service.Labels[SessionServiceLabels.SessionKey]);
+            Assert.Equal("c01", service.Labels[SessionServiceLabels.CompetitorKey]);
         });
     }
 
@@ -294,9 +272,7 @@ public sealed class SessionServicePlannerTests
     {
         // The competition containers were removed at close, so there is nothing to collide with — and an
         // expert who wrote a port down against a competitor finds the same one.
-        var image = Image(
-            env: new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" },
-            ports: [new PortMapping(5432, 5432, PortProtocol.Tcp)]);
+        var image = Image(ports: [new PortMapping(5432, 5432, PortProtocol.Tcp)]);
 
         var competition = Plan(SessionWith(image), SessionRunMode.Competition, Competitor("c02", 1));
         var marking = Plan(SessionWith(image), SessionRunMode.Marking, Competitor("c02", 1));
@@ -318,15 +294,10 @@ public sealed class SessionServicePlannerTests
     }
 
     [Fact]
-    public void ASessionWithNoCompetitorsPlansOnlyItsSharedServices()
+    public void ASessionWithNoCompetitorsPlansNothingAtAll()
     {
-        var plan = Plan(
-            SessionWith(
-                Image("redis:8"),
-                Image("postgres:17", env: new Dictionary<string, string> { ["U"] = "{{competitor.username}}" })),
-            SessionRunMode.Competition);
-
-        Assert.Equal("redis:8", Assert.Single(plan.Services).ConfiguredImage);
+        // There is no such thing as a container that belongs to nobody.
+        Assert.Empty(Plan(SessionWith(Image("redis:8")), SessionRunMode.Competition).Services);
     }
 
     [Fact]
@@ -336,11 +307,13 @@ public sealed class SessionServicePlannerTests
             SessionWith(Image("gitea:3000/skill09/postgres:17")),
             SessionRunMode.Competition,
             SessionProvisioningStage.DockerServices,
-            [],
+            [Competitor("c01", 0)],
             BaseName,
             Server,
             Admin,
-            GitInternalBaseUrl: "http://gitea:3000"));
+            GitInternalBaseUrl: "http://gitea:3000",
+            Network,
+            MarkingIpAddress: null));
 
         var service = Assert.Single(plan.Services);
 
@@ -352,13 +325,118 @@ public sealed class SessionServicePlannerTests
     public void AFailureSubjectNamesTheCompetitorAsWellAsTheImage()
     {
         // "postgres:17 failed" leaves the admin to work out which of twenty competitors is without a service.
+        var plan = Plan(SessionWith(Image()), SessionRunMode.Competition, Competitor("c01", 0));
+
+        Assert.Equal("postgres:17 (c01)", Assert.Single(plan.Services).Subject);
+    }
+
+    [Fact]
+    public void AServiceWithNoDomainJoinsNoNetworkAndCarriesNoProxyLabels()
+    {
         var plan = Plan(
-            SessionWith(Image(
-                env: new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" },
-                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)])),
+            SessionWith(Image(ports: [new PortMapping(8080, 80, PortProtocol.Tcp)])),
             SessionRunMode.Competition,
             Competitor("c01", 0));
 
-        Assert.Equal("postgres:17 (c01)", Assert.Single(plan.Services).Subject);
+        var service = Assert.Single(plan.Services);
+
+        Assert.Null(service.Network);
+        Assert.Null(service.Host);
+        Assert.DoesNotContain(service.Labels, label => label.Key.StartsWith("traefik.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AServiceWithADomainIsRoutedToTheCompetitorsOwnWorkstation()
+    {
+        var plan = Plan(
+            SessionWith(Image(
+                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
+                domain: "shop.skills.local")),
+            SessionRunMode.Competition,
+            Competitor("c01", 0, ip: "10.0.0.7"));
+
+        var service = Assert.Single(plan.Services);
+
+        Assert.Equal("skill-suite", service.Network);
+        Assert.Equal("shop.skills.local", service.Host);
+
+        Assert.Equal(
+            "Host(`shop.skills.local`) && ClientIP(`10.0.0.7`)",
+            service.Labels["traefik.http.routers.skill-suite-round-1-1-c01.rule"]);
+    }
+
+    [Fact]
+    public void EveryCompetitorsRoutedContainerSharesTheDomainAndDiffersByAddress()
+    {
+        // One address for everybody to type, twenty containers behind it. The source address is the whole of
+        // what sends a competitor to their own.
+        var plan = Plan(
+            SessionWith(Image(
+                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
+                domain: "shop.skills.local")),
+            SessionRunMode.Competition,
+            Competitor("c01", 0, ip: "10.0.0.7"), Competitor("c02", 1, ip: "10.0.0.8"));
+
+        Assert.All(plan.Services, service => Assert.Equal("shop.skills.local", service.Host));
+
+        Assert.Equal(
+            "Host(`shop.skills.local`) && ClientIP(`10.0.0.8`)",
+            plan.Services[1].Labels["traefik.http.routers.skill-suite-round-1-1-c02.rule"]);
+    }
+
+    [Fact]
+    public void AMarkingContainerIsRoutedToTheMarkingMachineInstead()
+    {
+        var plan = Plan(
+            SessionWith(Image(
+                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
+                domain: "shop.skills.local")),
+            SessionRunMode.Marking,
+            Competitor("c01", 0, ip: "10.0.0.7"));
+
+        var service = Assert.Single(plan.Services);
+
+        Assert.Equal(
+            $"Host(`shop.skills.local`) && ClientIP(`{MarkingIp}`)",
+            service.Labels["traefik.http.routers.skill-suite-round-1-1-c01-marking.rule"]);
+    }
+
+    [Fact]
+    public void TheProxyForwardsToTheFirstTcpContainerPort()
+    {
+        var plan = Plan(
+            SessionWith(Image(
+                ports:
+                [
+                    new PortMapping(5300, 53, PortProtocol.Udp),
+                    new PortMapping(8080, 8081, PortProtocol.Tcp),
+                ],
+                domain: "shop.skills.local")),
+            SessionRunMode.Competition,
+            Competitor("c01", 0));
+
+        Assert.Equal(
+            "8081",
+            Assert.Single(plan.Services)
+                .Labels["traefik.http.services.skill-suite-round-1-1-c01.loadbalancer.server.port"]);
+    }
+
+    [Fact]
+    public void ALabelTheAdministratorWroteThemselvesWinsOverTheGeneratedOne()
+    {
+        var plan = Plan(
+            SessionWith(Image(
+                labels: new Dictionary<string, string>
+                {
+                    ["traefik.http.routers.skill-suite-round-1-1-c01.rule"] = "Host(`mine.local`)",
+                },
+                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
+                domain: "shop.skills.local")),
+            SessionRunMode.Competition,
+            Competitor("c01", 0));
+
+        Assert.Equal(
+            "Host(`mine.local`)",
+            Assert.Single(plan.Services).Labels["traefik.http.routers.skill-suite-round-1-1-c01.rule"]);
     }
 }

@@ -17,14 +17,6 @@ using Skill.Suite.Domain.Sessions;
 /// </remarks>
 internal static class ServicePlaceholderValues
 {
-    /// <summary>What a shared service can ask for: the values that are the same for everyone.</summary>
-    public static IReadOnlyDictionary<ServicePlaceholder, string> ForSession(Session session) =>
-        new Dictionary<ServicePlaceholder, string>
-        {
-            [ServicePlaceholder.SessionName] = session.Name,
-            [ServicePlaceholder.SessionSlug] = session.Slug,
-        };
-
     /// <summary>
     /// The full catalogue for one competitor, including their database as this mode addresses it.
     /// </summary>

@@ -60,7 +60,8 @@ internal static class SessionServiceRunner
                         service.Labels,
                         service.Volumes,
                         service.PortMappings,
-                        RegistryAuthFactory.ForHostedImage(pullCredential, service.Image)),
+                        RegistryAuthFactory.ForHostedImage(pullCredential, service.Image),
+                        service.Network),
                     cancellationToken);
 
                 logger.LogInformation(

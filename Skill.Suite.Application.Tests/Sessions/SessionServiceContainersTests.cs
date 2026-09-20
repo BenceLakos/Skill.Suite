@@ -1,5 +1,6 @@
 namespace Skill.Suite.Application.Tests.Sessions;
 
+using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Application.Sessions;
 using Skill.Suite.Application.Sessions.Services;
 using Skill.Suite.Domain.Sessions;
@@ -9,10 +10,10 @@ using Xunit;
 /// The names stopping a session has to reach, worked out without resolving anything secret.
 /// </summary>
 /// <remarks>
-/// Stopping reads the shape of a service from the very scan the planner does, which is what stops a service
-/// being started per competitor and stopped as though it were shared — the failure that leaves a container
-/// running, a host port held, and a competitor still able to reach a service after the session was
-/// suspended.
+/// Stopping derives its names exactly as the planner derives the ones it started the containers under, which
+/// is what stops a container being started under one name and looked for under another — the failure that
+/// leaves a container running, a host port held, and a competitor still able to reach a service after the
+/// session was suspended.
 /// </remarks>
 public sealed class SessionServiceContainersTests
 {
@@ -27,27 +28,13 @@ public sealed class SessionServiceContainersTests
             dockerImages: images).Value;
 
     private static SessionDockerImage Image(string image, Dictionary<string, string>? env = null) =>
-        new(image, env ?? [], [], [], []);
+        new(image, env ?? [], [], [], [], Domain: null);
 
     [Fact]
-    public void ASharedServiceIsOneNameWhateverTheCompetitorList()
+    public void EveryServiceIsOneNamePerCompetitor()
     {
         var containers = SessionServiceContainers.For(
             SessionWith(Image("redis:8")), ["c01", "c02"], SessionRunMode.Competition);
-
-        Assert.Equal("skill-suite-round-1-1", Assert.Single(containers).ContainerName);
-    }
-
-    [Fact]
-    public void APerCompetitorServiceIsOneNamePerCompetitor()
-    {
-        var containers = SessionServiceContainers.For(
-            SessionWith(Image("postgres:17", new Dictionary<string, string>
-            {
-                ["USER"] = "{{competitor.username}}",
-            })),
-            ["c01", "c02"],
-            SessionRunMode.Competition);
 
         Assert.Equal(
             ["skill-suite-round-1-1-c01", "skill-suite-round-1-1-c02"],
@@ -73,12 +60,9 @@ public sealed class SessionServiceContainersTests
     [Fact]
     public void TheNamesAreTheOnesThePlannerStartedTheContainersUnder()
     {
-        var image = Image("postgres:17", new Dictionary<string, string>
-        {
-            ["USER"] = "{{competitor.username}}",
-        });
-
-        var session = SessionWith(image, Image("redis:8"));
+        var session = SessionWith(
+            Image("postgres:17", new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" }),
+            Image("redis:8"));
 
         var planned = SessionServicePlanner.Plan(new SessionServicePlanRequest(
             session,
@@ -88,7 +72,9 @@ public sealed class SessionServiceContainersTests
             "round-1",
             "host.docker.internal,1433",
             DatabaseAdmin: null,
-            GitInternalBaseUrl: null));
+            GitInternalBaseUrl: null,
+            "skill-suite",
+            MarkingIpAddress: null));
 
         var stopped = SessionServiceContainers.For(session, ["c01"], SessionRunMode.Competition);
 
@@ -103,19 +89,14 @@ public sealed class SessionServiceContainersTests
         var containers = SessionServiceContainers.For(
             SessionWith(Image("redis:8")), ["c01"], SessionRunMode.Marking);
 
-        Assert.Equal("skill-suite-round-1-1-marking", Assert.Single(containers).ContainerName);
+        Assert.Equal("skill-suite-round-1-1-c01-marking", Assert.Single(containers).ContainerName);
     }
 
     [Fact]
     public void AFailureSubjectNamesTheCompetitorAsWellAsTheImage()
     {
         var containers = SessionServiceContainers.For(
-            SessionWith(Image("postgres:17", new Dictionary<string, string>
-            {
-                ["USER"] = "{{competitor.username}}",
-            })),
-            ["c01"],
-            SessionRunMode.Competition);
+            SessionWith(Image("postgres:17")), ["c01"], SessionRunMode.Competition);
 
         Assert.Equal("postgres:17 (c01)", Assert.Single(containers).Subject);
     }

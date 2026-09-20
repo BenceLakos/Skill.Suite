@@ -19,6 +19,11 @@ using Skill.Suite.Domain.Credentials;
 /// restarting should still end up with twenty git-host users, and a per-row error they can retry — not a
 /// half-provisioned competition with no record of which half.
 /// <para>
+/// On the SQL side this creates the login and nothing else. The databases a competitor works in are created
+/// when a session starts, so provisioning before the session's database settings are decided is safe and
+/// leaves nothing to clean up if they change.
+/// </para>
+/// <para>
 /// Nothing is written to this application's database, so there is no transaction and nothing to roll back. The
 /// remote systems hold the state, and re-running the command is the repair.
 /// </para>
@@ -101,7 +106,7 @@ public sealed class ProvisionCompetitorAccountsHandler(
 
         try
         {
-            var outcome = await msSql.EnsureLoginAndDatabaseAsync(
+            var outcome = await msSql.EnsureLoginAsync(
                 new MsSqlAccountRequest(username, password, credential), cancellationToken);
 
             return outcome == AccountProvisioning.Created

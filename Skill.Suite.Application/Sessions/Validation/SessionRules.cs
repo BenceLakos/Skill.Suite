@@ -91,7 +91,26 @@ internal static class SessionRules
                 || !string.IsNullOrWhiteSpace(databaseName(command)))
             .WithMessage(
                 "A docker service that refers to the competitors' database needs the session's database base "
-                + "name to be set. Set one, or use only the competitor placeholders.");
+                + "name to be set. Set one, or use only the competitor placeholders.")
+            .Must(images => images.All(image => IsUnset(image.Domain) || ServiceDomain.IsValid(image.Domain!)))
+            .WithMessage(
+                "A docker service's domain must be a bare lowercase hostname such as 'shop.skills.local' — "
+                + $"no scheme, no port, no path, at most {ServiceDomain.MaxLength} characters.")
+            // Traefik forwards to a port INSIDE the container, so a routed service that publishes nothing
+            // over TCP gives it nothing to forward to: the route is created and every request fails.
+            .Must(images => images.All(image =>
+                IsUnset(image.Domain)
+                || image.PortMappings.Any(port => port.Protocol == PortProtocol.Tcp)))
+            .WithMessage(
+                "A docker service with a domain needs at least one TCP port mapping — the reverse proxy "
+                + "forwards to the container port of the first one.")
+            // Two services on one hostname would be two proxy routers competing for the same requests, and
+            // which one wins is a tie-break nothing here controls.
+            .Must(images => Domains(images).Count == Domains(images).Distinct(StringComparer.OrdinalIgnoreCase).Count())
+            .WithMessage("Two docker services of a session cannot share a domain.");
+
+    private static IReadOnlyList<string> Domains(IEnumerable<SessionDockerImage> images) =>
+        [.. images.Select(image => image.Domain).Where(domain => !IsUnset(domain)).Select(domain => domain!)];
 
     /// <summary>
     /// Every placeholder name the services mention that the catalogue does not hold, each once.

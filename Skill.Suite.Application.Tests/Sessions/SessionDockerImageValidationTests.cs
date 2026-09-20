@@ -26,8 +26,10 @@ public sealed class SessionDockerImageValidationTests
     private static SessionDockerImage Image(
         Dictionary<string, string>? env = null,
         Dictionary<string, string>? labels = null,
-        List<VolumeMount>? volumes = null) =>
-        new("postgres:17", env ?? [], labels ?? [], volumes ?? [], []);
+        List<VolumeMount>? volumes = null,
+        List<PortMapping>? ports = null,
+        string? domain = null) =>
+        new("postgres:17", env ?? [], labels ?? [], volumes ?? [], ports ?? [], domain);
 
     private static SessionDockerImage WithEnv(string value) =>
         Image(env: new Dictionary<string, string> { ["SETTING"] = value });
@@ -105,10 +107,120 @@ public sealed class SessionDockerImageValidationTests
         Assert.True(Update([WithEnv("{{competitor.username}}")], databaseName: null).IsValid);
     }
 
+    private static readonly List<PortMapping> OneTcpPort = [new PortMapping(8080, 80, PortProtocol.Tcp)];
+
+    [Theory]
+    [InlineData("shop.skills.local")]
+    [InlineData("shop")]
+    [InlineData("a-b.c-d.example")]
+    [InlineData("s1.skills.local")]
+    public void ABareLowercaseHostnameWithATcpPortIsAccepted(string domain)
+    {
+        Assert.True(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+        Assert.True(Update([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void NoDomainIsFineAndNeedsNoPorts()
+    {
+        Assert.True(Create([Image()], DatabaseName).IsValid);
+    }
+
+    [Theory]
+    [InlineData("Shop.Skills.Local")]
+    [InlineData("SHOP")]
+    public void AnUppercaseDomainIsRejected(string domain)
+    {
+        // The rule is a literal in a generated label, and two spellings of one name is what an administrator
+        // would be left comparing when a route does not match.
+        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+        Assert.False(Update([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+    }
+
+    [Theory]
+    [InlineData("http://shop.skills.local")]
+    [InlineData("https://shop.skills.local")]
+    public void ADomainWithASchemeIsRejected(string domain)
+    {
+        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void ADomainWithAPortIsRejected()
+    {
+        // The proxy matches the Host header, which carries no port on the standard one, and the published
+        // port belongs to the proxy rather than to this service.
+        Assert.False(Create([Image(ports: OneTcpPort, domain: "shop.skills.local:8080")], DatabaseName).IsValid);
+    }
+
+    [Theory]
+    [InlineData("shop.skills.local/admin")]
+    [InlineData("shop..local")]
+    [InlineData("-shop.local")]
+    [InlineData("shop.local-")]
+    [InlineData("shop local")]
+    public void ADomainThatIsNotAHostnameIsRejected(string domain)
+    {
+        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void ADomainLongerThanADnsNameIsRejected()
+    {
+        var domain = string.Join('.', Enumerable.Repeat(new string('a', 60), 5));
+
+        Assert.True(domain.Length > ServiceDomain.MaxLength);
+        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void ADomainWithNoTcpPortMappingIsRejected()
+    {
+        // Traefik forwards to a port inside the container; with none there is nothing to forward to and
+        // every request through the route fails.
+        Assert.False(Create([Image(domain: "shop.skills.local")], DatabaseName).IsValid);
+
+        Assert.False(Create(
+            [Image(ports: [new PortMapping(5300, 53, PortProtocol.Udp)], domain: "shop.skills.local")],
+            DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void TwoServicesSharingADomainAreRejected()
+    {
+        // Two routers competing for the same requests, resolved by a tie-break nothing here controls.
+        var images = new List<SessionDockerImage>
+        {
+            Image(ports: OneTcpPort, domain: "shop.skills.local"),
+            Image(ports: OneTcpPort, domain: "SHOP.skills.local".ToLowerInvariant()),
+        };
+
+        Assert.False(Create(images, DatabaseName).IsValid);
+        Assert.False(Update(images, DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void TwoServicesWithDifferentDomainsAreAccepted()
+    {
+        var images = new List<SessionDockerImage>
+        {
+            Image(ports: OneTcpPort, domain: "shop.skills.local"),
+            Image(ports: OneTcpPort, domain: "admin.skills.local"),
+        };
+
+        Assert.True(Create(images, DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void TwoServicesWithoutDomainsAreAccepted()
+    {
+        Assert.True(Create([Image(), Image()], DatabaseName).IsValid);
+    }
+
     [Fact]
     public void TheExistingImageRulesStillApply()
     {
-        var blank = new SessionDockerImage("   ", [], [], [], []);
+        var blank = new SessionDockerImage("   ", [], [], [], [], Domain: null);
 
         Assert.False(Create([blank], DatabaseName).IsValid);
         Assert.False(Update([blank], DatabaseName).IsValid);

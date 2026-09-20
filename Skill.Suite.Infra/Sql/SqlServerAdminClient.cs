@@ -18,6 +18,10 @@ using Skill.Suite.Application.Competitors.Accounts;
 /// Nothing here runs in a transaction: <c>CREATE DATABASE</c> cannot, so a half-finished provision is repaired
 /// by pressing the button again rather than rolled back. Every step is written to make that safe.
 /// </para>
+/// <para>
+/// An account is a login and nothing else. Databases arrive and leave with the sessions that need them, which
+/// is why creating one and granting access to it are separate operations from creating the account.
+/// </para>
 /// </remarks>
 internal sealed class SqlServerAdminClient(
     IOptions<MsSqlOptions> options,
@@ -30,7 +34,7 @@ internal sealed class SqlServerAdminClient(
     /// <summary>How much of a server error message is worth showing an admin.</summary>
     private const int MaxErrorDetailLength = 300;
 
-    public async Task<AccountProvisioning> EnsureLoginAndDatabaseAsync(
+    public async Task<AccountProvisioning> EnsureLoginAsync(
         MsSqlAccountRequest request, CancellationToken cancellationToken)
     {
         var name = request.Name;
@@ -45,7 +49,7 @@ internal sealed class SqlServerAdminClient(
             // Not "if it does not exist, create it" as one statement: the check and the create are separated by
             // a round trip, so another admin can win the race between them. 15025 says they did, which is the
             // state that was wanted anyway.
-            created |= await TryExecuteAsync(
+            created = await TryExecuteAsync(
                 connection,
                 MsSqlAccountScripts.CreateLogin(name, request.Password),
                 $"create the login '{name}'",
@@ -53,29 +57,8 @@ internal sealed class SqlServerAdminClient(
                 cancellationToken);
         }
 
-        if (!await ExistsAsync(connection, MsSqlAccountScripts.DatabaseExists, name, cancellationToken))
-        {
-            created |= await TryExecuteAsync(
-                connection,
-                MsSqlAccountScripts.CreateDatabase(name),
-                $"create the database '{name}'",
-                MsSqlErrorNumbers.DatabaseAlreadyExists,
-                cancellationToken);
-        }
-
-        // Both are idempotent and both are run every time, deliberately. They are what repairs an account left
-        // half-provisioned by an earlier failure — ownership is the thing a competitor actually needs, and it
-        // is the step most likely to have been the one that did not happen.
-        await ExecuteAsync(
-            connection, MsSqlAccountScripts.GrantDatabaseOwnership(name),
-            $"make '{name}' the owner of its database", cancellationToken);
-
-        await ExecuteAsync(
-            connection, MsSqlAccountScripts.SetDefaultDatabase(name),
-            $"set the default database for '{name}'", cancellationToken);
-
         logger.LogInformation(
-            "SQL Server account {Name}: {Outcome}", name, created ? "created" : "already existed");
+            "SQL Server login {Name}: {Outcome}", name, created ? "created" : "already existed");
 
         return created ? AccountProvisioning.Created : AccountProvisioning.AlreadyExisted;
     }
@@ -213,7 +196,18 @@ internal sealed class SqlServerAdminClient(
         }
     }
 
-    public async Task<AccountRemoval> DropLoginAndDatabaseAsync(
+    /// <remarks>
+    /// The login only. Every database it was given access to belongs to a session and stays, including the
+    /// database user the login was mapped to inside each one. Those users are left orphaned on purpose:
+    /// hunting them down means a connection to every database on the server, and re-provisioning the login
+    /// under the same name is not what re-attaches them anyway — the marker reads the data, not the mapping.
+    /// <para>
+    /// A login that OWNS a database cannot be dropped at all (error 15174). Nothing this platform does makes a
+    /// competitor an owner any more, so hitting it means somebody set the ownership by hand; it is reported
+    /// rather than worked around, because the fix is a decision about that database, not about the account.
+    /// </para>
+    /// </remarks>
+    public async Task<AccountRemoval> DropLoginAsync(
         string name, BasicCredential admin, CancellationToken cancellationToken)
     {
         await using var connection = Connect(admin);
@@ -221,31 +215,11 @@ internal sealed class SqlServerAdminClient(
 
         var removed = false;
 
-        // Database first. A login that owns a database cannot be dropped, so the other order fails halfway and
-        // leaves the database orphaned to a principal that no longer exists.
-        if (await ExistsAsync(connection, MsSqlAccountScripts.DatabaseExists, name, cancellationToken))
-        {
-            removed |= await TryExecuteAsync(
-                connection,
-                MsSqlAccountScripts.DropDatabase(name),
-                $"drop the database '{name}'",
-                MsSqlErrorNumbers.DatabaseNotFound,
-                cancellationToken);
-        }
-
         if (await ExistsAsync(connection, MsSqlAccountScripts.LoginExists, name, cancellationToken))
-        {
-            removed |= await TryExecuteAsync(
-                connection,
-                MsSqlAccountScripts.DropLogin(name),
-                $"drop the login '{name}'",
-                MsSqlErrorNumbers.LoginNotFound,
-                MsSqlErrorNumbers.PrincipalDoesNotExist,
-                cancellationToken);
-        }
+            removed = await TryDropLoginAsync(connection, name, cancellationToken);
 
         logger.LogInformation(
-            "SQL Server account {Name}: {Outcome}", name, removed ? "removed" : "already missing");
+            "SQL Server login {Name}: {Outcome}", name, removed ? "removed" : "already missing");
 
         return removed ? AccountRemoval.Removed : AccountRemoval.AlreadyMissing;
     }
@@ -386,6 +360,43 @@ internal sealed class SqlServerAdminClient(
         catch (SqlException ex)
         {
             throw Wrap(ex, what);
+        }
+    }
+
+    /// <summary>
+    /// Drops the login, distinguishing "it was already gone" from "the server will not let go of it".
+    /// </summary>
+    /// <returns><see langword="true"/> when this call is the one that removed the login.</returns>
+    /// <remarks>
+    /// Written out rather than routed through <see cref="TryExecuteAsync(SqlConnection,string,string,int,int,CancellationToken)"/>
+    /// because 15174 needs a message of its own: "SQL Server returned error 15174" tells an admin nothing they
+    /// can act on, whereas naming the ownership tells them exactly what to change first.
+    /// </remarks>
+    private async Task<bool> TryDropLoginAsync(
+        SqlConnection connection, string name, CancellationToken cancellationToken)
+    {
+        await using var command = Command(connection, MsSqlAccountScripts.DropLogin(name));
+
+        try
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return true;
+        }
+        catch (SqlException ex)
+            when (ex.Number is MsSqlErrorNumbers.LoginNotFound or MsSqlErrorNumbers.PrincipalDoesNotExist)
+        {
+            logger.LogInformation(
+                "Did not need to drop the login '{Name}': the server reported {Number}", name, ex.Number);
+
+            return false;
+        }
+        catch (SqlException ex) when (ex.Number == MsSqlErrorNumbers.LoginOwnsDatabases)
+        {
+            throw Wrap(ex, $"drop the login '{name}', because it still owns at least one database");
+        }
+        catch (SqlException ex)
+        {
+            throw Wrap(ex, $"drop the login '{name}'");
         }
     }
 

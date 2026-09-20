@@ -1,7 +1,7 @@
 namespace Skill.Suite.Infra.Sql;
 
 /// <summary>
-/// The T-SQL a competitor's login and database are managed with.
+/// The T-SQL a competitor's login, and the databases a session creates for them, are managed with.
 /// </summary>
 /// <remarks>
 /// Every method returns exactly ONE batch and never contains <c>GO</c>. <c>GO</c> is a client-side separator
@@ -34,16 +34,19 @@ internal static class MsSqlAccountScripts
         "SELECT name FROM sys.databases;";
 
     /// <summary>
-    /// Sessions other than this one belonging to the login, or connected to its database.
+    /// Sessions other than this one that belong to the login.
     /// </summary>
     /// <remarks>
-    /// <c>s.session_id &lt;&gt; @@SPID</c> excludes the connection asking the question, which is itself a
+    /// The login and nothing else: what removal drops is the login, so a connection somebody else holds to a
+    /// session database is not a reason to refuse — that database is staying either way.
+    /// <para>
+    /// <c>session_id &lt;&gt; @@SPID</c> excludes the connection asking the question, which is itself a
     /// session and would otherwise never let the count reach zero once the admin login matched.
+    /// </para>
     /// </remarks>
     public const string ActiveConnectionCount =
-        "SELECT COUNT(*) FROM sys.dm_exec_sessions s " +
-        "LEFT JOIN sys.databases d ON s.database_id = d.database_id " +
-        $"WHERE s.session_id <> @@SPID AND (s.login_name = {NameParameter} OR d.name = {NameParameter});";
+        "SELECT COUNT(*) FROM sys.dm_exec_sessions " +
+        $"WHERE session_id <> @@SPID AND login_name = {NameParameter};";
 
     /// <summary>
     /// Creates the login.
@@ -59,31 +62,6 @@ internal static class MsSqlAccountScripts
 
     public static string CreateDatabase(string name) =>
         $"CREATE DATABASE {TSql.QuoteName(name)};";
-
-    /// <summary>
-    /// Makes the login the owner of its own database — and of nothing else.
-    /// </summary>
-    /// <remarks>
-    /// Ownership rather than a server role: the competitor gets everything inside their database and no
-    /// visibility into anyone else's.
-    /// </remarks>
-    public static string GrantDatabaseOwnership(string name) =>
-        $"ALTER AUTHORIZATION ON DATABASE::{TSql.QuoteName(name)} TO {TSql.QuoteName(name)};";
-
-    /// <summary>So a connection string without <c>Database=</c> still lands somewhere useful.</summary>
-    public static string SetDefaultDatabase(string name) =>
-        $"ALTER LOGIN {TSql.QuoteName(name)} WITH DEFAULT_DATABASE = {TSql.QuoteName(name)};";
-
-    /// <summary>
-    /// Drops the database.
-    /// </summary>
-    /// <remarks>
-    /// No <c>SET SINGLE_USER WITH ROLLBACK IMMEDIATE</c>. That would kill whatever is connected and drop the
-    /// database anyway, which is precisely the outcome the caller's active-connection check exists to prevent:
-    /// removal is meant to refuse while somebody is working, not to win.
-    /// </remarks>
-    public static string DropDatabase(string name) =>
-        $"DROP DATABASE {TSql.QuoteName(name)};";
 
     public static string DropLogin(string name) =>
         $"DROP LOGIN {TSql.QuoteName(name)};";

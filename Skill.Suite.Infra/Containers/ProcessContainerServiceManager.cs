@@ -99,14 +99,27 @@ internal sealed class ProcessContainerServiceManager(ILogger<ProcessContainerSer
         return ContainerServiceStop.Stopped;
     }
 
-    public async Task<int> RemoveByLabelAsync(
-        string labelKey,
-        string labelValue,
+    /// <summary>
+    /// Removes every container carrying all of <paramref name="labels"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>--filter</c> repeated for different keys is an AND in <c>docker ps</c>, which is exactly the
+    /// narrowing this needs: one competitor's marking containers are the ones carrying the marking label AND
+    /// their competitor label.
+    /// </remarks>
+    public async Task<int> RemoveByLabelsAsync(
+        IReadOnlyDictionary<string, string> labels,
         CancellationToken cancellationToken)
     {
-        var filter = $"label={labelKey}={labelValue}";
+        // Never "remove everything". With no filters `docker ps -aq` lists every container on the host,
+        // including the platform's own, the database and the git server.
+        if (labels.Count == 0)
+            throw new ContainerServiceException("Removing containers needs at least one label to match on.");
+
+        var filter = string.Join(" ", DockerLabelFilters.Expressions(labels));
+
         var listed = await DockerCli.RunAsync(
-            ["ps", "-a", "-q", "--filter", filter],
+            DockerLabelFilters.ListArguments(labels),
             dockerConfigDirectory: null,
             standardInput: null,
             cancellationToken);

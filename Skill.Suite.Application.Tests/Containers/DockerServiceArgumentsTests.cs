@@ -110,6 +110,32 @@ public sealed class DockerServiceArgumentsTests
     }
 
     [Fact]
+    public void AServiceWithNoNetworkStaysOnTheDaemonsDefaultBridge()
+    {
+        // Where session services have always been started. Only a service the reverse proxy has to reach
+        // joins a network, and anything else must keep behaving exactly as it did.
+        Assert.DoesNotContain("--network", DockerServiceArguments.Build(Request()));
+    }
+
+    [Fact]
+    public void ARoutedServiceJoinsTheProxysNetwork()
+    {
+        // The proxy forwards to a container address; a container on the default bridge has none the proxy's
+        // network can reach, so a routed service left there is discovered, routed, and answers every
+        // request with a gateway error.
+        AssertFlag(DockerServiceArguments.Build(Request("skill-suite")), "--network", "skill-suite");
+    }
+
+    [Fact]
+    public void ARoutedServiceStillPublishesItsHostPortsAndReachesTheDockerHost()
+    {
+        var args = DockerServiceArguments.Build(Request("skill-suite"));
+
+        Assert.Equal(new[] { "1433:1433/tcp", "5300:53/udp" }, ValuesOf(args, "-p"));
+        AssertFlag(args, "--add-host", "host.docker.internal:host-gateway");
+    }
+
+    [Fact]
     public void TheJudgementHardeningIsNotApplied()
     {
         var args = DockerServiceArguments.Build(Request());
@@ -141,7 +167,8 @@ public sealed class DockerServiceArgumentsTests
             Labels: new Dictionary<string, string>(),
             Volumes: [],
             PortMappings: [],
-            RegistryAuth: null));
+            RegistryAuth: null,
+            Network: null));
 
         Assert.DoesNotContain("-p", args);
         Assert.DoesNotContain("-v", args);
@@ -160,7 +187,7 @@ public sealed class DockerServiceArgumentsTests
     private static List<string> ValuesOf(List<string> args, string flag) =>
         args.Select((a, i) => (a, i)).Where(x => x.a == flag).Select(x => args[x.i + 1]).ToList();
 
-    private static ContainerServiceRequest Request() =>
+    private static ContainerServiceRequest Request(string? network = null) =>
         new(
             Image: "registry.example.com/skill09/mssql:2022",
             ContainerName: "skill-suite-session-7-mssql",
@@ -183,5 +210,6 @@ public sealed class DockerServiceArgumentsTests
                 new PortMapping(1433, 1433, PortProtocol.Tcp),
                 new PortMapping(5300, 53, PortProtocol.Udp),
             ],
-            RegistryAuth: null);
+            RegistryAuth: null,
+            Network: network);
 }

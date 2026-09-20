@@ -24,6 +24,14 @@ using Skill.Suite.Domain.Sessions;
 /// Where the platform's own registry is, so an image reference stored in this process's terms is restated in
 /// the host daemon's before the container is asked for.
 /// </param>
+/// <param name="ServiceNetwork">
+/// The docker network a service with a domain joins, which must be the one the reverse proxy watches.
+/// </param>
+/// <param name="MarkingIpAddress">
+/// The machine an expert is marking from, and the only source address a marking container's route accepts.
+/// Required in <see cref="SessionRunMode.Marking"/> for a routed service and ignored otherwise: during the
+/// competition the address that separates the containers is each competitor's own.
+/// </param>
 internal sealed record SessionServicePlanRequest(
     Session Session,
     SessionRunMode Mode,
@@ -32,4 +40,6 @@ internal sealed record SessionServicePlanRequest(
     string? DatabaseBaseName,
     string? DatabaseServer,
     BasicCredential? DatabaseAdmin,
-    string? GitInternalBaseUrl);
+    string? GitInternalBaseUrl,
+    string ServiceNetwork,
+    string? MarkingIpAddress);

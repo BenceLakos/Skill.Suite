@@ -14,6 +14,22 @@ public sealed class WebhookOptions
     /// </summary>
     public string WorkdirVolumeName { get; set; } = "skill-suite-workdir";
 
+    /// <summary>
+    /// Docker network a session service joins when it is given a domain to be routed on.
+    /// </summary>
+    /// <remarks>
+    /// <b>Must match <c>--providers.docker.network</c> on the Traefik container</b>, which is
+    /// <c>skill-suite</c> in <c>infra/compose.yaml</c>. Traefik reads a container's labels off the daemon
+    /// wherever it is, but it can only forward to an address it can reach, so a routed container that is not
+    /// on this network is discovered, routed, and answers every request with a gateway error.
+    /// <para>
+    /// A setting rather than a derivation, unlike the registry host and the SQL Server address: nothing this
+    /// application already knows carries the network name. A service with no domain keeps today's behaviour
+    /// and joins nothing, so this is only read for services that are routed.
+    /// </para>
+    /// </remarks>
+    public string ServiceNetwork { get; set; } = "skill-suite";
+
     /// <summary>Container path the cloned source is mounted at inside the judgement image.</summary>
     public string ContainerWorkdir { get; set; } = "/workspace";
 

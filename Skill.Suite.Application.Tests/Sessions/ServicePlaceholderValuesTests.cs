@@ -138,15 +138,6 @@ public sealed class ServicePlaceholderValuesTests
     }
 
     [Fact]
-    public void ASharedServiceOnlyEverSeesTheSessionValues()
-    {
-        var values = ServicePlaceholderValues.ForSession(Draft());
-
-        Assert.Equal(2, values.Count);
-        Assert.Equal("round-1", values[ServicePlaceholder.SessionSlug]);
-    }
-
-    [Fact]
     public void EveryPlaceholderInTheCatalogueHasAValue()
     {
         var values = For(SessionRunMode.Competition);

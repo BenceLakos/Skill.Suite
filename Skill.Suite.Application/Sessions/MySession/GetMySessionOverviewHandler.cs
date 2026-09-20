@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Skill.Suite.Application.Abstractions;
 using Skill.Suite.Application.Competitors.Accounts;
 using Skill.Suite.Application.Sessions.Services;
+using Skill.Suite.Application.Webhooks;
 using Skill.Suite.Domain.Common;
 using Skill.Suite.Domain.Competitors;
 
@@ -24,7 +25,8 @@ public sealed class GetMySessionOverviewHandler(
     IAppDbContext db,
     IPasswordVault vault,
     ICurrentUserService currentUser,
-    IOptions<MsSqlOptions> msSqlOptions)
+    IOptions<MsSqlOptions> msSqlOptions,
+    IOptions<WebhookOptions> webhookOptions)
     : IRequestHandler<GetMySessionOverviewQuery, Result<MySessionOverviewDto>>
 {
     public async ValueTask<Result<MySessionOverviewDto>> Handle(
@@ -85,9 +87,6 @@ public sealed class GetMySessionOverviewHandler(
             server,
             competitor.Username,
             credentials.Password,
-            competitor.Username,
-            MsSqlConnectionString.For(
-                server, competitor.Username, competitor.Username, credentials.Password),
             sessionDatabase,
             session.DatabaseReadAccess,
             session.DatabaseWriteAccess,
@@ -98,8 +97,8 @@ public sealed class GetMySessionOverviewHandler(
 
         // Planned through the very code that started the containers, with this competitor as the only
         // competitor in the session, so what the page shows is what their container actually got: the same
-        // name, the same resolved environment and the same host ports. Describing the images directly was
-        // fine while every service was shared and is a lie as soon as one of them is not.
+        // name, the same resolved environment and the same host ports. Describing the images directly would
+        // describe nobody's container, since every service is one container per competitor.
         //
         // "Has a SQL login" is answered with "the session has a database", which is as close as this page can
         // honestly get without an outbound connection on its render path. A competitor who holds no login has
@@ -123,7 +122,11 @@ public sealed class GetMySessionOverviewHandler(
             DatabaseAdmin: null,
             // Null on purpose: this page prints the reference the session stores, which is what the
             // administrator typed, not the one the host daemon was handed to pull with.
-            GitInternalBaseUrl: null));
+            GitInternalBaseUrl: null,
+            webhookOptions.Value.ServiceNetwork,
+            // No marker is involved: this describes the competition containers, which are separated by the
+            // competitor's own workstation address.
+            MarkingIpAddress: null));
 
         var services = plan.Services
             .Select(service => new MySessionServiceDto(
@@ -132,7 +135,10 @@ public sealed class GetMySessionOverviewHandler(
                 service.ContainerName,
                 service.Environment,
                 service.PortMappings,
-                PerCompetitor: service.CompetitorUsername is not null))
+                // The proxy listens on 80 inside its container and the stack publishes it on a port this
+                // application has no setting for — so it is read off the host this very page was reached on,
+                // which came through that proxy on that port.
+                ServiceUrl.For(service.Host, host)))
             .ToList();
 
         return new MySessionOverviewDto(

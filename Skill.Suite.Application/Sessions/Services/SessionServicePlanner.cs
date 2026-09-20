@@ -7,16 +7,27 @@ using Skill.Suite.Domain.Sessions;
 /// Turns a session's configured images into the exact list of containers to run.
 /// </summary>
 /// <remarks>
-/// Pure, and deliberately the only thing that answers "how many containers". Start Session, Start Marking
-/// and — through <see cref="SessionServiceContainers"/> — Stop Session all read the shape of a service from
-/// the same scan, so a service cannot be started per competitor and stopped as though it were shared.
+/// Pure, and deliberately the only thing that answers "which containers". Start Session, Start Marking and —
+/// through <see cref="SessionServiceContainers"/> — Stop Session all derive their container names the same
+/// way, so a container cannot be started under one name and looked for under another.
 /// <para>
-/// THE RULE, in one sentence and repeated on the session form: a service whose environment values, label
-/// values or volume host paths mention any competitor- or database-scoped placeholder is started once per
-/// competitor enrolled in the session, except that a service mentioning a database-scoped placeholder is
-/// started only for those of them the SQL Server holds a login for — the rest have no session database for
-/// it to be pointed at — and a service mentioning neither stays the single shared container it has always
-/// been.
+/// THE RULE, in one sentence and repeated on the session form: every service of a session is started once
+/// per competitor, exactly as their session database is. Nothing is shared — not a service with no
+/// placeholders, not one with no domain — because a competition is N independent workspaces, and one
+/// container between twenty people is one competitor's restart costing the other nineteen their work. The
+/// placeholders exist to let the settings DIFFER per competitor, not to decide how many containers there
+/// are.
+/// </para>
+/// <para>
+/// The one exception is a subtraction, not a sharing: a service whose settings mention a database-scoped
+/// placeholder is skipped for a competitor the SQL Server holds no login for, because no session database of
+/// theirs was ever created for it to be pointed at. That competitor is reported, not failed.
+/// </para>
+/// <para>
+/// A service with a domain also gets the reverse-proxy labels and joins the proxy's network. Labels the
+/// administrator wrote themselves win over the generated ones key for key — an author who has typed
+/// <c>traefik.http.routers.x.rule</c> means it — while the platform's own session, service, competitor and
+/// marking labels win over both, because they are what tearing the session down finds the containers by.
 /// </para>
 /// </remarks>
 internal static class SessionServicePlanner
@@ -31,18 +42,12 @@ internal static class SessionServicePlanner
         for (var index = 0; index < session.DockerImages.Count; index++)
         {
             var image = session.DockerImages[index];
-            var scan = ServiceTemplate.Scan(image);
+            var needsDatabase = ServiceTemplate.Scan(image).NeedsDatabase;
             var daemonImage = DaemonImageReference.ForDaemon(image.Image, request.GitInternalBaseUrl);
-
-            if (!scan.IsPerCompetitor)
-            {
-                services.Add(Shared(request, image, daemonImage, index));
-                continue;
-            }
 
             foreach (var competitor in request.Competitors)
             {
-                if (scan.NeedsDatabase && !competitor.HasDatabaseLogin)
+                if (needsDatabase && !competitor.HasDatabaseLogin)
                 {
                     if (!skipped.Contains(competitor.Username, StringComparer.OrdinalIgnoreCase))
                         skipped.Add(competitor.Username);
@@ -67,31 +72,6 @@ internal static class SessionServicePlanner
         return new SessionServicePlan(services, failures, skipped);
     }
 
-    /// <summary>
-    /// The one container a service with no competitor-scoped placeholder runs as.
-    /// </summary>
-    /// <remarks>
-    /// Still rendered, because <c>{{session.slug}}</c> and <c>{{session.name}}</c> are legitimate here and
-    /// have one answer. The name and labels are exactly what sessions produced before this feature, so a
-    /// session already running keeps its containers across an upgrade instead of gaining a second copy.
-    /// </remarks>
-    private static PlannedSessionService Shared(
-        SessionServicePlanRequest request, SessionDockerImage image, string daemonImage, int index)
-    {
-        var values = ServicePlaceholderValues.ForSession(request.Session);
-
-        return new PlannedSessionService(
-            SessionServiceNaming.ServiceNumber(index),
-            daemonImage,
-            image.Image,
-            SessionServiceNaming.ContainerName(request.Session.Slug, index, competitorUsername: null, request.Mode),
-            CompetitorUsername: null,
-            Render(image.Env, values),
-            Labels(request, index, values, competitorUsername: null),
-            Volumes(image.Volumes, values),
-            image.PortMappings);
-    }
-
     private static PlannedSessionService ForCompetitor(
         SessionServicePlanRequest request,
         SessionDockerImage image,
@@ -108,41 +88,94 @@ internal static class SessionServicePlanner
             request.DatabaseServer,
             request.DatabaseAdmin);
 
+        var containerName = SessionServiceNaming.ContainerName(
+            request.Session.Slug, index, competitor.Username, request.Mode);
+
+        // Whose machine may reach this container: the competitor's own while they are competing, the
+        // expert's while that competitor's work is being marked. The hostname is the same either way — the
+        // source address is the whole of what separates one competitor's container from the next.
+        var clientIp = request.Mode == SessionRunMode.Marking
+            ? request.MarkingIpAddress
+            : competitor.IpAddress;
+
+        var route = RouteFor(request, image, containerName, clientIp, ports);
+
         return new PlannedSessionService(
             SessionServiceNaming.ServiceNumber(index),
             daemonImage,
             image.Image,
-            SessionServiceNaming.ContainerName(request.Session.Slug, index, competitor.Username, request.Mode),
+            containerName,
             competitor.Username,
             Render(image.Env, values),
-            Labels(request, index, values, competitor.Username),
+            Labels(request, image, index, values, competitor.Username, route),
             Volumes(image.Volumes, values),
-            ports);
+            ports,
+            route is null ? null : request.ServiceNetwork,
+            route?.Host);
     }
 
     /// <summary>
-    /// The image's own labels, rendered, with the platform's stamped over the top.
+    /// The container's route through the proxy, or null when it is not routed.
     /// </summary>
     /// <remarks>
-    /// The platform's win a collision on purpose: they are what Close and Stop Marking find the containers
-    /// by, and a session label an image happened to carry its own value for would strand its container.
+    /// The FIRST TCP mapping's container port is what the proxy forwards to, and the session validators make
+    /// sure a domain cannot be saved without one. The container port rather than the published host port: the
+    /// proxy reaches the container over the shared docker network, where nothing is published.
+    /// <para>
+    /// Every route carries a source address, because every container belongs to exactly one competitor. A
+    /// route without one would be one competitor's container answering for the whole domain, which is how
+    /// twenty people end up looking at the first competitor's work.
+    /// </para>
+    /// </remarks>
+    private static TraefikRoute? RouteFor(
+        SessionServicePlanRequest request,
+        SessionDockerImage image,
+        string containerName,
+        string? clientIp,
+        IReadOnlyList<PortMapping> ports)
+    {
+        if (string.IsNullOrWhiteSpace(image.Domain))
+            return null;
+
+        var forwarded = ports.FirstOrDefault(port => port.Protocol == PortProtocol.Tcp);
+
+        return forwarded is null
+            ? null
+            : new TraefikRoute(
+                containerName, image.Domain, clientIp, forwarded.ContainerPort, request.ServiceNetwork);
+    }
+
+    /// <summary>
+    /// The image's own labels, rendered, then the proxy's, then the platform's.
+    /// </summary>
+    /// <remarks>
+    /// In that order, and the order is the precedence. An administrator who typed a Traefik label themselves
+    /// has overridden the generated one deliberately; the platform's own win over everybody, because they
+    /// are what Close and Stop Marking find the containers by and a session label an image happened to carry
+    /// its own value for would strand its container.
     /// </remarks>
     private static Dictionary<string, string> Labels(
         SessionServicePlanRequest request,
+        SessionDockerImage image,
         int index,
         IReadOnlyDictionary<ServicePlaceholder, string> values,
-        string? competitorUsername)
+        string competitorUsername,
+        TraefikRoute? route)
     {
-        var labels = Render(request.Session.DockerImages[index].Labels, values);
+        var labels = Render(image.Labels, values);
+
+        if (route is not null)
+        {
+            foreach (var label in TraefikLabels.For(route))
+                labels.TryAdd(label.Key, label.Value);
+        }
 
         labels[SessionServiceLabels.SessionKey] = request.Session.Slug;
         labels[SessionServiceLabels.ServiceKey] = SessionServiceNaming.ServiceNumber(index);
-
-        if (competitorUsername is not null)
-            labels[SessionServiceLabels.CompetitorKey] = competitorUsername;
+        labels[SessionServiceLabels.CompetitorKey] = competitorUsername;
 
         // Carries the slug rather than a bare "true" so Stop Marking can remove one session's marking
-        // containers with the single label filter the daemon is asked for, and leave another session's alone.
+        // containers with a label filter, and leave another session's alone.
         if (request.Mode == SessionRunMode.Marking)
             labels[SessionServiceLabels.MarkingKey] = request.Session.Slug;
 

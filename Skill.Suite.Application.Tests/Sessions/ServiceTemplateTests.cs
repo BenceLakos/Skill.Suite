@@ -8,9 +8,9 @@ using Xunit;
 /// Reading and filling the <c>{{placeholder}}</c> tokens a service's configuration carries.
 /// </summary>
 /// <remarks>
-/// Everything downstream is decided here. The same scan tells the validators what to refuse and the planner
-/// whether a service is one container or twenty, so a token this misses is a service that validates as
-/// shared, starts as shared, and hands every competitor the same database.
+/// The same scan tells the validators what to refuse and the planner whether a service can be started for a
+/// competitor who has no session database, so a token this misses is a setting that saves cleanly and
+/// reaches the container as the literal text <c>{{database.name}}</c>.
 /// </remarks>
 public sealed class ServiceTemplateTests
 {
@@ -156,7 +156,8 @@ public sealed class ServiceTemplateTests
             new Dictionary<string, string> { ["USER"] = "{{competitor.username}}" },
             new Dictionary<string, string> { ["owner"] = "{{competitor.fullName}}" },
             [new VolumeMount("/srv/{{session.slug}}", "/data", ReadOnly: false)],
-            []);
+            [],
+            Domain: null);
 
         var scan = ServiceTemplate.Scan(image);
 
@@ -179,56 +180,26 @@ public sealed class ServiceTemplateTests
             new Dictionary<string, string> { ["{{competitor.username}}"] = "fixed" },
             new Dictionary<string, string> { ["{{competitor.username}}"] = "fixed" },
             [new VolumeMount("/srv/data", "/{{competitor.username}}", ReadOnly: false)],
-            []);
+            [],
+            Domain: null);
 
         var scan = ServiceTemplate.Scan(image);
 
         Assert.Empty(scan.Used);
-        Assert.False(scan.IsPerCompetitor);
     }
 
     [Fact]
-    public void AServiceMentioningNothingStaysShared()
+    public void AServiceMentioningNoDatabaseNeedsNone()
     {
-        var scan = ServiceTemplate.Scan(["postgres", "17"]);
-
-        Assert.False(scan.IsPerCompetitor);
-        Assert.False(scan.NeedsDatabase);
+        // The only thing a scan decides. How many containers a service becomes is not a question the
+        // placeholders answer: every service is one container per competitor either way.
+        Assert.False(ServiceTemplate.Scan(["postgres", "17"]).NeedsDatabase);
+        Assert.False(ServiceTemplate.Scan(["{{session.slug}}", "{{competitor.username}}"]).NeedsDatabase);
     }
 
     [Fact]
-    public void AServiceMentioningOnlyTheSessionStaysShared()
+    public void AServiceMentioningTheDatabaseNeedsOne()
     {
-        // The session's name and slug have one answer for everybody, so there is nothing to make a second
-        // container out of — which is what keeps every session configured before this feature unchanged.
-        var scan = ServiceTemplate.Scan(["{{session.slug}}", "{{session.name}}"]);
-
-        Assert.False(scan.IsPerCompetitor);
-        Assert.False(scan.NeedsDatabase);
-    }
-
-    [Fact]
-    public void AServiceMentioningACompetitorBecomesOnePerCompetitor()
-    {
-        var scan = ServiceTemplate.Scan(["{{competitor.username}}"]);
-
-        Assert.True(scan.IsPerCompetitor);
-        Assert.False(scan.NeedsDatabase);
-    }
-
-    [Fact]
-    public void AServiceMentioningTheDatabaseIsPerCompetitorAndNeedsOne()
-    {
-        var scan = ServiceTemplate.Scan(["{{database.connectionString}}"]);
-
-        Assert.True(scan.IsPerCompetitor);
-        Assert.True(scan.NeedsDatabase);
-    }
-
-    [Fact]
-    public void AnEmptyScanIsShared()
-    {
-        Assert.False(ServiceTemplateScan.Empty.IsPerCompetitor);
-        Assert.False(ServiceTemplateScan.Empty.NeedsDatabase);
+        Assert.True(ServiceTemplate.Scan(["{{database.connectionString}}"]).NeedsDatabase);
     }
 }

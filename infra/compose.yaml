@@ -142,11 +142,14 @@ services:
 
   # The SQL Server competitors work against. Nothing in the stack itself uses it: the platform and Gitea live
   # in Postgres. Reached as sql.${DOMAIN},1433 from the LAN and from inside the network alike - the port is
-  # published on Traefik, not here. sa is the operator's account only; each competitor gets a login and a
-  # database of their own, created by hand and handed out through the platform as a CredentialKind.MsSql
-  # credential (the T-SQL is in infra/.env.example).
+  # published on Traefik, not here. sa is the operator's account only, handed to the platform as a
+  # CredentialKind.MsSql credential; each competitor gets a login of their own from it, and the databases they
+  # work in are created per competitor when a session starts (the fallback T-SQL is in infra/.env.example).
   mssql:
     container_name: skill-suite-mssql
+    # Pick the major version before the first boot: SQL Server upgrades the system databases in mssql-data in
+    # place, but never downgrades them. An older engine pointed at a volume a newer one initialised crashes
+    # inside its own startup, before it writes an error log - the only way back is a fresh volume.
     image: mcr.microsoft.com/mssql/server:2022-latest
     # Microsoft publishes amd64 only. Stated so an arm64 host pulls it instead of failing with "no matching
     # manifest"; a no-op on amd64. An Apple silicon rehearsal machine runs it through Docker Desktop's

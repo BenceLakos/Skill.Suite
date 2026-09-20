@@ -3,14 +3,12 @@ namespace Skill.Suite.Application.Sessions.MySession;
 using Skill.Suite.Domain.Sessions;
 
 /// <summary>
-/// One service container the session runs, as a competitor needs to address it.
+/// One service container the session runs for THIS competitor.
 /// </summary>
 /// <remarks>
-/// There may be one of these per session or one per competitor, and <see cref="PerCompetitor"/> says which.
-/// A service whose configuration names no competitor has fixed host ports, so a second copy would collide on
-/// them and everybody in the session connects to the same instance; a service configured with a competitor
-/// placeholder gets a container, a name and host ports of its own per competitor, and what is described here
-/// is then THIS competitor's.
+/// Always theirs alone: every service of a session is started once per competitor, the same way every
+/// competitor gets their own session database. The container name, the host ports and the settings described
+/// here belong to the competitor reading the page and to nobody else.
 /// <para>
 /// Volumes and labels are deliberately absent. They are host paths and bookkeeping for the docker daemon —
 /// nothing a competitor can act on, and the host paths describe the competition machine's filesystem.
@@ -34,10 +32,15 @@ using Skill.Suite.Domain.Sessions;
 /// </para>
 /// </remarks>
 /// <param name="Number">The service's position as the admin sees it listed, and as its docker label carries it.</param>
+/// <param name="Url">
+/// The address to open when the service is routed by hostname, or null when it is reached on a published
+/// port alone. It answers only from this competitor's own workstation — the proxy sends every other machine
+/// to its own competitor's container.
+/// </param>
 public sealed record MySessionServiceDto(
     string Number,
     string Image,
     string ContainerName,
     IReadOnlyDictionary<string, string> Environment,
     IReadOnlyList<PortMapping> Ports,
-    bool PerCompetitor);
+    string? Url);

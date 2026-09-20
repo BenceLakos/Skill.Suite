@@ -14,13 +14,13 @@ using Skill.Suite.Domain.Credentials;
 using Skill.Suite.Domain.Sessions;
 
 /// <summary>
-/// Starts the marking copy of a closed session's docker services.
+/// Starts the marking copy of one competitor's docker services on a closed session.
 /// </summary>
 /// <remarks>
 /// Deliberately changes nothing in the database. Marking is a view of what the competition left behind — the
-/// competitors' databases, their repositories, their enrolments — so the session's status, the enrolment
-/// rows and the ordinals the host ports come from are all read and none of them written. That is also what
-/// makes this safe to run twice.
+/// competitor's database, their repository, their enrolment — so the session's status, the enrolment rows
+/// and the ordinal the host ports come from are all read and none of them written. That is also what makes
+/// this safe to run twice.
 /// </remarks>
 public sealed class StartMarkingHandler(
     IAppDbContext db,
@@ -49,6 +49,17 @@ public sealed class StartMarkingHandler(
         if (session.DockerImages.Count == 0)
             return SessionErrors.NoServicesToMark;
 
+        var enrolment = session.Competitors.FirstOrDefault(c => c.CompetitorId == request.CompetitorId);
+        if (enrolment is null)
+            return SessionErrors.CompetitorNotEnrolled;
+
+        var competitor = await db.Competitors
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == request.CompetitorId, cancellationToken);
+
+        if (competitor is null)
+            return SessionErrors.CompetitorNotEnrolled;
+
         var needsDatabase = session.DockerImages.Any(image => ServiceTemplate.Scan(image).NeedsDatabase);
 
         var database = await ResolveDatabaseAsync(session, needsDatabase, cancellationToken);
@@ -63,11 +74,22 @@ public sealed class StartMarkingHandler(
             session,
             SessionRunMode.Marking,
             SessionProvisioningStage.MarkingServices,
-            await PlanCompetitorsAsync(session, database.Value, cancellationToken),
+            [
+                new SessionServicePlanCompetitor(
+                    competitor.Username,
+                    competitor.FullName,
+                    competitor.IpAddress,
+                    competitor.CountryCode,
+                    vault.Unprotect(competitor.EncryptedPassword),
+                    enrolment.Ordinal,
+                    database.Value?.Logins.Contains(competitor.Username) ?? false),
+            ],
             session.DatabaseName,
             ServiceSqlServerName.For(msSqlOptions.Value.Server),
             database.Value?.Admin,
-            webhookOptions.Value.GitInternalBaseUrl));
+            webhookOptions.Value.GitInternalBaseUrl,
+            webhookOptions.Value.ServiceNetwork,
+            request.MarkingIpAddress));
 
         var run = await SessionServiceRunner.RunAsync(
             containerServices,
@@ -80,15 +102,18 @@ public sealed class StartMarkingHandler(
             cancellationToken);
 
         logger.LogInformation(
-            "Session {SessionId} marking started: {Running} containers up, {Failed} failures, " +
-            "{Skipped} competitors skipped for having no SQL login",
-            session.Id, run.Outcome.Succeeded, run.Outcome.Failures.Count, plan.SkippedNoDatabaseLogin.Count);
+            "Session {SessionId}: marking {Username} from {MarkingIp} — {Running} containers up, " +
+            "{Failed} failures, database services skipped: {Skipped}",
+            session.Id, competitor.Username, request.MarkingIpAddress,
+            run.Outcome.Succeeded, run.Outcome.Failures.Count, plan.SkippedNoDatabaseLogin.Count > 0);
 
         return new StartMarkingResult(
+            competitor.Username,
+            request.MarkingIpAddress,
             run.Outcome.Succeeded,
             [.. run.Running.Select(Endpoint)],
             run.Outcome.Failures,
-            plan.SkippedNoDatabaseLogin);
+            plan.SkippedNoDatabaseLogin.Count > 0);
     }
 
     /// <summary>
@@ -98,7 +123,7 @@ public sealed class StartMarkingHandler(
     /// <remarks>
     /// Read up front and refused up front, the same way starting a session plans its database stage: a
     /// missing credential or an unreadable login list makes every database-backed container impossible, and
-    /// discovering that after half of them are up turns one clear refusal into N identical failures.
+    /// discovering that after half of them are up turns one clear refusal into several identical failures.
     /// </remarks>
     private async Task<Result<MarkingDatabaseAccess?>> ResolveDatabaseAsync(
         Session session, bool needsDatabase, CancellationToken cancellationToken)
@@ -131,40 +156,6 @@ public sealed class StartMarkingHandler(
     }
 
     /// <summary>
-    /// Every competitor enrolled in the session, with the ordinal their marking ports are derived from.
-    /// </summary>
-    /// <remarks>
-    /// Every enrolment, not only the provisioned ones. The repository and the database are separate pieces
-    /// of work: a competitor whose repository failed may still have been given a database and worked in it
-    /// through a service container, and refusing to mark them because a git call failed weeks ago would lose
-    /// exactly the work marking exists to look at.
-    /// </remarks>
-    private async Task<List<SessionServicePlanCompetitor>> PlanCompetitorsAsync(
-        Session session, MarkingDatabaseAccess? database, CancellationToken cancellationToken)
-    {
-        var ordinals = session.Competitors.ToDictionary(c => c.CompetitorId, c => c.Ordinal);
-        var competitorIds = ordinals.Keys.ToList();
-
-        var competitors = await db.Competitors
-            .AsNoTracking()
-            .Where(c => competitorIds.Contains(c.Id))
-            .OrderBy(c => c.Username)
-            .ToListAsync(cancellationToken);
-
-        return
-        [
-            .. competitors.Select(competitor => new SessionServicePlanCompetitor(
-                competitor.Username,
-                competitor.FullName,
-                competitor.IpAddress,
-                competitor.CountryCode,
-                vault.Unprotect(competitor.EncryptedPassword),
-                ordinals[competitor.Id],
-                database?.Logins.Contains(competitor.Username) ?? false)),
-        ];
-    }
-
-    /// <summary>
     /// The credential the marking images are pulled with, resolved the way starting the session resolves it.
     /// </summary>
     private async Task<Result<BasicCredential?>> ResolvePullCredentialAsync(
@@ -181,11 +172,20 @@ public sealed class StartMarkingHandler(
             : Result.Success<BasicCredential?>(credential);
     }
 
+    /// <summary>
+    /// One running container as an address, with no request host to read the proxy's published port from.
+    /// </summary>
+    /// <remarks>
+    /// The admin page that shows this is reached through the same proxy, so its own address carries the
+    /// port — but the command does not receive it, and inventing a setting for it would be a second place
+    /// for the deployment's port to be stated wrongly. A bare <c>http://host</c> is right whenever the proxy
+    /// is published on 80, which is the default.
+    /// </remarks>
     private static MarkingEndpoint Endpoint(PlannedSessionService service) =>
-        new(service.CompetitorUsername,
-            service.ServiceNumber,
+        new(service.ServiceNumber,
             service.ConfiguredImage,
             service.ContainerName,
+            ServiceUrl.For(service.Host, requestHost: null),
             service.PortMappings);
 
     /// <summary>

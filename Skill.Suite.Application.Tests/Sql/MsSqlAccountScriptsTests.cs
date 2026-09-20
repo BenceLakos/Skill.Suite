@@ -39,17 +39,6 @@ public sealed class MsSqlAccountScriptsTests
     }
 
     [Fact]
-    public void DroppingADatabaseDoesNotEvictWhoeverIsConnected()
-    {
-        // SET SINGLE_USER WITH ROLLBACK IMMEDIATE would kill live connections and drop the database anyway,
-        // defeating the active-connection check that makes removal refuse while a competitor is working.
-        var script = MsSqlAccountScripts.DropDatabase("c01");
-
-        Assert.DoesNotContain("SINGLE_USER", script, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ROLLBACK", script, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public void EveryStatementEscapesTheNameTheSameWay()
     {
         // One statement forgetting the escaping is all it takes, and the drop statements are the ones where
@@ -64,10 +53,10 @@ public sealed class MsSqlAccountScriptsTests
     }
 
     [Fact]
-    public void OwnershipIsGrantedOnTheDatabaseToTheLoginOfTheSameName() =>
-        Assert.Equal(
-            "ALTER AUTHORIZATION ON DATABASE::[c01] TO [c01];",
-            MsSqlAccountScripts.GrantDatabaseOwnership("c01"));
+    public void RemovingAnAccountTouchesNothingButTheLogin() =>
+        // The session databases hold the work a marking dispute is settled from, so removal must not be able
+        // to reach them even by accident.
+        Assert.Equal("DROP LOGIN [c01];", MsSqlAccountScripts.DropLogin("c01"));
 
     [Theory]
     [InlineData(MsSqlAccountScripts.LoginExists)]
@@ -84,6 +73,15 @@ public sealed class MsSqlAccountScriptsTests
         Assert.Contains("@@SPID", MsSqlAccountScripts.ActiveConnectionCount, StringComparison.Ordinal);
 
     [Fact]
+    public void TheConnectionCountAsksAboutTheLoginAndNotAboutAnyDatabase()
+    {
+        // Removal drops the login and leaves every database alone, so somebody connected to a session
+        // database under another login is not a reason to refuse.
+        Assert.Contains("login_name", MsSqlAccountScripts.ActiveConnectionCount, StringComparison.Ordinal);
+        Assert.DoesNotContain("sys.databases", MsSqlAccountScripts.ActiveConnectionCount, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheInventoryReadsBothLoginsAndDatabases()
     {
         Assert.Contains("sys.server_principals", MsSqlAccountScripts.Inventory, StringComparison.Ordinal);
@@ -94,9 +92,6 @@ public sealed class MsSqlAccountScriptsTests
     [
         MsSqlAccountScripts.CreateLogin(name, "passphrase"),
         MsSqlAccountScripts.CreateDatabase(name),
-        MsSqlAccountScripts.GrantDatabaseOwnership(name),
-        MsSqlAccountScripts.SetDefaultDatabase(name),
-        MsSqlAccountScripts.DropDatabase(name),
         MsSqlAccountScripts.DropLogin(name),
     ];
 }

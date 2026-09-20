@@ -19,10 +19,15 @@
         </MudTooltip>
     </MudStack>
 
+    <LabeledField Label="@T["sessions.dockerImage.domain"]" Help="@T["sessions.help.dockerImageDomain"]">
+        <MudTextField T="string" @bind-Value="Image.Domain"
+                      Variant="Variant.Outlined" MaxLength="253"
+                      Placeholder="shop.skills.local" Clearable="true"/>
+    </LabeledField>
+
     @*
-        Stated on every service card rather than once at the top of the tab: the rule decides how many
-        containers this particular service becomes, and an administrator typing a placeholder into an
-        environment value is looking here, not at the tab heading.
+        Stated on every service card rather than once at the top of the tab: an administrator typing a
+        placeholder into an environment value is looking here, not at the tab heading.
     *@
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-2">
         <MudText Typo="Typo.caption">@T["sessions.placeholders.rule"]</MudText>

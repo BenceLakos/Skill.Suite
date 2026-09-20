@@ -10,10 +10,17 @@ using Xunit;
 /// The distinction that matters here is Unknown versus Missing. The obvious reaction to "no account" is to
 /// press Provision, so reporting an unreachable system as Missing would have an admin creating accounts that
 /// already exist against a server nobody can talk to.
+/// <para>
+/// One rule covers both systems: an account is a git-host user on one side and a SQL Server login on the
+/// other, and nothing else on either. The SQL cases below are kept separate because that server is the one
+/// whose account used to mean more than a name in a list.
+/// </para>
 /// </remarks>
 public sealed class AccountStatusEvaluatorTests
 {
     private const string Unreachable = "the git host returned 502";
+
+    private const string SqlUnreachable = "the SQL Server is restarting";
 
     private static IReadOnlySet<string> Names(params string[] names) =>
         names.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -53,53 +60,33 @@ public sealed class AccountStatusEvaluatorTests
     }
 
     [Fact]
-    public void SqlServerNeedsBothTheLoginAndTheDatabase()
+    public void ASqlServerLoginOnItsOwnIsTheWholeAccount()
     {
-        var evaluation = AccountStatusEvaluator.EvaluateMsSql("c01", Names("c01"), Names("c01"), null);
+        // No database of the competitor's is looked for, because there is none to look for: the databases on
+        // the server belong to sessions and are created when a session starts.
+        var evaluation = AccountStatusEvaluator.Evaluate("c01", Names("sa", "c01"), null);
 
         Assert.Equal(ExternalAccountStatus.Exists, evaluation.Status);
         Assert.Null(evaluation.Detail);
     }
 
     [Fact]
-    public void ALoginWithoutItsDatabaseIsMissingAndSaysSo()
+    public void ACompetitorWithNoSqlServerLoginIsMissing()
     {
-        // The state a half-finished provision, or a manual DROP DATABASE, leaves behind. Reporting it as
-        // Exists would hide an account the competitor cannot actually connect to.
-        var evaluation = AccountStatusEvaluator.EvaluateMsSql("c01", Names("c01"), Names("master"), null);
-
-        Assert.Equal(ExternalAccountStatus.Missing, evaluation.Status);
-        Assert.Equal(AccountStatusEvaluator.LoginWithoutDatabase, evaluation.Detail);
-    }
-
-    [Fact]
-    public void ADatabaseWithoutItsLoginIsPlainlyMissing()
-    {
-        var evaluation = AccountStatusEvaluator.EvaluateMsSql("c01", Names("sa"), Names("c01"), null);
+        var evaluation = AccountStatusEvaluator.Evaluate("c01", Names("sa"), null);
 
         Assert.Equal(ExternalAccountStatus.Missing, evaluation.Status);
         Assert.Null(evaluation.Detail);
     }
 
     [Fact]
-    public void SqlServerMatchingIgnoresCase() =>
-        Assert.Equal(
-            ExternalAccountStatus.Exists,
-            AccountStatusEvaluator.EvaluateMsSql("C01", Names("c01"), Names("C01"), null).Status);
-
-    [Fact]
-    public void NoSqlServerSnapshotIsUnknown()
+    public void AnUnreadableSqlServerIsUnknownRatherThanMissing()
     {
-        var evaluation = AccountStatusEvaluator.EvaluateMsSql("c01", null, null, Unreachable);
+        // The login list is null because the inventory query failed, not because the server holds no logins.
+        // Missing here would have an admin re-provisioning twenty accounts that are already there.
+        var evaluation = AccountStatusEvaluator.Evaluate("c01", null, SqlUnreachable);
 
         Assert.Equal(ExternalAccountStatus.Unknown, evaluation.Status);
-        Assert.Equal(Unreachable, evaluation.Detail);
+        Assert.Equal(SqlUnreachable, evaluation.Detail);
     }
-
-    [Fact]
-    public void OneHalfOfTheSqlServerSnapshotMissingIsStillUnknown() =>
-        // Half an inventory cannot distinguish an absent account from an unread one.
-        Assert.Equal(
-            ExternalAccountStatus.Unknown,
-            AccountStatusEvaluator.EvaluateMsSql("c01", Names("c01"), null, Unreachable).Status);
 }

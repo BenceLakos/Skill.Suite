@@ -32,8 +32,14 @@ public sealed class CloseSessionHandler(
 
         try
         {
-            var removed = await containerServices.RemoveByLabelAsync(
-                SessionServiceLabels.SessionKey, session.Slug, cancellationToken);
+            // One label, deliberately: closing takes down everything the session ever started, competition
+            // containers and any marking containers left behind alike, because both carry the session label.
+            var removed = await containerServices.RemoveByLabelsAsync(
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [SessionServiceLabels.SessionKey] = session.Slug,
+                },
+                cancellationToken);
 
             logger.LogInformation(
                 "Session {SessionId} closed; {Removed} service container(s) removed.", session.Id, removed);

@@ -10,27 +10,32 @@ namespace Skill.Suite.Application.Abstractions;
 /// Nothing here is persisted on this side. The server is the only record of which competitor has an account,
 /// which is what keeps the page honest when a login is created or dropped from a SQL client instead.
 /// </para>
+/// <para>
+/// A competitor's ACCOUNT is the login and nothing more. Databases are a separate concern with a separate
+/// lifetime: each one belongs to a session, is created when that session starts, and outlives neither more nor
+/// less than the session does.
+/// </para>
 /// </remarks>
 public interface IMsSqlAdminClient
 {
     /// <summary>
-    /// Creates the login, its database, and makes the login the owner of that database.
+    /// Creates the login if it does not already exist.
     /// </summary>
     /// <remarks>
     /// An existing login's password is NOT reset — the same rule the git host side follows, so re-running
     /// provisioning never invalidates credentials a competitor is already using.
     /// </remarks>
-    Task<AccountProvisioning> EnsureLoginAndDatabaseAsync(
+    Task<AccountProvisioning> EnsureLoginAsync(
         MsSqlAccountRequest request, CancellationToken cancellationToken);
 
     /// <summary>
     /// Creates the database if it does not already exist.
     /// </summary>
     /// <remarks>
-    /// For a session database, which is one competitor's but is not owned by them: no login is made its
-    /// owner, and the access their login gets inside it is set by <see cref="GrantDatabaseAccessAsync"/> from
-    /// the session's read and write flags. That is the difference from
-    /// <see cref="EnsureLoginAndDatabaseAsync"/>, where the competitor owns their personal database outright.
+    /// The database is one competitor's but is not owned by them: no login is made its owner, and the access
+    /// their login gets inside it is set by <see cref="GrantDatabaseAccessAsync"/> from the session's read and
+    /// write flags. Access that a flag grants is access the same flag can take away again, which ownership
+    /// would put out of reach.
     /// </remarks>
     Task<AccountProvisioning> EnsureDatabaseAsync(
         string database, BasicCredential admin, CancellationToken cancellationToken);
@@ -69,16 +74,22 @@ public interface IMsSqlAdminClient
         BasicCredential admin, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Counts sessions other than this one that belong to the login or are connected to its database.
+    /// Counts sessions other than this one that belong to the login.
     /// </summary>
     /// <remarks>
-    /// A non-zero count is why removal refuses: dropping the database out from under a live connection is how
-    /// a competitor loses work they were in the middle of.
+    /// A non-zero count is why removal refuses: dropping the login someone is connected with cuts a competitor
+    /// off mid-statement, and the session database they were working in stays behind with nothing left that
+    /// can sign in to it.
     /// </remarks>
     Task<int> CountActiveConnectionsAsync(
         string name, BasicCredential admin, CancellationToken cancellationToken);
 
-    /// <summary>Drops the database and then the login. Destructive and not recoverable.</summary>
-    Task<AccountRemoval> DropLoginAndDatabaseAsync(
+    /// <summary>Drops the login. Destructive and not recoverable.</summary>
+    /// <remarks>
+    /// Only the login. The session databases it was granted access to are left exactly where they are, because
+    /// they hold the work a marking dispute is settled from and their lifetime is the session's, not the
+    /// account's.
+    /// </remarks>
+    Task<AccountRemoval> DropLoginAsync(
         string name, BasicCredential admin, CancellationToken cancellationToken);
 }
