@@ -1,0 +1,8 @@
+node_modules
+.git
+.gitea
+compose.yaml
+.env
+.env.example
+README.md
+sql

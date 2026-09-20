@@ -1,0 +1,9 @@
+services:
+  api:
+    build: .
+    image: familiarization-api:local
+    environment:
+      COMPETITOR_NAME: ${COMPETITOR_NAME:?set COMPETITOR_NAME}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

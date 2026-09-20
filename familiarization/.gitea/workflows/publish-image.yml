@@ -1,0 +1,153 @@
+name: publish-image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Extra image tag to apply (optional)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: familiarization-api
+
+jobs:
+  image:
+    name: build and publish the familiarization image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive image reference and tags
+        id: meta
+        env:
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
+          SERVER_URL: ${{ github.server_url }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+
+          host="${REGISTRY_HOST:-}"
+          if [ -z "${host}" ]; then
+            url="${SERVER_URL:-}"
+            url="${url%/}"
+            host="${url#*://}"
+            host="${host%%/*}"
+          fi
+          if [ -z "${host}" ]; then
+            echo "::error::cannot determine the registry host - set the REGISTRY_HOST variable" && exit 1
+          fi
+
+          owner="$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+          image="${host}/${owner}/${IMAGE_NAME}"
+          sha7="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+
+          case "${EVENT_NAME}" in
+            workflow_dispatch)
+              primary="dev-${sha7}"
+              names="${primary}"
+              if [ -n "${INPUT_TAG:-}" ]; then names="${names} ${INPUT_TAG}"; fi
+              ;;
+            *)
+              case "${REF}" in
+                refs/tags/v*)
+                  primary="${REF#refs/tags/v}"
+                  names="${primary} latest"
+                  ;;
+                refs/heads/main)
+                  primary="sha-${sha7}"
+                  names="latest ${primary}"
+                  ;;
+                *)
+                  primary="dev-${sha7}"
+                  names="${primary}"
+                  ;;
+              esac
+              ;;
+          esac
+
+          {
+            echo "registry=${host}"
+            echo "owner=${owner}"
+            echo "image=${image}"
+            echo "primary_tag=${primary}"
+            echo "tags<<EOF"
+            for name in ${names}; do echo "${image}:${name}"; done
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "will publish:"
+          for name in ${names}; do echo "  ${image}:${name}"; done
+
+      - name: Set up QEMU
+        if: vars.IMAGE_PLATFORMS != '' && vars.IMAGE_PLATFORMS != 'linux/amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=${{ vars.BUILDX_NETWORK || 'skill-suite' }}
+          buildkitd-config-inline: |
+            [registry."${{ steps.meta.outputs.registry }}"]
+              http = true
+              insecure = true
+
+      - name: Write registry credentials
+        env:
+          REGISTRY: ${{ steps.meta.outputs.registry }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -eu
+
+          if [ -z "${REGISTRY_USERNAME:-}" ] || [ -z "${REGISTRY_TOKEN:-}" ]; then
+            echo "::error::secrets REGISTRY_USERNAME and REGISTRY_TOKEN are not set. Create a personal access token" \
+                 "(Settings -> Applications, permission package: Read and Write) for the user that owns the" \
+                 "${REGISTRY} namespace and add both as Actions secrets on this repository or its owner."
+            exit 1
+          fi
+
+          auth="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 -w0 2>/dev/null \
+                  || printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_TOKEN}" | base64 | tr -d '\n')"
+
+          umask 077
+          mkdir -p "${HOME}/.docker"
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "${REGISTRY}" "${auth}" > "${HOME}/.docker/config.json"
+          chmod 600 "${HOME}/.docker/config.json"
+
+          echo "credentials for ${REGISTRY} written as ${REGISTRY_USERNAME}"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ vars.IMAGE_PLATFORMS || 'linux/amd64' }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache
+          cache-to: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
+
+      - name: Summary
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          PRIMARY_TAG: ${{ steps.meta.outputs.primary_tag }}
+        run: |
+          set -eu
+          echo "Pushed:"
+          printf '%s\n' "${TAGS}"
+          echo
+          echo "Nothing was started. Register the image in the Skill Suite UI:"
+          echo "  Docker images -> Pull  ${IMAGE}:${PRIMARY_TAG}"
+          echo "  Sessions -> services   environment COMPETITOR_NAME={{competitor.username}}"

@@ -29,6 +29,7 @@ README.md
 # session module lives here, that means hidden test suites, reference solutions and local-nuget/*.nupkg.
 # Secret hygiene, not build speed.
 judging
+familiarization
 **/local-nuget
 
 # ...with one exception. Skill.Suite.Application compiles the event protocol in from judging/ as shared source,
