@@ -19,15 +19,30 @@
   "personas": [
     {
       "name": "reference",
-      "comment": "The suite the module ships with. The calibration target.",
+      "comment": [
+        "The suite the module ships with. The calibration target.",
+        "Split across two test classes - CalculatorTests and DescribeTests - so the per-fixture assertions",
+        "have something to distinguish. With one class they would be satisfied by a judge that measured the",
+        "whole suite once and labelled the result with the only fixture name it could see.",
+        "",
+        "coverageTotal/coverageCovered are the only exact numbers in this file. Calculator.cs has three",
+        "coverable lines and the reference suite reaches all three, and unlike a kill rate that is a fact",
+        "about the implementation rather than a measurement with variance. They are asserted because the",
+        "judge once globbed the same cobertura report twice - coverlet's own and the TRX attachment copy -",
+        "and reported 6/6, which every band here waved through because the rate was still 1.0."
+      ],
       "exit": 0,
       "status": "Completed",
       "units": 5,
       "passed": 5,
       "markerError": false,
       "coverageMin": 0.9,
+      "coverageTotal": 3,
+      "coverageCovered": 3,
       "qualityMin": 0.9,
       "qualityMax": 1.0,
+      "fixtureMetrics": true,
+      "fixtureMetricsMin": 2,
       "env": { "JUDGE_MUTATION_TIMEOUT_SECONDS": "600" }
     },
     {

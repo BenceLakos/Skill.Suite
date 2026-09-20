@@ -14,10 +14,12 @@ dotnet tool install -g Skill.Suite.Marker
 skill-marker score --map /app/marking-map.json --events "$LOG_DIRECTORY/events.jsonl" \
   --trx "$TEST_RESULTS"/*.trx \
   --coverage "$TEST_RESULTS"/*/coverage.cobertura.xml \
-  --mutation /app/StrykerOutput/reports/mutation-report.json
+  --mutation /app/StrykerOutput/reports/mutation-report.json \
+  --fixture-coverage "$TEST_RESULTS/fixtures"
 ```
 
-Appends `test-summary`, `coverage`, `mutation` and `score` — one set per declared part plus `overall`.
+Appends `test-summary`, `coverage`, `mutation` and `score` — one set per declared part plus `overall` —
+and then a `coverage` and a `mutation` event per **test fixture**.
 
 **It appends; it never truncates.** It runs after the test host, and the platform reads the whole file
 once the container exits, so opening it for truncation would erase every test event the run produced and
@@ -27,6 +29,56 @@ host leaves — is repaired with a newline first.
 Missing inputs are warnings, not errors: a white-box session has no mutation report and still scores. The
 warnings are attached to the `overall` summary and echoed to stderr. They are *not* emitted under their
 own part name, because the platform turns every part into a fixture and that would litter the UI.
+
+### Per-fixture measurements
+
+Alongside the part rollups, `score` measures **each test class on its own** and emits
+
+```json
+{"event":"coverage","value":0.75,"total":8,"covered":6,"fixture":"WidgetTests"}
+{"event":"mutation","value":0.6667,"total":3,"covered":3,"killed":1,"survived":1,"timeout":1,"fixture":"WidgetTests"}
+```
+
+`fixture` replaces `part`, and never appears beside it. A part is a scoring unit the marking map declares; a
+fixture is a class the competitor happened to write, and the platform keeps them in separate name spaces so a
+test class called `services` cannot inherit a part's score. **No `score` event is ever emitted for a fixture** —
+quality stays a part-level verdict, exactly as before. These two are measurements, for showing a competitor
+which of their test classes did the work.
+
+The fixture name is the class's **simple** name, the same string `FixtureScope<T>` puts in `start-fixture`, so
+the events join onto fixtures already in the stream. The set of fixtures is the union of the classes named in
+the TRX and those named in the event stream.
+
+**Coverage** comes from `--fixture-coverage`, a directory whose immediate subdirectories are class names:
+
+```
+fixtures/
+  WidgetTests/<guid>/coverage.cobertura.xml
+  SmokeTests/<guid>/coverage.cobertura.xml
+```
+
+A directory rather than `Name=path` pairs, because the caller is a shell script and coverlet buries its report
+under an unpredictable GUID directory. Each report is summed whole, with the same direct-child `<line>` rule
+the rollup uses, so the classes are comparable with one another **and with the `overall` line counts** beside
+them. A class with no report gets **no event**, not a zero — nothing was measured, which is not the same as
+nothing was covered.
+
+**Mutation** comes from the same single Stryker report as the rollup, via `testFiles[*].tests[]` (test id →
+name) and each mutant's `coveredBy` / `killedBy`. A class's `covered` is the mutants at least one of its tests
+reached; `killed` is those at least one of its tests detected; a `Timeout` counts as a kill, as in the rollup.
+`total` equals `covered`: a mutant the class never touched is not its business.
+
+That needs two settings in `stryker-config.json`:
+
+```jsonc
+"coverage-analysis": "perTest",   // or there is no coveredBy to attribute by
+"disable-bail": true              // or Stryker stops at the first killing test
+```
+
+With bail on, `killedBy` names one test and every other class that would have caught the same mutant is
+recorded as having missed it. A report without per-test data produces a `no-per-fixture-mutation` warning on
+the `overall` summary and **no** fixture mutation events — a page of zeroes would read as a finding about the
+submission rather than about the image's configuration.
 
 ### The quality formula
 
@@ -117,5 +169,14 @@ paths split on `.`, `/` and `\` — so a file's own stem is a segment too, and p
 Keep stderr terse: on a non-zero container exit the platform pastes it into the run's failure reason.
 
 `--trx` and `--coverage` accept several paths and may be repeated, so an expanded shell glob works
-directly. A missing or corrupt TRX, coverage or mutation report is skipped rather than fatal; only an
-unusable marking map or an unwritable events file fails the run.
+directly. `--fixture-coverage` takes exactly one directory, because its subdirectory names are the data. A
+missing or corrupt TRX, coverage or mutation report is skipped rather than fatal; only an unusable marking map
+or an unwritable events file fails the run.
+
+**Coverage reports are deduplicated by content hash**, so passing the same report twice is harmless. A glob
+over `TestResults` finds one: a run with `--logger trx` leaves coverlet's own
+`TestResults/<guid>/coverage.cobertura.xml` and a byte-identical copy attached to the TRX under
+`TestResults/<run>/In/<host>/`. Summing both doubled `total` and `covered` — the numbers the platform stores
+and displays — while leaving the rate, and so the score, untouched, which is why it went unnoticed. Two
+reports with *different* content still sum, so a multi-project run is unaffected. TRX files carry no such
+attachment copy of themselves and are not deduplicated.

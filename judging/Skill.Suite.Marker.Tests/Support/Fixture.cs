@@ -6,6 +6,8 @@ internal static class Fixture
     internal const string Cobertura = "cobertura-sample.xml";
     internal const string Trx = "results-sample.trx";
     internal const string Stryker = "stryker-sample.json";
+    internal const string StrykerPerTest = "stryker-per-test.json";
+    internal const string FixtureCoverage = "fixture-coverage";
     internal const string MapTwoParts = "map-two-parts.json";
     internal const string MapOverallOnly = "map-overall-only.json";
     internal const string MapObjectParts = "map-object-parts.json";

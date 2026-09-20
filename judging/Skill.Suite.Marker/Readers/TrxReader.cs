@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using Skill.Suite.TestLog.Protocol;
 using Skill.Suite.Marker.Model;
 
 namespace Skill.Suite.Marker.Readers;
@@ -49,6 +50,46 @@ public static class TrxReader
         }
 
         return counts;
+    }
+
+    /// <summary>Names the test classes the run actually executed, as fixture names.</summary>
+    /// <param name="paths">TRX file paths. Missing and unparsable files are skipped.</param>
+    /// <returns>Distinct fixture names, in no particular order.</returns>
+    /// <remarks>
+    /// The TRX is the authority on which test classes exist, because it is written by the runner rather than by
+    /// code inside the submission. The event stream is the other source and neither is complete on its own: a
+    /// class whose every test was skipped still appears here, and a class the harness opened without the runner
+    /// recording a result appears only there.
+    /// </remarks>
+    public static IReadOnlyCollection<string> ReadFixtureNames(IEnumerable<string> paths)
+    {
+        var fixtures = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var path in paths)
+        {
+            if (!File.Exists(path)) continue;
+
+            XDocument document;
+            try
+            {
+                document = XDocument.Load(path);
+            }
+            catch (Exception ex) when (ex is System.Xml.XmlException or IOException)
+            {
+                continue;
+            }
+
+            var ns = document.Root?.GetDefaultNamespace() ?? XNamespace.None;
+            if (ns == XNamespace.None) ns = TrxNamespace;
+
+            foreach (var unitTest in document.Descendants(ns + "UnitTest"))
+            {
+                var className = unitTest.Element(ns + "TestMethod")?.Attribute("className")?.Value;
+                if (FixtureNames.FromTypeName(className) is { } fixture) fixtures.Add(fixture);
+            }
+        }
+
+        return fixtures;
     }
 
     private static void Accumulate(

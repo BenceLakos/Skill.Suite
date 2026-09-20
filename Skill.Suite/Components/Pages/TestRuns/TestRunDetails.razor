@@ -184,6 +184,18 @@ else
                         <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Style="width:100%">
                             <MudIcon Icon="@FixtureIcon(fixture)" Color="@FixtureColor(fixture)" Size="Size.Small"/>
                             <MudText Typo="Typo.body1" Style="flex-grow:1">@fixture.Name</MudText>
+                            @if (fixture.LineCoverage.HasValue)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@QualityColor(fixture.LineCoverage.Value)">
+                                    @T["testRuns.field.coverage"] @FormatQuality(fixture.LineCoverage.Value)
+                                </MudChip>
+                            }
+                            @if (fixture.MutationScore.HasValue)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@QualityColor(fixture.MutationScore.Value)">
+                                    @T["testRuns.field.mutation"] @FormatQuality(fixture.MutationScore.Value)
+                                </MudChip>
+                            }
                             @if (fixture.Quality.HasValue)
                             {
                                 <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@QualityColor(fixture.Quality.Value)">

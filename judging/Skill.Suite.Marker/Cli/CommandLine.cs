@@ -81,7 +81,7 @@ public static class CommandLine
                     existing.AddRange(values);
                     break;
 
-                case "--map" or "--events" or "--mutation" or "--out":
+                case "--map" or "--events" or "--mutation" or "--out" or "--fixture-coverage":
                     if (values.Count != 1)
                     {
                         error = values.Count == 0
@@ -123,9 +123,10 @@ public static class CommandLine
         }
 
         if (verb == MarkerVerb.Report &&
-            (multiple.ContainsKey("--trx") || multiple.ContainsKey("--coverage") || single.ContainsKey("--mutation")))
+            (multiple.ContainsKey("--trx") || multiple.ContainsKey("--coverage")
+             || single.ContainsKey("--mutation") || single.ContainsKey("--fixture-coverage")))
         {
-            error = "report reads only --events; --trx, --coverage and --mutation are score options.";
+            error = "report reads only --events; --trx, --coverage, --fixture-coverage and --mutation are score options.";
             return null;
         }
 
@@ -136,6 +137,7 @@ public static class CommandLine
             multiple.GetValueOrDefault("--trx"),
             multiple.GetValueOrDefault("--coverage"),
             single.GetValueOrDefault("--mutation"),
-            single.GetValueOrDefault("--out", ""));
+            single.GetValueOrDefault("--out", ""),
+            single.GetValueOrDefault("--fixture-coverage"));
     }
 }

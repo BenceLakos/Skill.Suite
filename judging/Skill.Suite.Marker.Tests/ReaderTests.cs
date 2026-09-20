@@ -76,6 +76,66 @@ public sealed class ReaderTests
         Assert.Equal(300, coverage[MarkingMap.OverallPart].LinesTotal);
     }
 
+    [Fact]
+    public void Cobertura_CountsTheSamePathTwiceOnlyOnce()
+    {
+        // The judge globs TestResults for coverage.cobertura.xml and a careless glob returns the same file
+        // more than once. Summing it twice doubled total and covered while leaving the rate intact, so the
+        // platform stored and displayed line counts that contradicted the report's own lines-valid.
+        var once = CoberturaReader.Read([Fixture.Path(Fixture.Cobertura)], TwoParts);
+        var twice = CoberturaReader.Read(
+            [Fixture.Path(Fixture.Cobertura), Fixture.Path(Fixture.Cobertura)], TwoParts);
+
+        Assert.Equal(once[MarkingMap.OverallPart], twice[MarkingMap.OverallPart]);
+        Assert.Equal(once["services"], twice["services"]);
+        Assert.Equal(300, twice[MarkingMap.OverallPart].LinesTotal);
+    }
+
+    [Fact]
+    public void Cobertura_CountsIdenticalReportsAtDifferentPathsOnlyOnce()
+    {
+        // The real shape of the bug: coverlet's report under a run GUID, and the byte-identical copy VSTest
+        // attaches to the TRX under <run>/In/<host>/. Two paths, one measurement.
+        using var workspace = new TempWorkspace();
+        var content = File.ReadAllText(Fixture.Path(Fixture.Cobertura));
+        var original = workspace.WriteFile("run-guid-coverage.cobertura.xml", content);
+        var attachment = workspace.WriteFile("trx-attachment-coverage.cobertura.xml", content);
+
+        var coverage = CoberturaReader.Read([original, attachment], TwoParts);
+
+        Assert.Equal(new CoverageStats(269, 300), coverage[MarkingMap.OverallPart]);
+    }
+
+    [Fact]
+    public void Cobertura_StillSumsReportsWithDifferentContent()
+    {
+        // Deduplication is by content, not "take the first": a multi-project run legitimately produces one
+        // report per project and those must still add up.
+        using var workspace = new TempWorkspace();
+        var extra = workspace.WriteFile(
+            "other.cobertura.xml",
+            """
+            <coverage>
+              <packages>
+                <package>
+                  <classes>
+                    <class filename="Services/Extra.cs">
+                      <lines>
+                        <line number="1" hits="1" />
+                        <line number="2" hits="0" />
+                      </lines>
+                    </class>
+                  </classes>
+                </package>
+              </packages>
+            </coverage>
+            """);
+
+        var coverage = CoberturaReader.Read([Fixture.Path(Fixture.Cobertura), extra], TwoParts);
+
+        Assert.Equal(new CoverageStats(270, 302), coverage[MarkingMap.OverallPart]);
+    }
+
     // ---------- TRX ----------
 
     [Fact]

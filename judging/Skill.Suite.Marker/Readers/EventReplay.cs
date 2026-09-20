@@ -42,6 +42,35 @@ public static class EventReplay
         return [.. order.Select(key => units[key].Build())];
     }
 
+    /// <summary>Names every fixture the stream mentions.</summary>
+    /// <param name="path">Path to the events file. An absent file yields nothing rather than failing.</param>
+    /// <returns>Distinct fixture names, in no particular order.</returns>
+    /// <remarks>
+    /// Read from the harness's own <c>start-fixture</c> and per-test events, so the names are exactly the
+    /// strings a fixture-scoped metric has to match. Absent-is-empty rather than absent-is-an-error, because
+    /// the marker's own event file may not exist yet on a run that produced no tests at all.
+    /// </remarks>
+    public static IReadOnlyCollection<string> ReadFixtureNames(string path)
+    {
+        var fixtures = new HashSet<string>(StringComparer.Ordinal);
+
+        if (!File.Exists(path)) return fixtures;
+
+        foreach (var @event in TestLogEventReader.ReadFile(path))
+        {
+            var name = @event switch
+            {
+                StartFixtureEvent e => e.Fixture,
+                FinishFixtureEvent e => e.Fixture,
+                _ => Identify(@event)?.Fixture,
+            };
+
+            if (!string.IsNullOrWhiteSpace(name)) fixtures.Add(name);
+        }
+
+        return fixtures;
+    }
+
     private static void Apply(
         TestLogEvent @event,
         Dictionary<(string Fixture, string Test), Builder> units,

@@ -192,6 +192,27 @@ public sealed class RoundTripTests
     }
 
     [Fact]
+    public void Coverage_ForAFixture_CarriesTheFixtureAndNoPart()
+    {
+        var read = AssertRoundTrip(new CoverageEvent(null, 0.4, 100, 40, "WidgetTests"));
+
+        var evt = Assert.IsType<CoverageEvent>(read);
+        Assert.Equal("WidgetTests", evt.Fixture);
+        Assert.Null(evt.Part);
+    }
+
+    [Fact]
+    public void Coverage_ForAPart_CarriesNoFixtureField()
+    {
+        // Absent rather than null on the wire, so a part-scoped event is byte-identical to what every judge
+        // image emitted before fixture scoping existed.
+        var line = Write(new CoverageEvent("services", 0.9308, 289, 269));
+
+        Assert.DoesNotContain("fixture", line, StringComparison.Ordinal);
+        Assert.Null(Assert.IsType<CoverageEvent>(TestLogEventReader.Read(line)).Fixture);
+    }
+
+    [Fact]
     public void Mutation()
     {
         var read = AssertRoundTrip(new MutationEvent("services", 0.7143, 100, 85, 55, 25, 5, 15, 0));
@@ -201,6 +222,32 @@ public sealed class RoundTripTests
         Assert.Equal(25, evt.Survived);
         Assert.Equal(85, evt.Covered);
         Assert.Equal(100, evt.Total);
+    }
+
+    [Fact]
+    public void Mutation_ForAFixture_CarriesTheFixtureAndNoPart()
+    {
+        var read = AssertRoundTrip(new MutationEvent(null, 0.75, 8, 8, 5, 2, 1, 0, 0, "WidgetTests"));
+
+        var evt = Assert.IsType<MutationEvent>(read);
+        Assert.Equal("WidgetTests", evt.Fixture);
+        Assert.Null(evt.Part);
+        Assert.Equal(evt.Covered, evt.Total);
+    }
+
+    [Fact]
+    public void AFixtureScopedEventIsStillReadableWhenTheFieldIsNotKnown()
+    {
+        // The backward-compatibility promise, exercised the only way it can be from inside this version: an
+        // unrecognised property is ignored rather than discarding the event. That is what lets a judge image
+        // emitting fixture-scoped metrics run against a platform that has never heard of them.
+        const string line = """
+            {"event":"coverage","part":null,"value":0.4,"total":100,"covered":40,"invented-later":"x"}
+            """;
+
+        var evt = Assert.IsType<CoverageEvent>(TestLogEventReader.Read(line));
+        Assert.Equal(0.4, evt.Value);
+        Assert.Equal(40, evt.Covered);
     }
 
     [Fact]

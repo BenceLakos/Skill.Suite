@@ -81,6 +81,19 @@ public static class TestLogParser
                     Passed: e.Passed));
                 break;
 
+            // Fixture-scoped measurements, matched BEFORE the general metric arm. They are the same two event
+            // kinds, distinguished only by carrying a `fixture` instead of a `part` — so ordering is what keeps
+            // a test class out of the metric-part name space, where it would collide with a scoring part.
+            case CoverageEvent { Fixture: { Length: > 0 } fixture } e:
+                run.RecordFixtureMetric(
+                    fixture, TestFixtureMetric.LineCoverage, e.Event, timestamp, e.RawLine, e.Value);
+                break;
+
+            case MutationEvent { Fixture: { Length: > 0 } fixture } e:
+                run.RecordFixtureMetric(
+                    fixture, TestFixtureMetric.MutationScore, e.Event, timestamp, e.RawLine, e.Value);
+                break;
+
             // One arm for all four metric kinds. Previously this was a four-way fallthrough plus a string
             // comparison to find the one that carried a quality; the shared headline value makes it a type test.
             case MetricEvent e:

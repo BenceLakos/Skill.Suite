@@ -36,9 +36,6 @@ public sealed class CalculatorTests : LoggedTest<CalculatorTests>, IClassFixture
     public void Divide_ByZero_ReturnsZeroSentinel() =>
         Log.AssertEqual(0, _svc.Divide(9, 0));
 
-    // Hidden from the competitor's own score, but still graded - exercises the CompetitorVisible flag.
-    [Aspect("F3.1")]
-    [Fact]
-    public void Describe_ReturnsNonNull() =>
-        Log.AssertNotNull(_svc.Describe());
+    // Describe_ReturnsNonNull lives in DescribeTests, so this persona has two fixtures with different
+    // footprints - see the note there.
 }

@@ -44,6 +44,45 @@ public sealed class CommandLineTests
     }
 
     [Fact]
+    public void Score_TakesOneFixtureCoverageDirectory()
+    {
+        var command = Parse("score", "--map", "m.json", "--events", "e.jsonl",
+            "--fixture-coverage", "TestResults/fixtures");
+
+        Assert.Equal("TestResults/fixtures", command.FixtureCoveragePath);
+    }
+
+    [Fact]
+    public void Score_RejectsSeveralFixtureCoverageDirectories()
+    {
+        // One directory, because its subdirectory names are the fixture names. A second one would silently
+        // shadow the first rather than merge with it.
+        Assert.Null(CommandLine.Parse(
+            ["score", "--map", "m.json", "--events", "e.jsonl", "--fixture-coverage", "a", "b"], out var error));
+
+        Assert.Contains("--fixture-coverage", error!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Score_WithoutFixtureCoverage_LeavesItUnset()
+    {
+        var command = Parse("score", "--map", "m.json", "--events", "e.jsonl");
+
+        Assert.Null(command.FixtureCoveragePath);
+    }
+
+    [Fact]
+    public void Report_RejectsFixtureCoverage()
+    {
+        Assert.Null(CommandLine.Parse(
+            ["report", "--map", "m.json", "--events", "e.jsonl", "--out", "cis.csv",
+             "--fixture-coverage", "fixtures"],
+            out var error));
+
+        Assert.Contains("--fixture-coverage", error!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Report_RequiresAnOutputPath()
     {
         Assert.Null(CommandLine.Parse(["report", "--map", "m.json", "--events", "e.jsonl"], out var error));
