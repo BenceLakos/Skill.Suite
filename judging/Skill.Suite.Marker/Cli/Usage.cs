@@ -11,6 +11,7 @@ public static class Usage
           skill-marker score  --map <marking-map.json> --events <events.jsonl>
                               [--trx <results.trx>...] [--coverage <cobertura.xml>...]
                               [--mutation <mutation-report.json>]
+                              [--fixture-coverage <per-fixture-coverage-dir>]
 
           skill-marker report --map <marking-map.json> --events <events.jsonl>
                               --out <cis-report.csv>
@@ -23,6 +24,22 @@ public static class Usage
           the events file, one set per declared part plus "overall". A missing input is named in the
           overall test-summary's warnings rather than failing the run, so a session without mutation
           testing still scores.
+
+          It then appends a coverage and a mutation event per TEST FIXTURE - one per test class in
+          the submission, carrying "fixture" instead of "part". These are measurements only: the
+          quality score is still computed per part and per "overall", and a fixture never gets one.
+
+          --fixture-coverage names a directory whose IMMEDIATE SUBDIRECTORIES are test class names,
+          each holding that class's own coverage run - the shape produced by one filtered
+          `dotnet test --collect:"XPlat Code Coverage"` per class:
+
+              fixture-coverage/CalculatorTests/<guid>/coverage.cobertura.xml
+
+          A class with no report there gets no coverage event, rather than a zero. Per-fixture
+          mutation comes from the SAME Stryker report as the rollup, via testFiles/coveredBy/killedBy,
+          so it needs "coverage-analysis": "perTest" and "disable-bail": true - with bail on, Stryker
+          stops at the first killing test and every other class looks as though it missed the mutant.
+          A report without that data is reported as a warning instead of as a page of zeroes.
 
         report
           Groups finished unit tests by their [Aspect] id and writes:

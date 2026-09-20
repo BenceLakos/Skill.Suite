@@ -24,9 +24,12 @@ public static class ScoreCommand
         var coverage = CoberturaReader.Read(command.Coverage, router);
         var mutation = StrykerReader.Read(command.MutationPath, router);
 
+        var fixtureCoverage = FixtureCoverageReader.Read(command.FixtureCoveragePath);
+        var fixtureMutation = StrykerReader.ReadByFixture(command.MutationPath);
+
         using var sink = new EventSink(command.EventsPath);
 
-        var warnings = MissingInputWarnings(command);
+        var warnings = MissingInputWarnings(command, fixtureMutation);
         foreach (var warning in warnings)
             Console.Error.WriteLine($"skill-marker: {warning}");
 
@@ -83,15 +86,84 @@ public static class ScoreCommand
                     MutationScore: score.MutationScore,
                     Core: score.Core)));
         }
+
+        WriteFixtureMetrics(command, sink, fixtureCoverage, fixtureMutation);
+    }
+
+    /// <summary>
+    /// Appends the per-test-class measurements, after every part has been scored.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Strictly additive, and deliberately carries no score. A part is a scoring unit declared in the marking
+    /// map; a fixture is a class the competitor happened to write. Scoring one would invent marks the map never
+    /// authorised, and letting a fixture name reach the <c>part</c> field would collide the two name spaces in
+    /// the platform's fixture table — which is the whole reason these events carry <c>fixture</c> instead.
+    /// </para>
+    /// <para>
+    /// Absence is reported as absence: a class with no coverage report gets no coverage event, rather than a
+    /// zero that reads as "this class covered nothing".
+    /// </para>
+    /// </remarks>
+    private static void WriteFixtureMetrics(
+        MarkerCommand command,
+        EventSink sink,
+        IReadOnlyDictionary<string, CoverageStats> fixtureCoverage,
+        FixtureMutation fixtureMutation)
+    {
+        foreach (var fixture in Fixtures(command))
+        {
+            if (fixtureCoverage.TryGetValue(fixture, out var lines))
+            {
+                sink.Write(new CoverageEvent(
+                    Part: null,
+                    Value: Scorer.Round(lines.Rate),
+                    Total: lines.LinesTotal,
+                    Covered: lines.LinesCovered,
+                    Fixture: fixture));
+            }
+
+            if (fixtureMutation.ByFixture.TryGetValue(fixture, out var mutants))
+            {
+                sink.Write(new MutationEvent(
+                    Part: null,
+                    Value: Scorer.Round(mutants.KillRate),
+                    Total: mutants.Total,
+                    Covered: mutants.Covered,
+                    Killed: mutants.Killed,
+                    Survived: mutants.Survived,
+                    Timeout: mutants.Timeout,
+                    NoCoverage: mutants.NoCoverage,
+                    Other: mutants.Other,
+                    Fixture: fixture));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every test class the run knows about, from both sources that know any of them.
+    /// </summary>
+    /// <remarks>
+    /// Sorted so a diff of two runs of the same submission is about the numbers rather than about enumeration
+    /// order.
+    /// </remarks>
+    private static IEnumerable<string> Fixtures(MarkerCommand command)
+    {
+        var fixtures = new SortedSet<string>(StringComparer.Ordinal);
+        fixtures.UnionWith(TrxReader.ReadFixtureNames(command.Trx));
+        fixtures.UnionWith(EventReplay.ReadFixtureNames(command.EventsPath));
+        return fixtures;
     }
 
     /// <summary>
     /// Names the absent inputs rather than failing on them. A white-box session legitimately has no
     /// mutation report — but a silently absent one is indistinguishable from a suite that killed nothing.
     /// </summary>
-    private static List<string> MissingInputWarnings(MarkerCommand command)
+    private static List<string> MissingInputWarnings(MarkerCommand command, FixtureMutation fixtureMutation)
     {
         var warnings = new List<string>();
+        var hasMutationReport =
+            !string.IsNullOrWhiteSpace(command.MutationPath) && File.Exists(command.MutationPath);
 
         if (!command.Trx.Any(File.Exists))
             warnings.Add("no-trx: no readable TRX file was given, so every pass rate is 0.");
@@ -99,8 +171,19 @@ public static class ScoreCommand
         if (!command.Coverage.Any(File.Exists))
             warnings.Add("no-coverage: no readable coverage file was given, so coverage is 0.");
 
-        if (string.IsNullOrWhiteSpace(command.MutationPath) || !File.Exists(command.MutationPath))
+        if (!hasMutationReport)
             warnings.Add("no-mutation-report: no readable mutation report was given, so the mutation score is 0.");
+
+        // Only worth saying when there was a report to read. Said at all because the alternative — a mutation
+        // event reading 0 for every test class — looks like a finding about the submission rather than about
+        // how the judge image was configured.
+        else if (!fixtureMutation.PerTest)
+        {
+            warnings.Add(
+                "no-per-fixture-mutation: the mutation report carries no per-test data, so no per-fixture "
+                + "mutation was computed. Set \"coverage-analysis\": \"perTest\" and \"disable-bail\": true in "
+                + "stryker-config.json.");
+        }
 
         return warnings;
     }

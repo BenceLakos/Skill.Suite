@@ -143,6 +143,83 @@ public sealed class ScoreCommandTests
     }
 
     [Fact]
+    public void Score_EmitsCoverageAndMutationPerTestClass()
+    {
+        using var workspace = new TempWorkspace();
+        var events = workspace.WriteFile("events.jsonl", "");
+
+        RunWithFixtureMetrics(events, Fixture.MapTwoParts);
+
+        var fixtures = ParseFixtureEvents(events);
+
+        foreach (var name in new[] { "WidgetTests", "SmokeTests" })
+        {
+            Assert.Single(fixtures, e => e.Event == "coverage" && e.Fixture == name);
+            Assert.Single(fixtures, e => e.Event == "mutation" && e.Fixture == name);
+        }
+
+        // MiscTests ran, so it is mutated; it just has no coverage report of its own.
+        Assert.Single(fixtures, e => e.Event == "mutation" && e.Fixture == "MiscTests");
+        Assert.DoesNotContain(fixtures, e => e.Event == "coverage" && e.Fixture == "MiscTests");
+    }
+
+    [Fact]
+    public void Score_CarriesTheHandComputedFixtureNumbersThrough()
+    {
+        using var workspace = new TempWorkspace();
+        var events = workspace.WriteFile("events.jsonl", "");
+
+        RunWithFixtureMetrics(events, Fixture.MapTwoParts);
+        var fixtures = ParseFixtureEvents(events);
+
+        var coverage = fixtures.Single(e => e.Event == "coverage" && e.Fixture == "WidgetTests");
+        Assert.Equal(8, coverage.Root.GetProperty("total").GetInt32());
+        Assert.Equal(6, coverage.Root.GetProperty("covered").GetInt32());
+        Assert.Equal(0.75, coverage.Root.GetProperty("value").GetDouble());
+
+        var mutation = fixtures.Single(e => e.Event == "mutation" && e.Fixture == "SmokeTests");
+        Assert.Equal(3, mutation.Root.GetProperty("covered").GetInt32());
+        Assert.Equal(1, mutation.Root.GetProperty("killed").GetInt32());
+        Assert.Equal(1, mutation.Root.GetProperty("survived").GetInt32());
+    }
+
+    [Fact]
+    public void Score_NeverScoresAFixtureAndNeverNamesOneAsAPart()
+    {
+        using var workspace = new TempWorkspace();
+        var events = workspace.WriteFile("events.jsonl", "");
+
+        RunWithFixtureMetrics(events, Fixture.MapTwoParts);
+        var appended = ParseEvents(events);
+
+        // The contract the platform's fixture table depends on: quality is a part-level verdict, and a test
+        // class is not a part. Mixing the two name spaces would attach a score to a competitor's own class.
+        Assert.All(appended.Where(e => e.Event is "score" or "test-summary"),
+            e => Assert.False(e.Root.TryGetProperty("fixture", out _)));
+
+        Assert.Equal(3, appended.Count(e => e.Event == "score"));
+        Assert.All(appended.Where(e => e.Root.TryGetProperty("fixture", out _)),
+            e => Assert.False(e.Root.TryGetProperty("part", out var part) && part.ValueKind != JsonValueKind.Null));
+    }
+
+    [Fact]
+    public void Score_WithoutPerTestMutationData_WarnsInsteadOfPublishingZeroes()
+    {
+        using var workspace = new TempWorkspace();
+        var events = workspace.WriteFile("events.jsonl", "");
+
+        // The rollup report: valid, and simply unable to say which class killed what.
+        Run(workspace, events, Fixture.MapTwoParts);
+
+        var appended = ParseEvents(events);
+        var overall = appended.Single(e => e.Event == "test-summary" && e.Part == "overall");
+        var warnings = overall.Root.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!).ToArray();
+
+        Assert.Contains(warnings, w => w.StartsWith("no-per-fixture-mutation", StringComparison.Ordinal));
+        Assert.DoesNotContain(appended, e => e.Root.TryGetProperty("fixture", out _));
+    }
+
+    [Fact]
     public void EventSink_CreatesTheFileWhenItIsAbsent()
     {
         using var workspace = new TempWorkspace();
@@ -170,6 +247,24 @@ public sealed class ScoreCommandTests
             MarkingMapLoader.Load(mapPath));
     }
 
+    /// <summary>The same run with the per-fixture inputs a black-box judge image supplies.</summary>
+    private static void RunWithFixtureMetrics(string events, string mapName)
+    {
+        var mapPath = Fixture.Path(mapName);
+
+        ScoreCommand.Run(
+            new MarkerCommand(
+                MarkerVerb.Score, mapPath, events,
+                TrxPaths: [Fixture.Path(Fixture.Trx)],
+                CoveragePaths: [Fixture.Path(Fixture.Cobertura)],
+                MutationPath: Fixture.Path(Fixture.StrykerPerTest),
+                FixtureCoveragePath: Fixture.Path(Fixture.FixtureCoverage)),
+            MarkingMapLoader.Load(mapPath));
+    }
+
+    private static List<AppendedEvent> ParseFixtureEvents(string path) =>
+        [.. ParseEvents(path).Where(e => e.Fixture is not null)];
+
     /// <summary>
     /// Reads the metric events back through the shared reader rather than probing JSON by hand.
     /// </summary>
@@ -187,11 +282,20 @@ public sealed class ScoreCommandTests
             if (TestLogEventReader.Read(line) is not MetricEvent metric) continue;
 
             using var document = JsonDocument.Parse(line);
-            events.Add(new AppendedEvent(metric.Event, metric.PartOrOverall, document.RootElement.Clone(), metric));
+            var fixture = metric switch
+            {
+                CoverageEvent e => e.Fixture,
+                MutationEvent e => e.Fixture,
+                _ => null,
+            };
+
+            events.Add(new AppendedEvent(
+                metric.Event, metric.PartOrOverall, document.RootElement.Clone(), metric, fixture));
         }
 
         return events;
     }
 
-    private sealed record AppendedEvent(string Event, string Part, JsonElement Root, MetricEvent Typed);
+    private sealed record AppendedEvent(
+        string Event, string Part, JsonElement Root, MetricEvent Typed, string? Fixture = null);
 }

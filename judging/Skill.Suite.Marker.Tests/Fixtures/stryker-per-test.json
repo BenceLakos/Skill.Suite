@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "2",
+  "thresholds": { "high": 80, "low": 60 },
+
+  "//": [
+    "A Stryker report as written with coverage-analysis perTest and bail off: testFiles names every test,",
+    "and each mutant records which of them reached it and which of them detected it.",
+    "",
+    "Hand-checkable on purpose. Per fixture:",
+    "  WidgetTests  killed 1 (m1) survived 1 (m2) timeout 1 (m3)  -> covered 3, kill rate 2/3",
+    "  SmokeTests   survived 1 (m1) timeout 1 (m3) killed 1 (m5)  -> covered 3, kill rate 2/3",
+    "  MiscTests    killed 1 (m6)                                 -> covered 1, kill rate 1",
+    "",
+    "m1 is the row that justifies bail being off: two classes reach it, only one kills it. With bail on,",
+    "Stryker would have stopped at t1 and SmokeTests' honest miss would be indistinguishable from a run",
+    "that was never allowed to try.",
+    "",
+    "MiscTests' one test reports a bare display name with no class in it, so its fixture has to come from",
+    "the file it was found in."
+  ],
+
+  "testFiles": {
+    "/src/Tests/WidgetTests.cs": {
+      "tests": [
+        { "id": "t1", "name": "Acme.Services.WidgetTests.Build_Works" },
+        { "id": "t2", "name": "Acme.Services.WidgetTests.Build_Handles(value: 1.5)" }
+      ]
+    },
+    "/src/Tests/SmokeTests.cs": {
+      "tests": [
+        { "id": "t3", "name": "Acme.Program.SmokeTests.Runs" }
+      ]
+    },
+    "/src/Tests/MiscTests.cs": {
+      "tests": [
+        { "id": "t4", "name": "Misc_Bare" }
+      ]
+    }
+  },
+
+  "files": {
+    "/src/Services/Widget.cs": {
+      "language": "cs",
+      "source": "// elided",
+      "mutants": [
+        { "id": "m1", "status": "Killed", "mutatorName": "Equality", "coveredBy": ["t1", "t3"], "killedBy": ["t1"] },
+        { "id": "m2", "status": "Survived", "mutatorName": "String", "coveredBy": ["t1", "t2"], "killedBy": [] },
+        { "id": "m3", "status": "Timeout", "mutatorName": "Linq", "coveredBy": ["t2", "t3"], "killedBy": [] },
+        { "id": "m4", "status": "NoCoverage", "mutatorName": "Statement", "coveredBy": [] },
+        { "id": "m5", "status": "Killed", "mutatorName": "Boolean", "coveredBy": ["t3"], "killedBy": ["t3"] }
+      ]
+    },
+    "/src/Program.cs": {
+      "language": "cs",
+      "source": "// elided",
+      "mutants": [
+        { "id": "m6", "status": "Killed", "mutatorName": "Arithmetic", "coveredBy": ["t4"], "killedBy": ["t4"] },
+        { "id": "m7", "status": "CompileError", "mutatorName": "Assignment" }
+      ]
+    }
+  }
+}
