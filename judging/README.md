@@ -106,6 +106,12 @@ Metric events share one vocabulary — `value`, `total`, `covered` — with the 
 `ScoreEvent.Value` is functionally consumed; it becomes the fixture's quality and drives the competitor's score
 bucket.
 
+A metric event is scoped either to a **part** — a scoring unit the marking map declares, plus the reserved
+`overall` rollup — or, for `coverage` and `mutation` only, to a **fixture**: one of the competitor's own test
+classes, measured on its own. The two never appear on the same event, and the platform keeps them in separate
+rows, because a part and a test class can share a name and mean entirely different things. Only parts are
+scored; a fixture-scoped event is a measurement shown beside the class, never a mark.
+
 ## The events.jsonl write-ordering contract
 
 Three different writers touch the same file during a black-box run, and only one of them truncates.

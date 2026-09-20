@@ -19,7 +19,12 @@
   "personas": [
     {
       "name": "reference",
-      "comment": "The suite the module ships with. The calibration target.",
+      "comment": [
+        "The suite the module ships with. The calibration target.",
+        "Split across two test classes - CalculatorTests and DescribeTests - so the per-fixture assertions",
+        "have something to distinguish. With one class they would be satisfied by a judge that measured the",
+        "whole suite once and labelled the result with the only fixture name it could see."
+      ],
       "exit": 0,
       "status": "Completed",
       "units": 5,
@@ -28,6 +33,8 @@
       "coverageMin": 0.9,
       "qualityMin": 0.9,
       "qualityMax": 1.0,
+      "fixtureMetrics": true,
+      "fixtureMetricsMin": 2,
       "env": { "JUDGE_MUTATION_TIMEOUT_SECONDS": "600" }
     },
     {

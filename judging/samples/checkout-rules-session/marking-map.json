@@ -5,6 +5,8 @@
   // project, so a part would either duplicate "overall" or route nothing at all. A real multi-component
   // black-box session declares one per component — ["pricing", "shipping"] — so a competitor can see which
   // area their suite neglected.
+  // Parts are the SCORING granularity. Separately, the black-box judge measures coverage and mutation for each
+  // of the competitor's test CLASSES; that needs no declaration here and produces no marks.
   "parts": [],
 
   // Tuned against measured runs, not guessed. Two facts drove these numbers:

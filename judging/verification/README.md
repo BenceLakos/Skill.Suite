@@ -99,6 +99,18 @@ assertion would train everyone to ignore this suite.
 
 This matrix runs Stryker three times, so it is far slower than the white-box one.
 
+### Per-fixture measurements
+
+`reference` also asserts the per-test-class measurements: every class the harness opened must have its own
+`coverage` and `mutation` event carrying a real number in 0..1, no fixture may report more covered mutants than
+the whole suite did, and **no `score` event may name a fixture** — quality stays a part-level verdict.
+
+That is why `reference` is split across two test classes, `CalculatorTests` and `DescribeTests`. With a single
+class the assertions would pass against a judge that measured the suite once and labelled the result with the
+only fixture name in sight; two classes with different footprints (arithmetic vs `Describe`) cannot be faked
+that way. Splitting moved one test between files and changed no totals, so the calibration bands still describe
+the same five tests over the same implementation.
+
 ## Two bugs this kit caught that nothing else would
 
 Worth recording, because both were invisible to unit tests and to a casual `docker run`:

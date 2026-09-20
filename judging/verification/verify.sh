@@ -155,6 +155,47 @@ if 'coverageMin' in spec:
     if not isinstance(rate, (int, float)) or rate < spec['coverageMin']:
         problems.append(f'line coverage {rate} below the expected minimum {spec["coverageMin"]}')
 
+# Per-test-class measurements. Asserted as "every class the harness opened has both, with a real number in
+# range" rather than against fixed values: the point is that the plumbing reaches every fixture, and exact
+# per-class numbers are as run-to-run variable as the rollup's.
+#
+# The fixture set comes from start-fixture, i.e. from the runner's own view of which classes existed, so a
+# feature that silently measured only the first class cannot pass this.
+if spec.get('fixtureMetrics'):
+    classes = sorted({e.get('fixture') for e in events
+                      if e.get('event') == 'start-fixture' and e.get('fixture')})
+
+    if len(classes) < spec.get('fixtureMetricsMin', 1):
+        problems.append(f'expected at least {spec.get("fixtureMetricsMin", 1)} test classes, found {classes}')
+
+    for kind in ('coverage', 'mutation'):
+        measured = {e.get('fixture'): e.get('value') for e in events
+                    if e.get('event') == kind and e.get('fixture')}
+
+        for name in classes:
+            if name not in measured:
+                problems.append(f'no per-fixture {kind} event for {name}')
+            elif not isinstance(measured[name], (int, float)):
+                problems.append(f'per-fixture {kind} for {name} is {measured[name]!r}, not a number')
+            elif not (0.0 <= measured[name] <= 1.0):
+                problems.append(f'per-fixture {kind} for {name} is {measured[name]}, outside 0..1')
+
+    # A fixture measures a slice of the submission, so it can never have reached more mutants than the whole
+    # suite did. This is the cheap check that catches an attribution that double-counts.
+    total_covered = next((e.get('covered') for e in events if e.get('event') == 'mutation'
+                          and e.get('part', 'overall') == 'overall'), None)
+    if isinstance(total_covered, int):
+        for e in events:
+            if e.get('event') == 'mutation' and e.get('fixture') and isinstance(e.get('covered'), int):
+                if e['covered'] > total_covered:
+                    problems.append(
+                        f'{e["fixture"]} covered {e["covered"]} mutants, more than the whole suite\'s {total_covered}')
+
+    # Quality stays a part-level verdict. A score event naming a fixture would mean a competitor's own test
+    # class had been given a mark the marking map never authorised.
+    if any(e.get('event') == 'score' and e.get('fixture') for e in events):
+        problems.append('a score event carried a fixture; quality must stay part-scoped')
+
 print(json.dumps({'problems': problems}))
 PY
 )

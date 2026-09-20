@@ -77,6 +77,10 @@ Rules worth knowing before you debug a missing result:
   `total` and `covered` are likewise shared, so `lines_covered` and `mutants_covered` are one name.
 - **`score` needs a numeric `value` in 0..1** to drive the competitor-visible indicator. A string
   `"0.83"` is ignored.
+- **`coverage` and `mutation` may carry a `fixture` instead of a `part`**, naming one test class measured on
+  its own — the same simple class name `FixtureScope<T>` puts in `start-fixture`. `test-summary` and `score`
+  never do: quality stays a part-level verdict. A consumer that does not know the field ignores it, so a newer
+  judge image still works against an older platform.
 - **Never leave `events.jsonl` empty.** The platform prefers the file whenever it exists, so an empty
   one yields zero results *and* suppresses the stdout fallback.
 

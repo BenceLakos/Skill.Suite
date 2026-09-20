@@ -4,6 +4,10 @@
   // Black-box scoring parts. Leave empty for a white-box session, where marks come from aspects and the judge
   // never runs the marker. Declare a part per component for a black-box session so a competitor can see which
   // area their suite neglected: { "id": "services", "include": ["**/Services/**"] }
+  //
+  // Parts are the SCORING granularity, and the only one. Separately and unconditionally, the black-box judge
+  // also measures coverage and mutation for each of the competitor's test CLASSES - that needs no declaration
+  // here and produces no marks.
   "parts": [],
 
   // Only used by the black-box composite. The defaults are documented in the marker's README; these are the
