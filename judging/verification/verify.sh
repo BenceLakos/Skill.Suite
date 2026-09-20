@@ -150,7 +150,7 @@ if 'qualityMin' in spec or 'qualityMax' in spec:
 # coverage matches a good suite while the score does not.
 if 'coverageMin' in spec:
     coverage = next((e for e in events if e.get('event') == 'coverage'
-                     and e.get('part', 'overall') == 'overall'), None)
+                     and not e.get('fixture') and e.get('part', 'overall') == 'overall'), None)
     rate = (coverage or {}).get('value')
     if not isinstance(rate, (int, float)) or rate < spec['coverageMin']:
         problems.append(f'line coverage {rate} below the expected minimum {spec["coverageMin"]}')
@@ -183,7 +183,7 @@ if spec.get('fixtureMetrics'):
     # A fixture measures a slice of the submission, so it can never have reached more mutants than the whole
     # suite did. This is the cheap check that catches an attribution that double-counts.
     total_covered = next((e.get('covered') for e in events if e.get('event') == 'mutation'
-                          and e.get('part', 'overall') == 'overall'), None)
+                          and not e.get('fixture') and e.get('part', 'overall') == 'overall'), None)
     if isinstance(total_covered, int):
         for e in events:
             if e.get('event') == 'mutation' and e.get('fixture') and isinstance(e.get('covered'), int):
