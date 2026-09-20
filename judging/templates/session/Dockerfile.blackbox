@@ -17,6 +17,12 @@
 
 ARG BASE_IMAGE=JUDGE_BASE_IMAGE_DEFAULT
 ARG MARKER_VERSION=1.0.0
+# Pinned, like every other input to this image. An unpinned `dotnet tool install dotnet-stryker` resolves to
+# whatever is newest on nuget.org at build time, which means two builds of the same commit can measure a
+# submission differently - and, as of this writing, that the newest package cannot be installed on the sdk:9.0
+# base at all ("Settings file 'DotnetToolSettings.xml' was not found in the package"), so every black-box image
+# build fails. 4.16.0 is the version the images in use were built with.
+ARG STRYKER_VERSION=4.16.0
 
 # ---------------------------------------------------------------------------- build
 
@@ -60,6 +66,7 @@ RUN if find "/src/SkillSuite.Session.UnitTests" -name '*.cs' -print -quit | grep
 FROM ${BASE_IMAGE}
 
 ARG MARKER_VERSION
+ARG STRYKER_VERSION
 
 ENV JUDGE_SOLUTION=SkillSuite.Session.sln \
     JUDGE_SWAP_SRC=SkillSuite.Session.UnitTests \
@@ -91,7 +98,7 @@ COPY --from=build /root/.nuget/packages/ /root/.nuget/packages/
 # Both tools are installed at build time so the run needs no network. --add-source points at the baked feed,
 # so this works before the packages are published: drop the .nupkg files into local-nuget/.
 RUN dotnet tool install --global --add-source /app/local-nuget Skill.Suite.Marker --version ${MARKER_VERSION} \
-    && dotnet tool install --global dotnet-stryker \
+    && dotnet tool install --global dotnet-stryker --version ${STRYKER_VERSION} \
     && skill-marker version
 
 COPY marking-map.json /app/marking-map.json
