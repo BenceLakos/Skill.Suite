@@ -19,11 +19,22 @@
         </MudTooltip>
     </MudStack>
 
-    <LabeledField Label="@T["sessions.dockerImage.domain"]" Help="@T["sessions.help.dockerImageDomain"]">
-        <MudTextField T="string" @bind-Value="Image.Domain"
-                      Variant="Variant.Outlined" MaxLength="253"
-                      Placeholder="shop.skills.local" Clearable="true"/>
-    </LabeledField>
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="8">
+            <LabeledField Label="@T["sessions.dockerImage.domain"]" Help="@T["sessions.help.dockerImageDomain"]">
+                <MudTextField T="string" @bind-Value="Image.Domain"
+                              Variant="Variant.Outlined" MaxLength="253"
+                              Placeholder="shop.skills.local" Clearable="true"/>
+            </LabeledField>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <LabeledField Label="@T["sessions.dockerImage.routedPort"]" Help="@T["sessions.help.dockerImageRoutedPort"]">
+                <MudNumericField T="int?" @bind-Value="Image.RoutedPort"
+                                 Variant="Variant.Outlined" Min="1" Max="65535"
+                                 Placeholder="8080" Clearable="true"/>
+            </LabeledField>
+        </MudItem>
+    </MudGrid>
 
     @*
         Stated on every service card rather than once at the top of the tab: an administrator typing a

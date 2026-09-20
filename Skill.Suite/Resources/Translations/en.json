@@ -158,7 +158,7 @@
   "sessions.dockerImages.count": "{0} configured",
   "sessions.placeholders.rule": "Every competitor gets their own copy of every service — their own container, their own host ports counted up from the ones you type, and their own settings — exactly as they each get their own session database. Placeholders are how the settings differ between them; a service using none still runs once per competitor, with identical settings.",
   "sessions.placeholders.applyTo": "Substituted in environment values, label values and volume host paths. Not in keys, not in container paths and not in the image reference. Write {{{{ for a literal '{{'.",
-  "sessions.placeholders.legend": "Grey: same for everybody. Blue: this competitor. Purple: this competitor's session database — while marking, these connect as the database administrator instead, and a competitor with no SQL login gets no copy of such a service.",
+  "sessions.placeholders.legend": "Grey: same for everybody. Blue: this competitor — their mobile address is empty when they have none. Purple: this competitor's session database — while marking, these connect as the database administrator instead, and a competitor with no SQL login gets no copy of such a service.",
   "sessions.dockerImage.image": "Image",
   "sessions.dockerImage.env": "Environment variables",
   "sessions.dockerImage.labels": "Labels",
@@ -404,9 +404,13 @@
   "sessions.marking.start": "Start marking",
   "sessions.marking.stopThis": "Stop this competitor's marking",
   "sessions.marking.noCompetitors": "No competitor is enrolled in this session, so there is nothing to mark.",
-  "sessions.marking.url": "Address",
-  "sessions.marking.noUrl": "No domain — use the host port",
   "sessions.marking.everyone": "every competitor",
   "sessions.dockerImage.domain": "Domain",
-  "sessions.help.dockerImageDomain": "Optional hostname the reverse proxy routes to this service, such as 'shop.skills.local' — a bare lowercase name, no http:// and no port. Every competitor uses the same address and reaches their OWN container, because the proxy matches on their workstation's IP. Needs at least one TCP port mapping, and no two services of a session may share a domain. Leave empty to have competitors connect on the host port instead."
+  "sessions.help.dockerImageDomain": "Optional hostname the reverse proxy routes to this service, such as 'shop.skills.local' — a bare lowercase name, no http:// and no port. Every competitor uses the same address and reaches their OWN container, because the proxy matches on their workstation's IP. Set the container port beside it; port mappings stay optional and are not needed for routing. No two services of a session may share a domain.",
+  "sessions.marking.address": "Address",
+  "sessions.dockerImage.routedPort": "Container port",
+  "sessions.help.dockerImageRoutedPort": "The port the application listens on INSIDE the container — 8080 for most web images, 80 for nginx. The reverse proxy talks to it over the docker network, so a routed service needs no port mapping at all. Required when a domain is set, and must be empty without one.",
+  "mySession.service.urlHelp": "Open this from your own workstation. The same address on any other machine leads to that competitor's container, not yours.",
+  "competitors.field.mobileIpAddress": "Mobile device IP",
+  "competitors.help.mobileIpAddress": "Optional. The address of a phone or tablet the competitor was handed. It counts as the same competitor everywhere: it signs them in, and it reaches their own service containers during the competition and while their work is being marked. Must differ from the workstation address."
 }

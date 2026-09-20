@@ -52,6 +52,7 @@
             <PropertyColumn Property="x => x.Username" Title="@T["competitors.field.username"]"/>
             <PropertyColumn Property="x => x.FullName" Title="@T["competitors.field.fullName"]"/>
             <PropertyColumn Property="x => x.IpAddress" Title="@T["competitors.field.ipAddress"]"/>
+            <PropertyColumn Property="x => x.MobileIpAddress" Title="@T["competitors.field.mobileIpAddress"]"/>
             <PropertyColumn Property="x => x.CountryCode" Title="@T["competitors.field.countryCode"]"/>
             <TemplateColumn Title="@T["competitors.field.accounts"]" Sortable="false">
                 <CellTemplate>
@@ -158,6 +159,7 @@
         || x.Username.Contains(_search, StringComparison.OrdinalIgnoreCase)
         || x.FullName.Contains(_search, StringComparison.OrdinalIgnoreCase)
         || x.IpAddress.Contains(_search, StringComparison.OrdinalIgnoreCase)
+        || (x.MobileIpAddress?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false)
         || x.CountryCode.Contains(_search, StringComparison.OrdinalIgnoreCase);
 
     private async Task OpenCreate()

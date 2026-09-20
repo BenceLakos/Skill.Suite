@@ -428,6 +428,7 @@ else
         {
             Image = d.Image,
             Domain = d.Domain,
+            RoutedPort = d.RoutedPort,
             Env = d.Env.Select(kv => new KeyValueDraft { Key = kv.Key, Value = kv.Value }).ToList(),
             Labels = d.Labels.Select(kv => new KeyValueDraft { Key = kv.Key, Value = kv.Value }).ToList(),
             Volumes = d.Volumes.Select(v => new VolumeDraft { HostPath = v.HostPath, ContainerPath = v.ContainerPath, ReadOnly = v.ReadOnly }).ToList(),
@@ -442,5 +443,8 @@ else
         draft.Volumes.Where(v => !string.IsNullOrWhiteSpace(v.HostPath) && !string.IsNullOrWhiteSpace(v.ContainerPath))
             .Select(v => new VolumeMount(v.HostPath.Trim(), v.ContainerPath.Trim(), v.ReadOnly)).ToList(),
         draft.PortMappings.Select(p => new PortMapping(p.HostPort, p.ContainerPort, p.Protocol)).ToList(),
-        string.IsNullOrWhiteSpace(draft.Domain) ? null : draft.Domain.Trim().ToLowerInvariant());
+        string.IsNullOrWhiteSpace(draft.Domain) ? null : draft.Domain.Trim().ToLowerInvariant(),
+        // Cleared with the domain: a routed port on a service that is not routed is refused by the
+        // validators, and an administrator who removed the domain meant to remove the routing.
+        string.IsNullOrWhiteSpace(draft.Domain) ? null : draft.RoutedPort);
 }

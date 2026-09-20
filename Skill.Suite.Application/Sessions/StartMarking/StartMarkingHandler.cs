@@ -79,6 +79,7 @@ public sealed class StartMarkingHandler(
                     competitor.Username,
                     competitor.FullName,
                     competitor.IpAddress,
+                    competitor.MobileIpAddress,
                     competitor.CountryCode,
                     vault.Unprotect(competitor.EncryptedPassword),
                     enrolment.Ordinal,
@@ -173,19 +174,18 @@ public sealed class StartMarkingHandler(
     }
 
     /// <summary>
-    /// One running container as an address, with no request host to read the proxy's published port from.
+    /// One running container as an address: a URL when it is routed, its published ports when it is not.
     /// </summary>
     /// <remarks>
-    /// The admin page that shows this is reached through the same proxy, so its own address carries the
-    /// port — but the command does not receive it, and inventing a setting for it would be a second place
-    /// for the deployment's port to be stated wrongly. A bare <c>http://host</c> is right whenever the proxy
-    /// is published on 80, which is the default.
+    /// Both are carried and the page shows one of them. A host port printed beside a URL is a second address
+    /// for the same container that does not go through the proxy, which is exactly the confusion the routing
+    /// exists to remove.
     /// </remarks>
     private static MarkingEndpoint Endpoint(PlannedSessionService service) =>
         new(service.ServiceNumber,
             service.ConfiguredImage,
             service.ContainerName,
-            ServiceUrl.For(service.Host, requestHost: null),
+            ServiceUrl.For(service.Host),
             service.PortMappings);
 
     /// <summary>

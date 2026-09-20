@@ -26,6 +26,7 @@ public sealed class CreateCompetitorHandler(
             request.FullName,
             vault.Protect(request.Password),
             request.IpAddress,
+            request.MobileIpAddress,
             request.CountryCode);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

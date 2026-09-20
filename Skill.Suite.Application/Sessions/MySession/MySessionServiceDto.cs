@@ -32,6 +32,17 @@ using Skill.Suite.Domain.Sessions;
 /// </para>
 /// </remarks>
 /// <param name="Number">The service's position as the admin sees it listed, and as its docker label carries it.</param>
+/// <remarks>
+/// The docker image reference is deliberately absent. It named nothing a competitor can act on — they cannot
+/// pull it, restart it or choose another — and it leaked the session author's registry layout onto a page
+/// whose whole job is the address and the settings to connect with.
+/// </remarks>
+/// <param name="Ports">
+/// The published host ports, which are what a competitor connects to when <paramref name="Url"/> is null.
+/// A routed service shows its URL INSTEAD of these, even when it also publishes ports: a host port beside a
+/// URL is a second address for the same container that does not go through the proxy, and a competitor who
+/// used it would be working around the very thing that keeps each of them on their own instance.
+/// </param>
 /// <param name="Url">
 /// The address to open when the service is routed by hostname, or null when it is reached on a published
 /// port alone. It answers only from this competitor's own workstation — the proxy sends every other machine
@@ -39,7 +50,6 @@ using Skill.Suite.Domain.Sessions;
 /// </param>
 public sealed record MySessionServiceDto(
     string Number,
-    string Image,
     string ContainerName,
     IReadOnlyDictionary<string, string> Environment,
     IReadOnlyList<PortMapping> Ports,

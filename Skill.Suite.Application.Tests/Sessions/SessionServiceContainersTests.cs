@@ -28,7 +28,7 @@ public sealed class SessionServiceContainersTests
             dockerImages: images).Value;
 
     private static SessionDockerImage Image(string image, Dictionary<string, string>? env = null) =>
-        new(image, env ?? [], [], [], [], Domain: null);
+        new(image, env ?? [], [], [], [], Domain: null, RoutedPort: null);
 
     [Fact]
     public void EveryServiceIsOneNamePerCompetitor()
@@ -68,7 +68,7 @@ public sealed class SessionServiceContainersTests
             session,
             SessionRunMode.Competition,
             SessionProvisioningStage.DockerServices,
-            [new SessionServicePlanCompetitor("c01", "Joe", "10.0.0.1", "HU", "p", 0, true)],
+            [new SessionServicePlanCompetitor("c01", "Joe", "10.0.0.1", null, "HU", "p", 0, true)],
             "round-1",
             "host.docker.internal,1433",
             DatabaseAdmin: null,

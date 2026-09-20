@@ -64,9 +64,8 @@
                 <th>@T["sessions.marking.competitor"]</th>
                 <th>@T["sessions.marking.ipAddress"]</th>
                 <th>@T["sessions.marking.service"]</th>
-                <th>@T["sessions.marking.url"]</th>
+                <th>@T["sessions.marking.address"]</th>
                 <th>@T["sessions.marking.container"]</th>
-                <th>@T["sessions.marking.ports"]</th>
             </tr>
             </thead>
             <tbody>
@@ -78,23 +77,26 @@
                         <td>@run.CompetitorUsername</td>
                         <td>@run.MarkingIpAddress</td>
                         <td>@endpoint.ServiceNumber — @endpoint.Image</td>
+                        @*
+                            One address per container. A routed container is reached at its URL; a host port
+                            beside it would be a second address for the same thing that skips the proxy.
+                        *@
                         <td>
-                            @if (endpoint.Url is null)
-                            {
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["sessions.marking.noUrl"]</MudText>
-                            }
-                            else
+                            @if (endpoint.Url is not null)
                             {
                                 <MudLink Href="@endpoint.Url" Target="_blank">@endpoint.Url</MudLink>
                             }
+                            else if (endpoint.Ports.Count == 0)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@T["sessions.marking.noPorts"]</MudText>
+                            }
+                            else
+                            {
+                                @string.Join(", ", endpoint.Ports.Select(
+                                    p => $"{p.HostPort}→{p.ContainerPort}/{p.Protocol.ToString().ToLowerInvariant()}"))
+                            }
                         </td>
                         <td>@endpoint.ContainerName</td>
-                        <td>
-                            @(endpoint.Ports.Count == 0
-                                ? T["sessions.marking.noPorts"]
-                                : string.Join(", ", endpoint.Ports.Select(
-                                    p => $"{p.HostPort}→{p.ContainerPort}/{p.Protocol.ToString().ToLowerInvariant()}")))
-                        </td>
                     </tr>
                 }
             }

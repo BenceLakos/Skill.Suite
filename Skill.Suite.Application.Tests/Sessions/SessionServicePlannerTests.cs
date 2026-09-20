@@ -24,8 +24,8 @@ public sealed class SessionServicePlannerTests
     private static readonly BasicCredential Admin = new("sa", "adm1n");
 
     private static SessionServicePlanCompetitor Competitor(
-        string username, int ordinal, bool hasLogin = true, string ip = "10.0.0.1") =>
-        new(username, $"{username} Doe", ip, "HU", $"{username}-pass", ordinal, hasLogin);
+        string username, int ordinal, bool hasLogin = true, string ip = "10.0.0.1", string? mobileIp = null) =>
+        new(username, $"{username} Doe", ip, mobileIp, "HU", $"{username}-pass", ordinal, hasLogin);
 
     private static Session SessionWith(params SessionDockerImage[] images) =>
         Session.Create(
@@ -43,8 +43,9 @@ public sealed class SessionServicePlannerTests
         Dictionary<string, string>? labels = null,
         List<VolumeMount>? volumes = null,
         List<PortMapping>? ports = null,
-        string? domain = null) =>
-        new(image, env ?? [], labels ?? [], volumes ?? [], ports ?? [], domain);
+        string? domain = null,
+        int? routedPort = null) =>
+        new(image, env ?? [], labels ?? [], volumes ?? [], ports ?? [], domain, routedPort);
 
     private static SessionServicePlan Plan(
         Session session,
@@ -349,9 +350,7 @@ public sealed class SessionServicePlannerTests
     public void AServiceWithADomainIsRoutedToTheCompetitorsOwnWorkstation()
     {
         var plan = Plan(
-            SessionWith(Image(
-                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
-                domain: "shop.skills.local")),
+            SessionWith(Image(domain: "shop.skills.local", routedPort: 8080)),
             SessionRunMode.Competition,
             Competitor("c01", 0, ip: "10.0.0.7"));
 
@@ -366,14 +365,135 @@ public sealed class SessionServicePlannerTests
     }
 
     [Fact]
+    public void ARoutedServiceNeedsNoPortMappingToBeRouted()
+    {
+        // The proxy reaches the container over the shared docker network and talks to the container port
+        // directly, so nothing has to be published on the host.
+        var plan = Plan(
+            SessionWith(Image(ports: [], domain: "shop.skills.local", routedPort: 8080)),
+            SessionRunMode.Competition,
+            Competitor("c01", 0));
+
+        var service = Assert.Single(plan.Services);
+
+        Assert.Empty(service.PortMappings);
+        Assert.Equal("shop.skills.local", service.Host);
+        Assert.Equal(
+            "8080",
+            service.Labels["traefik.http.services.skill-suite-round-1-1-c01.loadbalancer.server.port"]);
+    }
+
+    [Fact]
+    public void ARoutedServiceStillPublishesAnyPortMappingsItHas()
+    {
+        // Routing and publishing are independent: an administrator who also wants a host port gets one,
+        // offset per competitor like every other service.
+        var plan = Plan(
+            SessionWith(Image(
+                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
+                domain: "shop.skills.local",
+                routedPort: 3000)),
+            SessionRunMode.Competition,
+            Competitor("c01", 0), Competitor("c02", 1));
+
+        Assert.Equal([8080, 8081], plan.Services.Select(s => s.PortMappings[0].HostPort));
+    }
+
+    [Fact]
+    public void TheProxyForwardsToTheRoutedPortAndNotToAnyPortMapping()
+    {
+        // The port mappings are a different thing entirely — a host port and the container port behind it —
+        // and reading the forwarded port off them was what forced a routed service to publish one.
+        var plan = Plan(
+            SessionWith(Image(
+                ports:
+                [
+                    new PortMapping(5300, 53, PortProtocol.Udp),
+                    new PortMapping(8080, 8081, PortProtocol.Tcp),
+                ],
+                domain: "shop.skills.local",
+                routedPort: 3000)),
+            SessionRunMode.Competition,
+            Competitor("c01", 0));
+
+        Assert.Equal(
+            "3000",
+            Assert.Single(plan.Services)
+                .Labels["traefik.http.services.skill-suite-round-1-1-c01.loadbalancer.server.port"]);
+    }
+
+    [Fact]
+    public void ADomainWithNoRoutedPortIsNotRouted()
+    {
+        // Refused by the validators, so only reachable for a session saved around them. Better an unrouted
+        // container than a route the proxy cannot forward through.
+        var plan = Plan(
+            SessionWith(Image(domain: "shop.skills.local", routedPort: null)),
+            SessionRunMode.Competition,
+            Competitor("c01", 0));
+
+        var service = Assert.Single(plan.Services);
+
+        Assert.Null(service.Host);
+        Assert.Null(service.Network);
+        Assert.DoesNotContain(service.Labels, label => label.Key.StartsWith("traefik.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ACompetitorWithAMobileDeviceIsRoutedFromBothOfTheirMachines()
+    {
+        // Traefik v3's ClientIP takes one value, so two devices are two matchers — and the parentheses keep
+        // the || from escaping the Host condition.
+        var plan = Plan(
+            SessionWith(Image(domain: "shop.skills.local", routedPort: 8080)),
+            SessionRunMode.Competition,
+            Competitor("c01", 0, ip: "10.0.0.7", mobileIp: "10.0.0.99"));
+
+        Assert.Equal(
+            "Host(`shop.skills.local`) && (ClientIP(`10.0.0.7`) || ClientIP(`10.0.0.99`))",
+            Assert.Single(plan.Services).Labels["traefik.http.routers.skill-suite-round-1-1-c01.rule"]);
+    }
+
+    [Fact]
+    public void AMarkingContainerAlsoAdmitsTheCompetitorsMobileDevice()
+    {
+        // So a phone the task is meant to be demonstrated on can still reach the container being marked.
+        // Their WORKSTATION is deliberately not on the list: the competition is over.
+        var plan = Plan(
+            SessionWith(Image(domain: "shop.skills.local", routedPort: 8080)),
+            SessionRunMode.Marking,
+            Competitor("c01", 0, ip: "10.0.0.7", mobileIp: "10.0.0.99"));
+
+        Assert.Equal(
+            $"Host(`shop.skills.local`) && (ClientIP(`{MarkingIp}`) || ClientIP(`10.0.0.99`))",
+            Assert.Single(plan.Services)
+                .Labels["traefik.http.routers.skill-suite-round-1-1-c01-marking.rule"]);
+    }
+
+    [Fact]
+    public void TheMobileAddressResolvesAsAPlaceholderAndIsEmptyWithoutOne()
+    {
+        var withMobile = Plan(
+            SessionWith(Image(env: new Dictionary<string, string> { ["M"] = "{{competitor.mobileIpAddress}}" })),
+            SessionRunMode.Competition,
+            Competitor("c01", 0, mobileIp: "10.0.0.99"));
+
+        var without = Plan(
+            SessionWith(Image(env: new Dictionary<string, string> { ["M"] = "{{competitor.mobileIpAddress}}" })),
+            SessionRunMode.Competition,
+            Competitor("c02", 1));
+
+        Assert.Equal("10.0.0.99", Assert.Single(withMobile.Services).Environment["M"]);
+        Assert.Equal(string.Empty, Assert.Single(without.Services).Environment["M"]);
+    }
+
+    [Fact]
     public void EveryCompetitorsRoutedContainerSharesTheDomainAndDiffersByAddress()
     {
         // One address for everybody to type, twenty containers behind it. The source address is the whole of
         // what sends a competitor to their own.
         var plan = Plan(
-            SessionWith(Image(
-                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
-                domain: "shop.skills.local")),
+            SessionWith(Image(domain: "shop.skills.local", routedPort: 8080)),
             SessionRunMode.Competition,
             Competitor("c01", 0, ip: "10.0.0.7"), Competitor("c02", 1, ip: "10.0.0.8"));
 
@@ -388,9 +508,7 @@ public sealed class SessionServicePlannerTests
     public void AMarkingContainerIsRoutedToTheMarkingMachineInstead()
     {
         var plan = Plan(
-            SessionWith(Image(
-                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
-                domain: "shop.skills.local")),
+            SessionWith(Image(domain: "shop.skills.local", routedPort: 8080)),
             SessionRunMode.Marking,
             Competitor("c01", 0, ip: "10.0.0.7"));
 
@@ -402,26 +520,6 @@ public sealed class SessionServicePlannerTests
     }
 
     [Fact]
-    public void TheProxyForwardsToTheFirstTcpContainerPort()
-    {
-        var plan = Plan(
-            SessionWith(Image(
-                ports:
-                [
-                    new PortMapping(5300, 53, PortProtocol.Udp),
-                    new PortMapping(8080, 8081, PortProtocol.Tcp),
-                ],
-                domain: "shop.skills.local")),
-            SessionRunMode.Competition,
-            Competitor("c01", 0));
-
-        Assert.Equal(
-            "8081",
-            Assert.Single(plan.Services)
-                .Labels["traefik.http.services.skill-suite-round-1-1-c01.loadbalancer.server.port"]);
-    }
-
-    [Fact]
     public void ALabelTheAdministratorWroteThemselvesWinsOverTheGeneratedOne()
     {
         var plan = Plan(
@@ -430,8 +528,8 @@ public sealed class SessionServicePlannerTests
                 {
                     ["traefik.http.routers.skill-suite-round-1-1-c01.rule"] = "Host(`mine.local`)",
                 },
-                ports: [new PortMapping(8080, 80, PortProtocol.Tcp)],
-                domain: "shop.skills.local")),
+                domain: "shop.skills.local",
+                routedPort: 8080)),
             SessionRunMode.Competition,
             Competitor("c01", 0));
 

@@ -8,22 +8,22 @@ using Xunit;
 /// </summary>
 /// <remarks>
 /// The derivation replaces a configuration knob, so these cases are the contract: the deployment publishes
-/// <c>suite.${DOMAIN}</c> and <c>sql.${DOMAIN}</c> off the same proxy, and everything else — a local stack, a
-/// bare address on the venue LAN — is the docker host publishing the port itself.
+/// <c>suite.${DOMAIN}</c> and <c>mssql.${DOMAIN}</c> off the same proxy, and everything else — a local stack,
+/// a bare address on the venue LAN — is the docker host publishing the port itself.
 /// </remarks>
 public sealed class CompetitorSqlServerNameTests
 {
     [Fact]
     public void TheProxiedSuiteHostBecomesTheProxiedSqlHost()
     {
-        Assert.Equal("sql.skills.local,1433", CompetitorSqlServerName.For("suite.skills.local"));
+        Assert.Equal("mssql.skills.local,1433", CompetitorSqlServerName.For("suite.skills.local"));
     }
 
     [Fact]
     public void ThePrefixIsMatchedWithoutRegardToCase()
     {
         // Host names are case-insensitive, and a browser is free to send the one the competitor typed.
-        Assert.Equal("sql.Skills.Local,1433", CompetitorSqlServerName.For("SUITE.Skills.Local"));
+        Assert.Equal("mssql.Skills.Local,1433", CompetitorSqlServerName.For("SUITE.Skills.Local"));
     }
 
     [Fact]
@@ -43,6 +43,15 @@ public sealed class CompetitorSqlServerNameTests
     {
         // "mysuite.local" is somebody's host name, not this application's published route.
         Assert.Equal("mysuite.local,1433", CompetitorSqlServerName.For("mysuite.local"));
+    }
+
+    [Fact]
+    public void ThePortTheBrowserReachedTheSuiteOnIsNotCarriedOver()
+    {
+        // The data source's port is the TDS one. Carrying the Suite's over produced "mssql.x:8080,1433",
+        // which is not an address at all.
+        Assert.Equal("mssql.skills.local,1433", CompetitorSqlServerName.For("suite.skills.local:8080"));
+        Assert.Equal("localhost,1433", CompetitorSqlServerName.For("localhost:8080"));
     }
 
     [Theory]

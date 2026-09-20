@@ -77,20 +77,28 @@ internal static class WorkstationMatch
     }
 
     /// <summary>
-    /// Positions in <paramref name="storedAddresses"/> that are the same workstation as <paramref name="client"/>.
+    /// Positions in <paramref name="storedDevices"/> where ANY of that entry's addresses is
+    /// <paramref name="client"/>.
     /// </summary>
     /// <remarks>
+    /// A set of addresses per entry rather than one, because a competitor may have been given a second
+    /// device: their phone signing in is the same person as their workstation signing in, and recognising
+    /// only the workstation would hand them an empty form on the device the task is to be demonstrated on.
+    /// <para>
     /// Every match is returned rather than the first, because more than one is a meaningful answer: two
     /// competitors recorded at one address is a data-entry mistake, and the caller has to be able to refuse
-    /// instead of handing one competitor's credentials to the other's machine.
+    /// instead of handing one competitor's credentials to the other's machine. One competitor matching on
+    /// both of their own addresses is still one match — the entry is counted, not the address.
+    /// </para>
     /// </remarks>
-    public static List<int> MatchIndexes(IPAddress? client, IReadOnlyList<string> storedAddresses)
+    public static List<int> MatchIndexes(
+        IPAddress? client, IReadOnlyList<IReadOnlyList<string?>> storedDevices)
     {
         var matches = new List<int>();
 
-        for (var index = 0; index < storedAddresses.Count; index++)
+        for (var index = 0; index < storedDevices.Count; index++)
         {
-            if (IsSameWorkstation(client, storedAddresses[index]))
+            if (storedDevices[index].Any(address => IsSameWorkstation(client, address)))
                 matches.Add(index);
         }
 

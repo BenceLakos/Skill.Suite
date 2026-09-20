@@ -4,52 +4,36 @@ using Skill.Suite.Application.Sessions.Services;
 using Xunit;
 
 /// <summary>
-/// The address printed for a routed service, and where its port comes from.
+/// The address printed for a routed service.
 /// </summary>
 /// <remarks>
-/// The port is the whole reason this is not string concatenation. The proxy listens on 80 inside its
-/// container and the stack publishes it on <c>TRAEFIK_HTTP_PORT</c>, which this application has no setting
-/// for and must not grow one — so it is read off the host the caller reached this application on, which came
-/// through that very proxy on that very port. A URL missing it is one a competitor pastes, watches fail, and
-/// spends competition time on.
+/// Deliberately nothing but the scheme and the hostname. An earlier version appended the port the caller
+/// reached this application on, reasoning that the browser had come through the same proxy — a guess, wrong
+/// for anyone reaching the Suite by another route, and a wrong port in an address a competitor pastes costs
+/// competition time. The proxy answers on the default port; if that ever changes it is fixed at the proxy.
 /// </remarks>
 public sealed class ServiceUrlTests
 {
     [Fact]
-    public void AHostWithNoPortGivesABareHttpUrl()
+    public void ADomainBecomesAPlainHttpUrl()
     {
-        Assert.Equal("http://shop.skills.local", ServiceUrl.For("shop.skills.local", "suite.skills.local"));
+        Assert.Equal("http://shop.skills.local", ServiceUrl.For("shop.skills.local"));
     }
 
     [Fact]
-    public void ThePortTheCallerReachedTheApplicationOnIsCarriedOver()
+    public void NoPortIsEverAppended()
     {
-        // The browser reached the suite through the proxy on this port, so the service behind the same proxy
-        // is on it too.
-        Assert.Equal(
-            "http://shop.skills.local:8080",
-            ServiceUrl.For("shop.skills.local", "suite.skills.local:8080"));
+        var authority = ServiceUrl.For("shop.skills.local")!["http://".Length..];
+
+        Assert.DoesNotContain(":", authority, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheDefaultHttpPortIsNotRestated()
+    public void TheSchemeIsHttpBecauseTheStackHasNoTls()
     {
-        Assert.Equal("http://shop.skills.local", ServiceUrl.For("shop.skills.local", "suite.skills.local:80"));
-    }
-
-    [Fact]
-    public void NoCallerHostGivesTheBareUrl()
-    {
-        // What the admin page gets: it does not receive its own request host, and a bare URL is right
-        // whenever the proxy is published on 80, which is the default.
-        Assert.Equal("http://shop.skills.local", ServiceUrl.For("shop.skills.local", requestHost: null));
-    }
-
-    [Fact]
-    public void AnIpv6CallerHostIsNotMistakenForAPort()
-    {
-        Assert.Equal("http://shop.skills.local", ServiceUrl.For("shop.skills.local", "[::1]"));
-        Assert.Equal("http://shop.skills.local:8080", ServiceUrl.For("shop.skills.local", "[::1]:8080"));
+        // A venue LAN has no certificate authority, and a self-signed certificate would have to be trusted
+        // on every competitor machine.
+        Assert.StartsWith("http://", ServiceUrl.For("shop.skills.local"), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -58,6 +42,6 @@ public sealed class ServiceUrlTests
     [InlineData("   ")]
     public void AServiceWithNoDomainHasNoUrl(string? host)
     {
-        Assert.Null(ServiceUrl.For(host, "suite.skills.local:8080"));
+        Assert.Null(ServiceUrl.For(host));
     }
 }

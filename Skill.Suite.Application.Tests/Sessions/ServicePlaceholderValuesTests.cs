@@ -25,6 +25,7 @@ public sealed class ServicePlaceholderValuesTests
         Username: "c01",
         FullName: "Joe Doe",
         IpAddress: "10.0.0.7",
+        MobileIpAddress: null,
         CountryCode: "HU",
         Password: "correct-horse",
         Ordinal: 2,

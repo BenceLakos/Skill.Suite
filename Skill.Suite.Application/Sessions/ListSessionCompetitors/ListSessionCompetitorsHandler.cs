@@ -31,6 +31,7 @@ public sealed class ListSessionCompetitorsHandler(IAppDbContext db)
                     competitor.Username,
                     competitor.FullName,
                     competitor.IpAddress,
+                    competitor.MobileIpAddress,
                     enrolment.Ordinal,
                     enrolment.ProvisionStatus))
             .OrderBy(competitor => competitor.Username)

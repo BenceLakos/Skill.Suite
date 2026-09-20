@@ -17,7 +17,7 @@ using Xunit;
 public sealed class AccountAccessPartitionerTests
 {
     private static Competitor Named(string username) =>
-        Competitor.Create(username, $"{username} name", [], "10.0.0.1", "HU");
+        Competitor.Create(username, $"{username} name", [], "10.0.0.1", mobileIpAddress: null, "HU");
 
     [Fact]
     public void OnlyAccountHoldersAreProvisionable()

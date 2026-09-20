@@ -26,7 +26,8 @@ public sealed class UpdateCompetitorHandler(
                 return Result.Failure(CompetitorErrors.UsernameConflict);
         }
 
-        competitor.UpdateProfile(username, request.FullName, request.IpAddress, request.CountryCode);
+        competitor.UpdateProfile(
+            username, request.FullName, request.IpAddress, request.MobileIpAddress, request.CountryCode);
         competitor.SetPassword(vault.Protect(request.Password));
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

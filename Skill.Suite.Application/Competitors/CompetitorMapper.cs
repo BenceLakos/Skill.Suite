@@ -14,6 +14,7 @@ public static class CompetitorMapper
             competitor.FullName,
             vault.Unprotect(competitor.EncryptedPassword),
             competitor.IpAddress,
+            competitor.MobileIpAddress,
             competitor.CountryCode,
             competitor.CreatedAt,
             competitor.CreatedBy,

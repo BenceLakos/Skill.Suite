@@ -28,8 +28,9 @@ public sealed class SessionDockerImageValidationTests
         Dictionary<string, string>? labels = null,
         List<VolumeMount>? volumes = null,
         List<PortMapping>? ports = null,
-        string? domain = null) =>
-        new("postgres:17", env ?? [], labels ?? [], volumes ?? [], ports ?? [], domain);
+        string? domain = null,
+        int? routedPort = null) =>
+        new("postgres:17", env ?? [], labels ?? [], volumes ?? [], ports ?? [], domain, routedPort);
 
     private static SessionDockerImage WithEnv(string value) =>
         Image(env: new Dictionary<string, string> { ["SETTING"] = value });
@@ -107,23 +108,85 @@ public sealed class SessionDockerImageValidationTests
         Assert.True(Update([WithEnv("{{competitor.username}}")], databaseName: null).IsValid);
     }
 
-    private static readonly List<PortMapping> OneTcpPort = [new PortMapping(8080, 80, PortProtocol.Tcp)];
+    private static SessionDockerImage Routed(string domain, int? routedPort = 8080, List<PortMapping>? ports = null) =>
+        Image(ports: ports, domain: domain, routedPort: routedPort);
 
     [Theory]
     [InlineData("shop.skills.local")]
     [InlineData("shop")]
     [InlineData("a-b.c-d.example")]
     [InlineData("s1.skills.local")]
-    public void ABareLowercaseHostnameWithATcpPortIsAccepted(string domain)
+    public void ABareLowercaseHostnameWithAContainerPortIsAccepted(string domain)
     {
-        Assert.True(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
-        Assert.True(Update([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+        Assert.True(Create([Routed(domain)], DatabaseName).IsValid);
+        Assert.True(Update([Routed(domain)], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void ARoutedServiceNeedsNoPortMappingAtAll()
+    {
+        // The proxy reaches the container over the shared docker network and talks to the container port
+        // directly, so nothing has to be published on the host.
+        Assert.True(Create([Routed("shop.skills.local", ports: [])], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void ARoutedServiceMayStillPublishHostPorts()
+    {
+        // Port mappings stay optional and independent of routing, in both directions.
+        Assert.True(Create(
+            [Routed("shop.skills.local", ports: [new PortMapping(8080, 80, PortProtocol.Tcp)])],
+            DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void ARoutedServiceWhoseOnlyPortMappingIsUdpIsStillAccepted()
+    {
+        // The old rule demanded a TCP mapping. Nothing about routing needs one.
+        Assert.True(Create(
+            [Routed("shop.skills.local", ports: [new PortMapping(5300, 53, PortProtocol.Udp)])],
+            DatabaseName).IsValid);
     }
 
     [Fact]
     public void NoDomainIsFineAndNeedsNoPorts()
     {
         Assert.True(Create([Image()], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void ADomainWithNoContainerPortIsRejected()
+    {
+        // There would be nothing for the proxy to forward to: the route is created and every request
+        // through it fails.
+        Assert.False(Create([Routed("shop.skills.local", routedPort: null)], DatabaseName).IsValid);
+        Assert.False(Update([Routed("shop.skills.local", routedPort: null)], DatabaseName).IsValid);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(65536)]
+    public void AContainerPortOutsideThePortRangeIsRejected(int routedPort)
+    {
+        Assert.False(Create([Routed("shop.skills.local", routedPort)], DatabaseName).IsValid);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(65535)]
+    public void AContainerPortAtTheEdgesOfTheRangeIsAccepted(int routedPort)
+    {
+        Assert.True(Create([Routed("shop.skills.local", routedPort)], DatabaseName).IsValid);
+    }
+
+    [Fact]
+    public void AContainerPortWithoutADomainIsRejected()
+    {
+        // Refused rather than ignored: a port left behind by clearing the domain would read as a service
+        // that is still routed, which it is not.
+        Assert.False(Create([Image(routedPort: 8080)], DatabaseName).IsValid);
+        Assert.False(Update([Image(routedPort: 8080)], DatabaseName).IsValid);
     }
 
     [Theory]
@@ -133,8 +196,8 @@ public sealed class SessionDockerImageValidationTests
     {
         // The rule is a literal in a generated label, and two spellings of one name is what an administrator
         // would be left comparing when a route does not match.
-        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
-        Assert.False(Update([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+        Assert.False(Create([Routed(domain)], DatabaseName).IsValid);
+        Assert.False(Update([Routed(domain)], DatabaseName).IsValid);
     }
 
     [Theory]
@@ -142,15 +205,14 @@ public sealed class SessionDockerImageValidationTests
     [InlineData("https://shop.skills.local")]
     public void ADomainWithASchemeIsRejected(string domain)
     {
-        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+        Assert.False(Create([Routed(domain)], DatabaseName).IsValid);
     }
 
     [Fact]
     public void ADomainWithAPortIsRejected()
     {
-        // The proxy matches the Host header, which carries no port on the standard one, and the published
-        // port belongs to the proxy rather than to this service.
-        Assert.False(Create([Image(ports: OneTcpPort, domain: "shop.skills.local:8080")], DatabaseName).IsValid);
+        // The proxy matches the Host header, and the port the container listens on is a field of its own.
+        Assert.False(Create([Routed("shop.skills.local:8080")], DatabaseName).IsValid);
     }
 
     [Theory]
@@ -161,7 +223,7 @@ public sealed class SessionDockerImageValidationTests
     [InlineData("shop local")]
     public void ADomainThatIsNotAHostnameIsRejected(string domain)
     {
-        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
+        Assert.False(Create([Routed(domain)], DatabaseName).IsValid);
     }
 
     [Fact]
@@ -170,19 +232,7 @@ public sealed class SessionDockerImageValidationTests
         var domain = string.Join('.', Enumerable.Repeat(new string('a', 60), 5));
 
         Assert.True(domain.Length > ServiceDomain.MaxLength);
-        Assert.False(Create([Image(ports: OneTcpPort, domain: domain)], DatabaseName).IsValid);
-    }
-
-    [Fact]
-    public void ADomainWithNoTcpPortMappingIsRejected()
-    {
-        // Traefik forwards to a port inside the container; with none there is nothing to forward to and
-        // every request through the route fails.
-        Assert.False(Create([Image(domain: "shop.skills.local")], DatabaseName).IsValid);
-
-        Assert.False(Create(
-            [Image(ports: [new PortMapping(5300, 53, PortProtocol.Udp)], domain: "shop.skills.local")],
-            DatabaseName).IsValid);
+        Assert.False(Create([Routed(domain)], DatabaseName).IsValid);
     }
 
     [Fact]
@@ -191,8 +241,8 @@ public sealed class SessionDockerImageValidationTests
         // Two routers competing for the same requests, resolved by a tie-break nothing here controls.
         var images = new List<SessionDockerImage>
         {
-            Image(ports: OneTcpPort, domain: "shop.skills.local"),
-            Image(ports: OneTcpPort, domain: "SHOP.skills.local".ToLowerInvariant()),
+            Routed("shop.skills.local"),
+            Routed("SHOP.skills.local".ToLowerInvariant()),
         };
 
         Assert.False(Create(images, DatabaseName).IsValid);
@@ -204,8 +254,8 @@ public sealed class SessionDockerImageValidationTests
     {
         var images = new List<SessionDockerImage>
         {
-            Image(ports: OneTcpPort, domain: "shop.skills.local"),
-            Image(ports: OneTcpPort, domain: "admin.skills.local"),
+            Routed("shop.skills.local"),
+            Routed("admin.skills.local", 3000),
         };
 
         Assert.True(Create(images, DatabaseName).IsValid);
@@ -220,7 +270,7 @@ public sealed class SessionDockerImageValidationTests
     [Fact]
     public void TheExistingImageRulesStillApply()
     {
-        var blank = new SessionDockerImage("   ", [], [], [], [], Domain: null);
+        var blank = new SessionDockerImage("   ", [], [], [], [], Domain: null, RoutedPort: null);
 
         Assert.False(Create([blank], DatabaseName).IsValid);
         Assert.False(Update([blank], DatabaseName).IsValid);

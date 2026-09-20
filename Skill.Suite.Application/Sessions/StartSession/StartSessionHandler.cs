@@ -746,6 +746,7 @@ public sealed class StartSessionHandler(
                     competitor.Username,
                     competitor.FullName,
                     competitor.IpAddress,
+                    competitor.MobileIpAddress,
                     competitor.CountryCode,
                     vault.Unprotect(competitor.EncryptedPassword),
                     ordinals[competitor.Id],

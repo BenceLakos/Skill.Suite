@@ -112,6 +112,7 @@ public sealed class GetMySessionOverviewHandler(
                     competitor.Username,
                     competitor.FullName,
                     competitor.IpAddress,
+                    competitor.MobileIpAddress,
                     competitor.CountryCode,
                     credentials.Password,
                     enrolment.Ordinal,
@@ -131,14 +132,10 @@ public sealed class GetMySessionOverviewHandler(
         var services = plan.Services
             .Select(service => new MySessionServiceDto(
                 service.ServiceNumber,
-                service.ConfiguredImage,
                 service.ContainerName,
                 service.Environment,
                 service.PortMappings,
-                // The proxy listens on 80 inside its container and the stack publishes it on a port this
-                // application has no setting for — so it is read off the host this very page was reached on,
-                // which came through that proxy on that port.
-                ServiceUrl.For(service.Host, host)))
+                ServiceUrl.For(service.Host)))
             .ToList();
 
         return new MySessionOverviewDto(
@@ -149,7 +146,9 @@ public sealed class GetMySessionOverviewHandler(
                 session.StartsAt,
                 session.EndsAt,
                 session.Status,
-                enrolment.RepositoryUrl,
+                // Rewritten for the competitor's machine: the stored value is the name the git server
+                // calls itself over the docker network, which their laptop cannot resolve.
+                CompetitorGitUrl.For(enrolment.RepositoryUrl, host),
                 enrolment.ProvisionStatus,
                 host,
                 database,

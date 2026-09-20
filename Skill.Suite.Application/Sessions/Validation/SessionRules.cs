@@ -96,14 +96,19 @@ internal static class SessionRules
             .WithMessage(
                 "A docker service's domain must be a bare lowercase hostname such as 'shop.skills.local' — "
                 + $"no scheme, no port, no path, at most {ServiceDomain.MaxLength} characters.")
-            // Traefik forwards to a port INSIDE the container, so a routed service that publishes nothing
-            // over TCP gives it nothing to forward to: the route is created and every request fails.
+            // Traefik forwards to a port INSIDE the container, so a routed service has to say which one.
+            // Without it the route is created and every request through it fails.
             .Must(images => images.All(image =>
-                IsUnset(image.Domain)
-                || image.PortMappings.Any(port => port.Protocol == PortProtocol.Tcp)))
+                IsUnset(image.Domain) || image.RoutedPort is > 0 and < 65536))
             .WithMessage(
-                "A docker service with a domain needs at least one TCP port mapping — the reverse proxy "
-                + "forwards to the container port of the first one.")
+                "A docker service with a domain needs the port the application listens on inside the "
+                + "container (1-65535) — it is what the reverse proxy forwards to.")
+            // Refused rather than ignored, so a port left behind by clearing the domain cannot read as a
+            // service that is still routed.
+            .Must(images => images.All(image => !IsUnset(image.Domain) || image.RoutedPort is null))
+            .WithMessage(
+                "A docker service without a domain is not routed, so it must not carry a container port for "
+                + "the reverse proxy. Set a domain, or clear the port.")
             // Two services on one hostname would be two proxy routers competing for the same requests, and
             // which one wins is a tie-break nothing here controls.
             .Must(images => Domains(images).Count == Domains(images).Distinct(StringComparer.OrdinalIgnoreCase).Count())

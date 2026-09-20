@@ -16,6 +16,9 @@ public sealed class CompetitorConfiguration : IEntityTypeConfiguration<Competito
         builder.Property(x => x.FullName).IsRequired().HasMaxLength(200);
         builder.Property(x => x.EncryptedPassword).IsRequired();
         builder.Property(x => x.IpAddress).IsRequired().HasMaxLength(45);
+
+        // Nullable and the same width: an optional second device, holding an address of the same kind.
+        builder.Property(x => x.MobileIpAddress).HasMaxLength(45);
         builder.Property(x => x.CountryCode).IsRequired().HasMaxLength(3).IsFixedLength();
 
         builder.Property(x => x.CreatedAt).IsRequired();

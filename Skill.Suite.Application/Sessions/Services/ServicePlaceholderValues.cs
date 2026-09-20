@@ -55,6 +55,9 @@ internal static class ServicePlaceholderValues
             [ServicePlaceholder.CompetitorUsername] = competitor.Username,
             [ServicePlaceholder.CompetitorFullName] = competitor.FullName,
             [ServicePlaceholder.CompetitorIpAddress] = competitor.IpAddress,
+            // Empty rather than absent when they have no second device, so a setting built around it
+            // renders to something harmless instead of keeping the literal token.
+            [ServicePlaceholder.CompetitorMobileIpAddress] = competitor.MobileIpAddress ?? string.Empty,
             [ServicePlaceholder.CompetitorCountryCode] = competitor.CountryCode,
             [ServicePlaceholder.CompetitorPassword] = competitor.Password,
             [ServicePlaceholder.DatabaseName] = database,

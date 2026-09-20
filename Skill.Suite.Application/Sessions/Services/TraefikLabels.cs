@@ -51,6 +51,9 @@ internal static class TraefikLabels
     private const string ClientIpMatcher = "ClientIP";
 
     private const string RuleAnd = " && ";
+    private const string RuleOr = " || ";
+    private const string GroupOpen = "(";
+    private const string GroupClose = ")";
     private const char RuleQuote = '`';
 
     /// <summary>The one character a Traefik router or service name may carry besides letters and digits.</summary>
@@ -95,11 +98,30 @@ internal static class TraefikLabels
         return name.ToString();
     }
 
+    /// <summary>
+    /// The router's rule: the hostname, narrowed to the addresses allowed to reach this container.
+    /// </summary>
+    /// <remarks>
+    /// One <c>ClientIP</c> matcher per address, because Traefik v3's takes exactly one value. Two or more are
+    /// joined by <c>||</c> INSIDE parentheses: without them the rule would parse as
+    /// <c>(Host &amp;&amp; ClientIP) || ClientIP</c>, whose right-hand side matches that address on every
+    /// hostname the proxy serves — including the Suite's own.
+    /// </remarks>
     private static string Rule(TraefikRoute route)
     {
         var host = Matcher(HostMatcher, route.Host);
 
-        return route.ClientIp is null ? host : host + RuleAnd + Matcher(ClientIpMatcher, route.ClientIp);
+        var addresses = route.ClientIps
+            .Where(address => !string.IsNullOrWhiteSpace(address))
+            .Select(address => Matcher(ClientIpMatcher, address.Trim()))
+            .ToList();
+
+        return addresses.Count switch
+        {
+            0 => host,
+            1 => host + RuleAnd + addresses[0],
+            _ => host + RuleAnd + GroupOpen + string.Join(RuleOr, addresses) + GroupClose,
+        };
     }
 
     private static string Matcher(string matcher, string value) =>

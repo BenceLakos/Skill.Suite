@@ -23,6 +23,8 @@ internal sealed record SessionServicePlanCompetitor(
     string Username,
     string FullName,
     string IpAddress,
+    /// <summary>Their second device, or null when they have none.</summary>
+    string? MobileIpAddress,
     string CountryCode,
     string Password,
     int Ordinal,

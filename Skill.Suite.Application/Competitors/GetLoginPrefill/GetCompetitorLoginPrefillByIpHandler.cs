@@ -36,11 +36,16 @@ public sealed class GetCompetitorLoginPrefillByIpHandler(
         var competitors = await db.Competitors
             .AsNoTracking()
             .OrderBy(c => c.Username)
-            .Select(c => new { c.Username, c.IpAddress, c.EncryptedPassword })
+            .Select(c => new { c.Username, c.IpAddress, c.MobileIpAddress, c.EncryptedPassword })
             .ToListAsync(cancellationToken);
 
+        // Both of a competitor's devices count as them: the phone they were handed is the same person as the
+        // workstation they sit at, and the task is routinely the one to be demonstrated on it.
         var matches = WorkstationMatch.MatchIndexes(
-            client, competitors.Select(c => c.IpAddress).ToList());
+            client,
+            competitors
+                .Select(c => (IReadOnlyList<string?>)[c.IpAddress, c.MobileIpAddress])
+                .ToList());
 
         if (matches.Count == 0)
             return NoPrefill();

@@ -17,8 +17,14 @@ public sealed class TraefikLabelsTests
     private const string Container = "skill-suite-round-1-1-c01";
     private const string Network = "skill-suite";
 
-    private static TraefikRoute Route(string? clientIp = "10.0.0.7", int containerPort = 80) =>
-        new(Container, "shop.skills.local", clientIp, containerPort, Network);
+    private static TraefikRoute Route(int containerPort = 80, params string[] clientIps) =>
+        new(Container, "shop.skills.local",
+            clientIps.Length == 0 ? ["10.0.0.7"] : clientIps, containerPort, Network);
+
+    private static TraefikRoute RouteFor(params string[] clientIps) =>
+        new(Container, "shop.skills.local", clientIps, DefaultPort, Network);
+
+    private const int DefaultPort = 80;
 
     [Fact]
     public void TheProxyIsTurnedOnForThisContainerOnly()
@@ -55,10 +61,11 @@ public sealed class TraefikLabelsTests
     }
 
     [Fact]
-    public void TheForwardedPortIsTheContainerPort()
+    public void TheForwardedPortIsTheOneInsideTheContainer()
     {
-        // The container port, not the published host port: the proxy reaches the container over the shared
-        // docker network, where nothing is published.
+        // The service's own routed port, not a published host port: the proxy reaches the container over the
+        // shared docker network, where nothing is published — which is why a routed service needs no port
+        // mapping at all.
         Assert.Equal(
             "8081",
             TraefikLabels.For(Route(containerPort: 8081))[
@@ -74,13 +81,34 @@ public sealed class TraefikLabelsTests
     }
 
     [Fact]
+    public void TwoAddressesAreJoinedByOrInsideParentheses()
+    {
+        // Traefik v3's ClientIP matcher takes exactly one value, so a competitor with a second device is two
+        // matchers. The parentheses are load-bearing: without them the rule parses as
+        // (Host && ClientIP) || ClientIP, whose right-hand side matches that address on EVERY hostname the
+        // proxy serves — including the Suite's own.
+        Assert.Equal(
+            "Host(`shop.skills.local`) && (ClientIP(`10.0.0.7`) || ClientIP(`10.0.0.8`))",
+            TraefikLabels.For(RouteFor("10.0.0.7", "10.0.0.8"))[
+                $"traefik.http.routers.{Container}.rule"]);
+    }
+
+    [Fact]
+    public void AnEmptyAddressIsDroppedRatherThanEmittedAsAMatcherThatMatchesNothing()
+    {
+        Assert.Equal(
+            "Host(`shop.skills.local`) && ClientIP(`10.0.0.7`)",
+            TraefikLabels.For(RouteFor("10.0.0.7", "   "))[$"traefik.http.routers.{Container}.rule"]);
+    }
+
+    [Fact]
     public void ARouteWithNoSourceAddressMatchesTheHostAlone()
     {
-        // Not produced by the planner — every container belongs to one competitor and therefore to one
-        // address — but the builder must not invent an empty ClientIP matcher, which would match nothing.
+        // Not produced by the planner — every container belongs to one competitor and therefore to at least
+        // one address — but the builder must not invent an empty ClientIP matcher, which would match nothing.
         Assert.Equal(
             "Host(`shop.skills.local`)",
-            TraefikLabels.For(Route(clientIp: null))[$"traefik.http.routers.{Container}.rule"]);
+            TraefikLabels.For(RouteFor())[$"traefik.http.routers.{Container}.rule"]);
     }
 
     [Fact]

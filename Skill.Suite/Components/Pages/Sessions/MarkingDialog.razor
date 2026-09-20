@@ -20,7 +20,7 @@
                     @foreach (var competitor in Competitors)
                     {
                         <MudSelectItem Value="@competitor.CompetitorId">
-                            @competitor.Username — @competitor.FullName (@competitor.IpAddress)
+                            @competitor.Username — @competitor.FullName (@Devices(competitor))
                         </MudSelectItem>
                     }
                 </MudSelect>
@@ -74,4 +74,16 @@
             new MarkingRequest(MarkingAction.Stop, _competitorId, string.Empty)));
 
     private void Cancel() => Dialog.Cancel();
+
+    /// <summary>
+    /// The competitor's machines, so it is clear which addresses are already theirs.
+    /// </summary>
+    /// <remarks>
+    /// Their mobile device keeps reaching the marking container alongside the address typed below, which is
+    /// worth seeing while typing it.
+    /// </remarks>
+    private static string Devices(SessionCompetitorDto competitor) =>
+        competitor.MobileIpAddress is null
+            ? competitor.IpAddress
+            : $"{competitor.IpAddress}, {competitor.MobileIpAddress}";
 }

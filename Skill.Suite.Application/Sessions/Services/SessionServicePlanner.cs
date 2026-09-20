@@ -91,14 +91,7 @@ internal static class SessionServicePlanner
         var containerName = SessionServiceNaming.ContainerName(
             request.Session.Slug, index, competitor.Username, request.Mode);
 
-        // Whose machine may reach this container: the competitor's own while they are competing, the
-        // expert's while that competitor's work is being marked. The hostname is the same either way — the
-        // source address is the whole of what separates one competitor's container from the next.
-        var clientIp = request.Mode == SessionRunMode.Marking
-            ? request.MarkingIpAddress
-            : competitor.IpAddress;
-
-        var route = RouteFor(request, image, containerName, clientIp, ports);
+        var route = RouteFor(request, image, containerName, ClientIpsFor(request, competitor));
 
         return new PlannedSessionService(
             SessionServiceNaming.ServiceNumber(index),
@@ -115,35 +108,59 @@ internal static class SessionServicePlanner
     }
 
     /// <summary>
+    /// Whose machines may reach this container.
+    /// </summary>
+    /// <remarks>
+    /// While the competition runs, the competitor's own: their workstation and, if they were given one,
+    /// their mobile device. While marking, the machine the expert is marking from — plus that competitor's
+    /// mobile device again, so a phone the task is meant to be demonstrated on can still reach the container
+    /// being marked. The competitor's WORKSTATION is deliberately not on the marking list: the competition
+    /// is over, and leaving it there would let them keep using the instance an expert is judging.
+    /// </remarks>
+    private static List<string> ClientIpsFor(
+        SessionServicePlanRequest request, SessionServicePlanCompetitor competitor)
+    {
+        var addresses = new List<string>();
+
+        if (request.Mode == SessionRunMode.Marking)
+        {
+            if (!string.IsNullOrWhiteSpace(request.MarkingIpAddress))
+                addresses.Add(request.MarkingIpAddress);
+        }
+        else
+        {
+            addresses.Add(competitor.IpAddress);
+        }
+
+        if (!string.IsNullOrWhiteSpace(competitor.MobileIpAddress))
+            addresses.Add(competitor.MobileIpAddress);
+
+        return addresses;
+    }
+
+    /// <summary>
     /// The container's route through the proxy, or null when it is not routed.
     /// </summary>
     /// <remarks>
-    /// The FIRST TCP mapping's container port is what the proxy forwards to, and the session validators make
-    /// sure a domain cannot be saved without one. The container port rather than the published host port: the
-    /// proxy reaches the container over the shared docker network, where nothing is published.
+    /// The service's own routed port is what the proxy forwards to, and the session validators make sure a
+    /// domain cannot be saved without one. Nothing here reads the port MAPPINGS: the proxy reaches the
+    /// container over the shared docker network and talks to the port inside it, so a routed service needs
+    /// nothing published on the host at all.
     /// <para>
-    /// Every route carries a source address, because every container belongs to exactly one competitor. A
-    /// route without one would be one competitor's container answering for the whole domain, which is how
-    /// twenty people end up looking at the first competitor's work.
+    /// Every route carries at least one source address, because every container belongs to exactly one
+    /// competitor. A route without one would be one competitor's container answering for the whole domain,
+    /// which is how twenty people end up looking at the first competitor's work.
     /// </para>
     /// </remarks>
     private static TraefikRoute? RouteFor(
         SessionServicePlanRequest request,
         SessionDockerImage image,
         string containerName,
-        string? clientIp,
-        IReadOnlyList<PortMapping> ports)
-    {
-        if (string.IsNullOrWhiteSpace(image.Domain))
-            return null;
-
-        var forwarded = ports.FirstOrDefault(port => port.Protocol == PortProtocol.Tcp);
-
-        return forwarded is null
+        IReadOnlyList<string> clientIps) =>
+        string.IsNullOrWhiteSpace(image.Domain) || image.RoutedPort is not { } routedPort
             ? null
             : new TraefikRoute(
-                containerName, image.Domain, clientIp, forwarded.ContainerPort, request.ServiceNetwork);
-    }
+                containerName, image.Domain, clientIps, routedPort, request.ServiceNetwork);
 
     /// <summary>
     /// The image's own labels, rendered, then the proxy's, then the platform's.

@@ -6,6 +6,8 @@ public sealed record CompetitorDto(
     string FullName,
     string Password,
     string IpAddress,
+    /// <summary>Their second device, or null when they have none.</summary>
+    string? MobileIpAddress,
     string CountryCode,
     DateTime CreatedAt,
     string? CreatedBy,

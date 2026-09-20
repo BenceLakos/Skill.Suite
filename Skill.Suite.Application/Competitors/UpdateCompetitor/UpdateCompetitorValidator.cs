@@ -25,6 +25,8 @@ public sealed class UpdateCompetitorValidator : AbstractValidator<UpdateCompetit
             .Must(CompetitorRules.IsValidIpAddress)
             .WithMessage("IP address must be a valid IPv4 or IPv6 address.");
 
+        RuleFor(x => x.MobileIpAddress).ValidMobileIpAddress(x => x.IpAddress);
+
         RuleFor(x => x.CountryCode)
             .NotEmpty()
             .Must(c => CompetitorRules.CountryCodePattern.IsMatch(c))

@@ -101,10 +101,14 @@ public sealed class WorkstationMatchTests
         Assert.Equal(IPAddress.Parse("10.0.0.5"), WorkstationMatch.Parse("::ffff:10.0.0.5"));
     }
 
+    /// <summary>One competitor, given as the set of devices recorded for them.</summary>
+    private static IReadOnlyList<string?> Devices(params string?[] addresses) => addresses;
+
     [Fact]
     public void OneCompetitorAtTheAddressIsFoundByPosition()
     {
-        var stored = new[] { "10.0.0.4", "10.0.0.5", "10.0.0.6" };
+        List<IReadOnlyList<string?>> stored =
+            [Devices("10.0.0.4"), Devices("10.0.0.5"), Devices("10.0.0.6")];
 
         var matches = WorkstationMatch.MatchIndexes(IPAddress.Parse("10.0.0.5"), stored);
 
@@ -114,7 +118,7 @@ public sealed class WorkstationMatchTests
     [Fact]
     public void NobodyAtTheAddressIsNoMatch()
     {
-        var stored = new[] { "10.0.0.4", "10.0.0.6" };
+        List<IReadOnlyList<string?>> stored = [Devices("10.0.0.4"), Devices("10.0.0.6")];
 
         Assert.Empty(WorkstationMatch.MatchIndexes(IPAddress.Parse("10.0.0.5"), stored));
     }
@@ -124,10 +128,40 @@ public sealed class WorkstationMatchTests
     {
         // The caller has to be able to tell "nobody" from "more than one": the second is a data-entry mistake
         // that must produce no pre-fill rather than one of the two competitors' passwords.
-        var stored = new[] { "10.0.0.5", "10.0.0.6", "::ffff:10.0.0.5" };
+        List<IReadOnlyList<string?>> stored =
+            [Devices("10.0.0.5"), Devices("10.0.0.6"), Devices("::ffff:10.0.0.5")];
 
         var matches = WorkstationMatch.MatchIndexes(IPAddress.Parse("10.0.0.5"), stored);
 
         Assert.Equal([0, 2], matches);
+    }
+
+    [Fact]
+    public void ACompetitorIsFoundByTheirMobileDeviceToo()
+    {
+        // The phone they were handed is the same person as the workstation they sit at, and the task is
+        // routinely the one to be demonstrated on it.
+        List<IReadOnlyList<string?>> stored =
+            [Devices("10.0.0.4", null), Devices("10.0.0.5", "10.0.0.99")];
+
+        Assert.Equal([1], WorkstationMatch.MatchIndexes(IPAddress.Parse("10.0.0.99"), stored));
+    }
+
+    [Fact]
+    public void ACompetitorWithNoMobileDeviceIsStillMatchedByTheirWorkstation()
+    {
+        List<IReadOnlyList<string?>> stored = [Devices("10.0.0.5", null)];
+
+        Assert.Equal([0], WorkstationMatch.MatchIndexes(IPAddress.Parse("10.0.0.5"), stored));
+    }
+
+    [Fact]
+    public void ACompetitorMatchingOnBothOfTheirOwnAddressesIsStillOneMatch()
+    {
+        // Counted per competitor, not per address: two entries here would read as the ambiguity that
+        // refuses a pre-fill, on a row that is perfectly unambiguous.
+        List<IReadOnlyList<string?>> stored = [Devices("10.0.0.5", "::ffff:10.0.0.5")];
+
+        Assert.Equal([0], WorkstationMatch.MatchIndexes(IPAddress.Parse("10.0.0.5"), stored));
     }
 }

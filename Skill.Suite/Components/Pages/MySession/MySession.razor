@@ -176,23 +176,26 @@ else
                             <MudPaper Outlined="true" Class="pa-3">
                                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-2">
                                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@service.Number</MudChip>
-                                    <MudText Typo="Typo.body1" Style="flex:1;">@service.Image</MudText>
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@service.ContainerName</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="flex:1;">@service.ContainerName</MudText>
                                 </MudStack>
 
+                                @*
+                                    One address per service and never two. A routed service is reached at
+                                    its URL, and a host port printed beside it would be a second address for
+                                    the same container that skips the proxy — which is the confusion the
+                                    routing exists to remove, not something a competitor should choose
+                                    between mid-competition.
+                                *@
                                 @if (service.Url is not null)
                                 {
-                                    @*
-                                        The address to open. Only this competitor's machine reaches this
-                                        container at it — the proxy sends every other workstation to its
-                                        own competitor's copy — which is worth saying next to the link.
-                                    *@
                                     <div class="mb-2">
                                         <CopyableField Label="@T["mySession.service.url"]" Value="@service.Url"/>
                                     </div>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @T["mySession.service.urlHelp"]
+                                    </MudText>
                                 }
-
-                                @if (service.Ports.Count == 0)
+                                else if (service.Ports.Count == 0)
                                 {
                                     <MudText Typo="Typo.body2" Color="Color.Secondary">@T["mySession.service.noPorts"]</MudText>
                                 }

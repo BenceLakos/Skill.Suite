@@ -30,6 +30,9 @@ public enum ServicePlaceholder
     /// <summary>The workstation address recorded for the competitor.</summary>
     CompetitorIpAddress,
 
+    /// <summary>Their second device's address, or empty when they have none.</summary>
+    CompetitorMobileIpAddress,
+
     /// <summary>The competitor's country code, upper-cased.</summary>
     CompetitorCountryCode,
 

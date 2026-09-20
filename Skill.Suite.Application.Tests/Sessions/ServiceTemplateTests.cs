@@ -21,6 +21,7 @@ public sealed class ServiceTemplateTests
         [ServicePlaceholder.CompetitorUsername] = "c01",
         [ServicePlaceholder.CompetitorFullName] = "Joe Doe",
         [ServicePlaceholder.CompetitorIpAddress] = "10.0.0.1",
+        [ServicePlaceholder.CompetitorMobileIpAddress] = "10.0.0.99",
         [ServicePlaceholder.CompetitorCountryCode] = "HU",
         [ServicePlaceholder.CompetitorPassword] = "correct-horse",
         [ServicePlaceholder.DatabaseName] = "round-1-c01",
@@ -157,7 +158,8 @@ public sealed class ServiceTemplateTests
             new Dictionary<string, string> { ["owner"] = "{{competitor.fullName}}" },
             [new VolumeMount("/srv/{{session.slug}}", "/data", ReadOnly: false)],
             [],
-            Domain: null);
+            Domain: null,
+            RoutedPort: null);
 
         var scan = ServiceTemplate.Scan(image);
 
@@ -181,7 +183,8 @@ public sealed class ServiceTemplateTests
             new Dictionary<string, string> { ["{{competitor.username}}"] = "fixed" },
             [new VolumeMount("/srv/data", "/{{competitor.username}}", ReadOnly: false)],
             [],
-            Domain: null);
+            Domain: null,
+            RoutedPort: null);
 
         var scan = ServiceTemplate.Scan(image);
 

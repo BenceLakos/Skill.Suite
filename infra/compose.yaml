@@ -39,7 +39,7 @@ services:
       - skill-suite
 
   # The single entrypoint for the whole competition. Everything else is reached by name through it:
-  # git.${DOMAIN}, suite.${DOMAIN}, traefik.${DOMAIN} over http, sql.${DOMAIN} over TDS. Plain http only - a
+  # git.${DOMAIN}, suite.${DOMAIN}, traefik.${DOMAIN} over http, mssql.${DOMAIN} over TDS. Plain http only - a
   # venue LAN has no certificate authority, and a self-signed one would have to be trusted on every
   # competitor machine.
   traefik:
@@ -82,12 +82,12 @@ services:
         # skill-suite - the runners, the job containers they spawn, a buildx builder attached to the network -
         # then reaches git.${DOMAIN} and suite.${DOMAIN} at the proxy, which routes on the Host header exactly
         # as it does for a browser on the LAN. Nothing inside docker depends on venue DNS or on the host's
-        # /etc/hosts, and a workflow can use the same registry hostname a human types. sql.${DOMAIN} works the
+        # /etc/hosts, and a workflow can use the same registry hostname a human types. mssql.${DOMAIN} works the
         # same way, so a judge container and a competitor laptop use one connection string.
         aliases:
           - git.${DOMAIN:-localhost}
           - suite.${DOMAIN:-localhost}
-          - sql.${DOMAIN:-localhost}
+          - mssql.${DOMAIN:-localhost}
 
   gitea:
     container_name: skill-suite-gitea
@@ -141,7 +141,7 @@ services:
       - skill-suite
 
   # The SQL Server competitors work against. Nothing in the stack itself uses it: the platform and Gitea live
-  # in Postgres. Reached as sql.${DOMAIN},1433 from the LAN and from inside the network alike - the port is
+  # in Postgres. Reached as mssql.${DOMAIN},1433 from the LAN and from inside the network alike - the port is
   # published on Traefik, not here. sa is the operator's account only, handed to the platform as a
   # CredentialKind.MsSql credential; each competitor gets a login of their own from it, and the databases they
   # work in are created per competitor when a session starts (the fallback T-SQL is in infra/.env.example).

@@ -8,11 +8,16 @@ namespace Skill.Suite.Application.Sessions.Services;
 /// by the planner, which knows the session, while the builder only knows Traefik's label vocabulary.
 /// </remarks>
 /// <param name="Host">The hostname the request's <c>Host</c> header has to carry.</param>
-/// <param name="ClientIp">
-/// The only source address allowed through to this container, or null for a route open to everybody.
+/// <param name="ClientIps">
+/// The source addresses allowed through to this container. Empty means a route open to everybody.
 /// <para>
-/// This is what separates twenty containers sharing one hostname: during the competition it is the
-/// competitor's own workstation, and while marking it is the machine the expert is marking from.
+/// This is what separates twenty containers sharing one hostname: during the competition these are the
+/// competitor's own machines, and while marking they are the expert's machine and — so the competitor's
+/// phone can still be pointed at the container being marked — that competitor's mobile device.
+/// </para>
+/// <para>
+/// A list rather than one address because Traefik v3's <c>ClientIP</c> matcher takes exactly one value; two
+/// devices are two matchers joined by <c>||</c>.
 /// </para>
 /// </param>
 /// <param name="ContainerPort">The port inside the container the proxy forwards to.</param>
@@ -20,6 +25,6 @@ namespace Skill.Suite.Application.Sessions.Services;
 internal sealed record TraefikRoute(
     string ContainerName,
     string Host,
-    string? ClientIp,
+    IReadOnlyList<string> ClientIps,
     int ContainerPort,
     string Network);
