@@ -44,7 +44,7 @@ services:
   # competitor machine.
   traefik:
     container_name: skill-suite-traefik
-    image: traefik:v3.5
+    image: traefik:v3.6.25
     restart: unless-stopped
     command:
       # Routes are discovered from container labels, so adding a service means labelling it, not editing a
