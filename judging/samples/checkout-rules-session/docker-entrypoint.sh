@@ -133,12 +133,20 @@ flush_events
 #
 # Runs last, and appends. The globs are unquoted on purpose: skill-marker takes several values per flag, so
 # an expanded glob works directly. Absent files are warnings, not errors.
+#
+# The coverage find excludes */In/*: a run with --logger trx leaves the SAME cobertura report under two paths -
+# coverlet's own TestResults/<guid>/coverage.cobertura.xml, and the byte-identical copy VSTest attaches to the
+# TRX under TestResults/<run>/In/<host>/. Passing both doubled the reported total and covered line counts, which
+# the platform stores and displays; the rate, and so the score, hid the fault. The marker also deduplicates
+# identical reports by content hash - this keeps the duplicate out of the argument list to begin with. The TRX
+# is written once and has no attachment copy of itself, so the --trx find needs no such filter.
 # shellcheck disable=SC2046
 skill-marker score \
     --map "${JUDGE_MARKING_MAP}" \
     --events "${JUDGE_EVENT_FILE}" \
     --trx $(find "${TEST_RESULTS}" -name '*.trx' 2>/dev/null | tr '\n' ' ') \
-    --coverage $(find "${TEST_RESULTS}" -name 'coverage.cobertura.xml' 2>/dev/null | tr '\n' ' ') \
+    --coverage $(find "${TEST_RESULTS}" -name 'coverage.cobertura.xml' -not -path '*/In/*' 2>/dev/null \
+        | tr '\n' ' ') \
     --mutation "${MUTATION_REPORT}" \
     --fixture-coverage "${FIXTURE_COVERAGE}"
 
