@@ -32,18 +32,4 @@ public sealed class DiscountEngineTests : LoggedTest<DiscountEngineTests>, IClas
     public DiscountEngineTests(ITestOutputHelper output, FixtureScope<DiscountEngineTests> scope) : base(output, scope)
     {
     }
-// Write your tests here. This example shows the required shape; it is commented out so the project
-// you received compiles with zero tests.
-//
-// [Aspect("C1", CompetitorVisible = true)]
-// [Fact]
-// public void SomeRule_AtItsBoundary_BehavesAsDocumented() =>
-//     Log.AssertEqual(expected, _service.SomeMethod(input));
-//
-// [Aspect("C2", CompetitorVisible = true)]
-// [Theory]
-// [InlineData(9, 180)]
-// [InlineData(10, 190)]
-// public void SomeRule_OnEachSideOfTheThreshold(int input, decimal expected) =>
-//     Log.AssertEqual(expected, _service.SomeMethod(input));
 }

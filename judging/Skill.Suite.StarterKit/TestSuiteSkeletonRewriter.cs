@@ -21,9 +21,8 @@ namespace Skill.Suite.StarterKit;
 /// <item>The class doc comment is replaced, as in the stubber — the reference suite's summary says it is the
 /// calibration suite, which is both wrong and a hint once the competitor is reading it.</item>
 /// </list>
-/// A commented-out example test is added so the competitor has the required shape to copy. Commented rather than
-/// live so the delivered project compiles with zero tests — a starter kit that fails to build costs every
-/// competitor the same confused ten minutes.
+/// Nothing is added in their place: the delivered project compiles with zero tests, and a starter kit that
+/// fails to build costs every competitor the same confused ten minutes.
 /// </remarks>
 public sealed class TestSuiteSkeletonRewriter : CSharpSyntaxRewriter
 {
@@ -31,18 +30,8 @@ public sealed class TestSuiteSkeletonRewriter : CSharpSyntaxRewriter
     public override SyntaxNode? VisitMethodDeclaration(MethodDeclarationSyntax node) => null;
 
     /// <inheritdoc/>
-    public override SyntaxNode? VisitClassDeclaration(ClassDeclarationSyntax node)
-    {
-        var visited = (ClassDeclarationSyntax)base.VisitClassDeclaration(node)!;
-
-        // Attached to the closing brace rather than appended as a member: it has to survive as trivia, because
-        // a real member would make the delivered project fail to compile or ship a passing test for free.
-        var withExample = visited.WithCloseBraceToken(
-            visited.CloseBraceToken.WithLeadingTrivia(
-                visited.CloseBraceToken.LeadingTrivia.Concat(Example)));
-
-        return Reban(withExample);
-    }
+    public override SyntaxNode? VisitClassDeclaration(ClassDeclarationSyntax node) =>
+        Reban((ClassDeclarationSyntax)base.VisitClassDeclaration(node)!);
 
     /// <inheritdoc/>
     public override SyntaxNode? VisitRecordDeclaration(RecordDeclarationSyntax node) =>
@@ -59,21 +48,10 @@ public sealed class TestSuiteSkeletonRewriter : CSharpSyntaxRewriter
     }
 
     // One line, on purpose - the same reason as in ImplementationStubber. The shape the harness needs is shown
-    // by the wiring that is kept and by the example below, not explained in prose.
+    // by the wiring that is kept, not explained in prose.
     private static readonly SyntaxTriviaList Banner = SyntaxFactory.ParseLeadingTrivia(
         """
         /// <summary>Write your tests here: resolve through <c>ServiceResolver</c>, assert through <c>Log</c>. Keep this folder's name and its csproj, and add no package references.</summary>
-
-        """);
-
-    private static readonly SyntaxTriviaList Example = SyntaxFactory.ParseLeadingTrivia(
-        """
-            // Example of the required shape, commented out so the project compiles with zero tests:
-            //
-            // [Aspect("C1", CompetitorVisible = true)]
-            // [Fact]
-            // public void SomeRule_AtItsBoundary_BehavesAsDocumented() =>
-            //     Log.AssertEqual(expected, _service.SomeMethod(input));
 
         """);
 }

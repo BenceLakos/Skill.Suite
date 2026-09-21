@@ -103,5 +103,5 @@ cd judging/samples/checkout-rules-session && ./make-competitor-start.sh blackbox
 Generated, not hand-written — same principle as the white-box samples, opposite rewrite. `skill-starter --kind
 blackbox` removes every method from the reference suite (the tests *are* the answer) while keeping the harness
 wiring: the private service field, the fixture constructor, the base list. Without those the delivered project
-cannot resolve the service and emits no fixture events at all. A commented-out example is added so the
-competitor has the required shape to copy, and the script compiles the result before it finishes.
+cannot resolve the service and emits no fixture events at all. Nothing is added in place of the tests, and the
+script compiles the result before it finishes.

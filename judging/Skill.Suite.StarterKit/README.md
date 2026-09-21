@@ -35,7 +35,7 @@ The competitor writes the tests, so the reference suite is emptied:
 
 - every method is removed — the tests *are* the answer;
 - private fields and constructors are kept — in a suite those are the harness wiring, not the answer;
-- a commented-out example test is added, so the delivered project compiles with zero tests.
+- nothing is added in their place — the delivered project compiles with zero tests.
 
 ## Output
 

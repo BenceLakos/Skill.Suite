@@ -75,14 +75,13 @@ public sealed class TestSuiteSkeletonRewriterTests
 
         Assert.DoesNotContain("190m", skeleton);
         Assert.DoesNotContain("99.99", skeleton);
-        Assert.DoesNotContain("InlineData", skeleton.Replace("// [InlineData(9, 180)]", "")
-            .Replace("// [InlineData(10, 190)]", ""));
+        Assert.DoesNotContain("InlineData", skeleton);
     }
 
     [Fact]
     public void PrivateHelpersGoWithTheTests() =>
         // Unreferenced once the tests are gone, and the name still hints at the rule.
-        Assert.DoesNotContain("Expected", Rewrite(ReferenceSuite).Replace("SomeRule_AtItsBoundary", ""));
+        Assert.DoesNotContain("Expected", Rewrite(ReferenceSuite));
 
     [Fact]
     public void HarnessWiringSurvives()
@@ -123,14 +122,17 @@ public sealed class TestSuiteSkeletonRewriterTests
     }
 
     [Fact]
-    public void AnExampleIsPresentButCommentedOut()
+    public void NoExampleTestIsAdded()
     {
+        // Live it would ship the competitor a passing test for free; commented out it is one more block to
+        // delete before writing anything. The wiring that survives already shows the shape.
         var skeleton = Rewrite(ReferenceSuite);
 
-        Assert.Contains("// [Fact]", skeleton);
-        Assert.Contains("// public void SomeRule_AtItsBoundary_BehavesAsDocumented", skeleton);
-        // Live it would either fail to compile or ship the competitor a passing test for free.
-        Assert.DoesNotContain("\n    [Fact]", skeleton);
+        Assert.DoesNotContain("[Fact]", skeleton);
+        Assert.DoesNotContain("[Aspect", skeleton);
+        Assert.DoesNotContain(
+            skeleton.Split('\n').Select(line => line.TrimStart()),
+            line => line.StartsWith("//") && !line.StartsWith("///"));
     }
 
     [Fact]

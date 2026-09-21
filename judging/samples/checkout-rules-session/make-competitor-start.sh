@@ -12,8 +12,8 @@
 # services, so the .csproj is copied verbatim and every public member keeps its exact declaration with a
 # NotImplementedException body, while non-public members and non-const fields are removed. Black-box: the
 # competitor writes the tests, so the reference suite's methods are removed while the harness wiring - the
-# private service field, the fixture constructor - is kept, plus a commented-out example. Either way the type's
-# own doc comment is replaced with one addressed to the competitor.
+# private service field, the fixture constructor - is kept, and nothing is added in their place. Either way
+# the type's own doc comment is replaced with one addressed to the competitor.
 #
 # The generator is the `skill-starter` tool. Like pack-contracts.sh, it is resolved from a local judging
 # checkout when there is one, or from a feed when this module lives in its own repository:
