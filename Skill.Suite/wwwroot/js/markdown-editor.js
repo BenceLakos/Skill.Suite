@@ -6,7 +6,7 @@ window.skillSuite.markdown = {
             element: textarea,
             initialValue: initialValue || "",
             spellChecker: false,
-            autoDownloadFontAwesome: true,
+            autoDownloadFontAwesome: false,
             status: false,
             minHeight: "260px",
             toolbar: [
