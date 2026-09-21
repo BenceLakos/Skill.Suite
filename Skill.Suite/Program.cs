@@ -8,6 +8,7 @@ using Skill.Suite.Configuration;
 using Skill.Suite.Endpoints;
 using Skill.Suite.Infra;
 using Skill.Suite.Services;
+using Skill.Suite.Services.Clipboard;
 using Skill.Suite.Services.Theme;
 using Skill.Suite.Services.Translation;
 
@@ -29,11 +30,7 @@ builder.Services.AddAuthentication(options =>
     .AddIdentityCookies();
 
 builder.Services.AddAuthorization();
-
-// Whether the caller's address may be read out of X-Forwarded-For, and from which peers. Empty unless the
-// deployment names its proxy, in which case nothing below adds the middleware.
-var trustsProxies = builder.Services.AddTrustedProxies(builder.Configuration);
-
+builder.Services.AddProxyForwarding();
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
@@ -44,6 +41,7 @@ builder.Services.AddSingleton<TranslationStore>();
 builder.Services.AddScoped<ITranslator, JsonTranslator>();
 builder.Services.AddScoped<ThemeState>();
 builder.Services.AddScoped<ThemePersistence>();
+builder.Services.AddScoped<ClipboardInterop>();
 
 // --- Application & Infrastructure ----------------------------------------------------
 builder.Services.AddApplication();
@@ -60,8 +58,7 @@ var app = builder.Build();
 // --- HTTP pipeline -------------------------------------------------------------------
 // First, so everything downstream — logging, the sign-in page's workstation lookup — sees the caller's own
 // address rather than the proxy's.
-if (trustsProxies)
-    app.UseForwardedHeaders();
+app.UseForwardedHeaders();
 
 if (app.Environment.IsDevelopment())
 {

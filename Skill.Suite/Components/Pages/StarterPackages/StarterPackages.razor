@@ -4,9 +4,10 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
-@inject IJSRuntime JS
+@inject ClipboardInterop Clipboard
 @inject ITranslator T
 
+@using Skill.Suite.Services.Clipboard
 @using Skill.Suite.Application.StarterPackages
 @using Skill.Suite.Application.StarterPackages.BrowseStarterPackage
 @using Skill.Suite.Application.StarterPackages.DeleteStarterPackage
@@ -252,18 +253,17 @@ else
     private void Download(string relativePath) =>
         Nav.NavigateTo($"api/starter-packages/download?path={Uri.EscapeDataString(relativePath)}", forceLoad: true);
 
+    // Through the same helper CopyableField uses. Calling navigator.clipboard here directly was what made
+    // this report failure every time: it throws unbound in Chromium, and over plain http it does not exist.
     private async Task CopyTemplateFolder(string templateFolder)
     {
-        try
-        {
-            await JS.InvokeVoidAsync("navigator.clipboard.writeText", templateFolder);
-            Snackbar.Add(T["starterPackages.templateFolderCopied"], Severity.Success);
-        }
-        catch (JSException)
-        {
-            // The clipboard API is unavailable outside a secure context; the value is on screen either way.
-            Snackbar.Add(T["starterPackages.templateFolderCopyFailed"], Severity.Warning);
-        }
+        var copied = await Clipboard.CopyAsync(templateFolder);
+
+        Snackbar.Add(
+            copied
+                ? T["starterPackages.templateFolderCopied"]
+                : T["starterPackages.templateFolderCopyFailed"],
+            copied ? Severity.Success : Severity.Warning);
     }
 
     private async Task OpenUpload()

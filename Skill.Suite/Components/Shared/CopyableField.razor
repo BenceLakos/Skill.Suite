@@ -1,6 +1,8 @@
-@inject IJSRuntime JS
+@inject ClipboardInterop Clipboard
 @inject ISnackbar Snackbar
 @inject ITranslator T
+
+@using Skill.Suite.Services.Clipboard
 
 @*
     A read-only value the reader is meant to take somewhere else: a username, a host name, a connection
@@ -40,18 +42,14 @@
 
     private InputType FieldInputType => Secret && !_revealed ? InputType.Password : InputType.Text;
 
-    // Best effort, the same way the starter packages page copies a path: the clipboard API is unavailable
-    // outside a secure context, and the value is on screen either way.
+    // The helper falls back to a selection copy where the clipboard API is missing, which over plain http is
+    // every browser. It reports rather than throws, so a failure is a warning and the value stays on screen.
     private async Task Copy()
     {
-        try
-        {
-            await JS.InvokeVoidAsync("navigator.clipboard.writeText", Value ?? string.Empty);
-            Snackbar.Add(T["common.copied"], Severity.Success);
-        }
-        catch (JSException)
-        {
-            Snackbar.Add(T["common.copyFailed"], Severity.Warning);
-        }
+        var copied = await Clipboard.CopyAsync(Value);
+
+        Snackbar.Add(
+            copied ? T["common.copied"] : T["common.copyFailed"],
+            copied ? Severity.Success : Severity.Warning);
     }
 }

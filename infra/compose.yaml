@@ -1,11 +1,12 @@
 name: skill-suite-infra
 
 # Shared infrastructure for a competition: the platform database, the SQL Server competitors build against,
-# the git host, the reverse proxy every device on the venue LAN goes through, and the Actions runners that
-# build the platform image.
+# the git host, the reverse proxy every device on the venue LAN goes through, the optional DNS server that
+# points that LAN at the proxy, and the Actions runners that build the platform image.
 #
 #   cp infra/.env.example infra/.env && $EDITOR infra/.env
 #   docker compose -f infra/compose.yaml up -d
+#   docker compose -f infra/compose.yaml --profile dns up -d   # ...and answer DNS for the venue (see dnsmasq)
 #
 # Compose reads infra/.env because the project directory is the directory of the first -f file, so the
 # variables below resolve from there no matter which directory the command is run from. With no .env at all
@@ -88,6 +89,92 @@ services:
           - git.${DOMAIN:-localhost}
           - suite.${DOMAIN:-localhost}
           - mssql.${DOMAIN:-localhost}
+
+  # What makes the hostnames above mean anything on the LAN. The aliases on Traefik solve resolution INSIDE
+  # the docker network only; a competitor laptop still has to be told that git.${DOMAIN}, suite.${DOMAIN},
+  # mssql.${DOMAIN} and traefik.${DOMAIN} are this host. This service is the alternative to a wildcard record
+  # on the venue router (which not every router can do) and to an /etc/hosts line on every machine (which does
+  # not survive one new competitor). It answers EVERY name under ${DOMAIN} with HOST_LAN_IP, so a hostname
+  # added later needs no DNS change, and forwards everything else to DNS_UPSTREAM.
+  #
+  # OPT-IN, through the `dns` profile:
+  #
+  #   docker compose -f infra/compose.yaml --profile dns up -d
+  #
+  # A plain `up -d` leaves it out, which is deliberate: taking over port 53 on a machine is a decision, not a
+  # side effect of starting the stack, and with DOMAIN unset the names are *.localhost, which every browser and
+  # resolver already maps to loopback without help. Naming the service on the command line enables its profile
+  # too, so `up -d --no-deps dnsmasq` works without --profile.
+  #
+  # Nothing inside the stack depends on this. No other service sets `dns:` - containers keep resolving the
+  # public hostnames through the Traefik aliases above, whether or not this one is running.
+  dnsmasq:
+    container_name: skill-suite-dnsmasq
+    profiles:
+      - dns
+    # Built, not pulled - infra/dnsmasq/Dockerfile says why in full. On a host that will be offline at the
+    # venue, build it in advance: `docker compose -f infra/compose.yaml --profile dns build`.
+    build:
+      context: ./dnsmasq
+    restart: unless-stopped
+    command:
+      # The command line is the whole configuration, and --conf-file=/dev/null is what makes that true: the
+      # alpine package ships an /etc/dnsmasq.conf that sets `local-service` and pulls in /etc/dnsmasq.d, so
+      # without this the effective config is partly in files nobody reading this stack would think to open.
+      - --conf-file=/dev/null
+      # dnsmasq forks into the background by default; as PID 1 that looks to docker like a container that
+      # exited at once. Logs go to stdout rather than syslog so `docker logs skill-suite-dnsmasq` shows them.
+      # --log-queries is deliberately absent: one line per lookup per laptop buries everything else - add it by
+      # hand while chasing a problem.
+      - --keep-in-foreground
+      - --log-facility=-
+      # /etc/resolv.conf in a container points at docker's embedded resolver on 127.0.0.11. Forwarding to that
+      # would make the venue's DNS depend on the docker daemon's, and would answer LAN clients with names and
+      # addresses that only mean anything inside this network. --no-hosts drops the container's own /etc/hosts
+      # for the same reason: its entries are this container's bridge address, not the host's.
+      - --no-resolv
+      - --no-hosts
+      # The point of the whole service. --address is a wildcard: it covers ${DOMAIN} itself and every name
+      # under it, present and future. --local declares the domain ours and unforwardable, so a query this
+      # server has no record for (an AAAA, a stray MX) is answered empty here instead of travelling to a public
+      # resolver - which would both leak the venue's internal names and return an NXDOMAIN a client may cache.
+      - --local=/${DOMAIN:-localhost}/
+      - --address=/${DOMAIN:-localhost}/${HOST_LAN_IP:-127.0.0.1}
+      # Everything outside ${DOMAIN}. A laptop handed this server as its resolver has ONLY this server, so
+      # without an upstream it loses the internet the moment it joins the venue network. The venue router is
+      # usually the right value; infra/.env.example covers the offline case.
+      - --server=${DNS_UPSTREAM:-1.1.1.1}
+      # Two filters that keep venue-internal questions off a public resolver: an unqualified name ("laptop-07",
+      # typed into a browser) is never forwarded, and neither is a reverse lookup for an RFC1918 address.
+      - --domain-needed
+      - --bogus-priv
+    ports:
+      # Both protocols. DNS is UDP until an answer exceeds 512 bytes, at which point the client is told to
+      # retry over TCP - publish UDP alone and the failure is intermittent and size-dependent, which is the
+      # worst kind to debug at a venue.
+      #
+      # On a Linux host running systemd-resolved, its stub listener already holds 127.0.0.53:53 and a wildcard
+      # bind then fails with "address already in use". The fix is to bind this to the LAN address instead of
+      # 0.0.0.0 - set DNS_BIND to the same value as HOST_LAN_IP; the stub keeps loopback, this keeps the LAN.
+      # On Docker Desktop for Mac, publishing any port below 1024 needs the privileged helper installed and
+      # running, otherwise the container fails to start with "ports are not available ... vmnetd"; a rehearsal
+      # there can set DNS_PORT high and query it with `dig -p`, since only a venue needs the real port.
+      - "${DNS_BIND:-0.0.0.0}:${DNS_PORT:-53}:53/udp"
+      - "${DNS_BIND:-0.0.0.0}:${DNS_PORT:-53}:53/tcp"
+    healthcheck:
+      # Asks the server a question it is supposed to be authoritative for, rather than checking that a process
+      # exists: a dnsmasq that came up with a mistyped --address is running, listening and useless. busybox
+      # nslookup exits non-zero on NXDOMAIN, SERVFAIL and timeout alike. 127.0.0.1 is the container's own
+      # listener on 53, so DNS_PORT (a host-side mapping) does not enter into it.
+      test: ["CMD-SHELL", "nslookup suite.${DOMAIN:-localhost} 127.0.0.1 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    networks:
+      # On the network for consistency and so it can be queried by name while debugging. No traefik labels:
+      # exposedbydefault=false keeps it off the proxy, and DNS is not http anyway.
+      - skill-suite
 
   gitea:
     container_name: skill-suite-gitea

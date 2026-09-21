@@ -4,7 +4,6 @@
 @inject NavigationManager Nav
 @inject ITranslator T
 
-@using System.Globalization
 @using Skill.Suite.Application.Authorization
 @using Skill.Suite.Application.Sessions.MySession
 @using Skill.Suite.Domain.Sessions
@@ -171,65 +170,27 @@ else
                 else
                 {
                     <MudStack Spacing="3" Class="mt-3">
+                        @*
+                            The name and nothing else. A competitor opens it or copies it; everything the
+                            container was built from is the administrator's business, and a published host
+                            port printed beside the name would be a second address for the same container
+                            that skips the proxy.
+                        *@
                         @foreach (var service in session.Services)
                         {
                             <MudPaper Outlined="true" Class="pa-3">
                                 <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-2">
-                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@service.Number</MudChip>
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="flex:1;">@service.ContainerName</MudText>
+                                    <MudIcon Icon="@Icons.Material.Filled.Language" Size="Size.Small" Color="Color.Secondary"/>
+                                    <MudLink Href="@service.Url" Target="_blank" Typo="Typo.body1">
+                                        @service.Domain
+                                    </MudLink>
                                 </MudStack>
 
-                                @*
-                                    One address per service and never two. A routed service is reached at
-                                    its URL, and a host port printed beside it would be a second address for
-                                    the same container that skips the proxy — which is the confusion the
-                                    routing exists to remove, not something a competitor should choose
-                                    between mid-competition.
-                                *@
-                                @if (service.Url is not null)
-                                {
-                                    <div class="mb-2">
-                                        <CopyableField Label="@T["mySession.service.url"]" Value="@service.Url"/>
-                                    </div>
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                        @T["mySession.service.urlHelp"]
-                                    </MudText>
-                                }
-                                else if (service.Ports.Count == 0)
-                                {
-                                    <MudText Typo="Typo.body2" Color="Color.Secondary">@T["mySession.service.noPorts"]</MudText>
-                                }
-                                else
-                                {
-                                    <MudGrid Spacing="2">
-                                        @foreach (var port in service.Ports)
-                                        {
-                                            <MudItem xs="12" md="6">
-                                                <CopyableField Label="@PortLabel(port)"
-                                                               Value="@Address(session.ServiceHost, port)"/>
-                                            </MudItem>
-                                        }
-                                    </MudGrid>
-                                }
+                                <CopyableField Label="@T["mySession.service.url"]" Value="@service.Domain"/>
 
-                                @if (service.Environment.Count > 0)
-                                {
-                                    <MudExpansionPanels Elevation="0" Dense="true" Class="mt-2">
-                                        <MudExpansionPanel Text="@($"{T["sessions.dockerImage.env"]} ({service.Environment.Count})")">
-                                            <MudSimpleTable Dense="true" Hover="true" Striped="true" Elevation="0">
-                                                <tbody>
-                                                @foreach (var setting in service.Environment.OrderBy(e => e.Key, StringComparer.Ordinal))
-                                                {
-                                                    <tr>
-                                                        <td>@setting.Key</td>
-                                                        <td>@setting.Value</td>
-                                                    </tr>
-                                                }
-                                                </tbody>
-                                            </MudSimpleTable>
-                                        </MudExpansionPanel>
-                                    </MudExpansionPanels>
-                                }
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                                    @T["mySession.service.urlHelp"]
+                                </MudText>
                             </MudPaper>
                         }
                     </MudStack>
@@ -242,17 +203,14 @@ else
 @code {
     private const string TimestampFormat = "yyyy-MM-dd HH:mm";
 
-    /// <summary>What separates a host from a published port for a human to paste. Not the SQL Server comma.</summary>
-    private const char HostPortSeparator = ':';
-
     private MySessionOverviewDto? _overview;
     private string? _error;
     private bool _loading = true;
 
     protected override async Task OnInitializedAsync()
     {
-        // The host the competitor reached this page on is the host everything else is published on, and it is
-        // the one thing the handler cannot work out for itself.
+        // The host the competitor reached this page on. It is the one thing the handler cannot work out for
+        // itself, and both the SQL Server name and the git clone URL are derived from it.
         var result = await Mediator.Send(new GetMySessionOverviewQuery(RequestHost()));
 
         if (result.IsSuccess)
@@ -265,21 +223,6 @@ else
 
     private string? RequestHost() =>
         Uri.TryCreate(Nav.BaseUri, UriKind.Absolute, out var baseUri) ? baseUri.Host : null;
-
-    private string PortLabel(PortMapping port) =>
-        T.Format(
-            "mySession.service.port",
-            port.ContainerPort,
-            port.Protocol.ToString().ToUpperInvariant());
-
-    private static string Address(string? host, PortMapping port)
-    {
-        var publishedPort = port.HostPort.ToString(CultureInfo.InvariantCulture);
-
-        return string.IsNullOrWhiteSpace(host)
-            ? publishedPort
-            : $"{host}{HostPortSeparator}{publishedPort}";
-    }
 
     private static Color StatusColor(SessionStatus status) => status switch
     {

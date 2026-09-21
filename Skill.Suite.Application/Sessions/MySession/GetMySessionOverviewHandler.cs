@@ -2,13 +2,11 @@ namespace Skill.Suite.Application.Sessions.MySession;
 
 using Mediator;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Skill.Suite.Application.Abstractions;
-using Skill.Suite.Application.Competitors.Accounts;
 using Skill.Suite.Application.Sessions.Services;
-using Skill.Suite.Application.Webhooks;
 using Skill.Suite.Domain.Common;
 using Skill.Suite.Domain.Competitors;
+using Skill.Suite.Domain.Sessions;
 
 /// <summary>
 /// Assembles the one page a competitor is given about their own session.
@@ -24,9 +22,7 @@ using Skill.Suite.Domain.Competitors;
 public sealed class GetMySessionOverviewHandler(
     IAppDbContext db,
     IPasswordVault vault,
-    ICurrentUserService currentUser,
-    IOptions<MsSqlOptions> msSqlOptions,
-    IOptions<WebhookOptions> webhookOptions)
+    ICurrentUserService currentUser)
     : IRequestHandler<GetMySessionOverviewQuery, Result<MySessionOverviewDto>>
 {
     public async ValueTask<Result<MySessionOverviewDto>> Handle(
@@ -95,47 +91,13 @@ public sealed class GetMySessionOverviewHandler(
                     server, sessionDatabase, competitor.Username, credentials.Password)
                 : null);
 
-        // Planned through the very code that started the containers, with this competitor as the only
-        // competitor in the session, so what the page shows is what their container actually got: the same
-        // name, the same resolved environment and the same host ports. Describing the images directly would
-        // describe nobody's container, since every service is one container per competitor.
-        //
-        // "Has a SQL login" is answered with "the session has a database", which is as close as this page can
-        // honestly get without an outbound connection on its render path. A competitor who holds no login has
-        // no session database either, and the database card above already says so.
-        var plan = SessionServicePlanner.Plan(new SessionServicePlanRequest(
-            session,
-            SessionRunMode.Competition,
-            SessionProvisioningStage.DockerServices,
-            [
-                new SessionServicePlanCompetitor(
-                    competitor.Username,
-                    competitor.FullName,
-                    competitor.IpAddress,
-                    competitor.MobileIpAddress,
-                    competitor.CountryCode,
-                    credentials.Password,
-                    enrolment.Ordinal,
-                    sessionDatabase is not null),
-            ],
-            session.DatabaseName,
-            ServiceSqlServerName.For(msSqlOptions.Value.Server),
-            DatabaseAdmin: null,
-            // Null on purpose: this page prints the reference the session stores, which is what the
-            // administrator typed, not the one the host daemon was handed to pull with.
-            GitInternalBaseUrl: null,
-            webhookOptions.Value.ServiceNetwork,
-            // No marker is involved: this describes the competition containers, which are separated by the
-            // competitor's own workstation address.
-            MarkingIpAddress: null));
-
-        var services = plan.Services
-            .Select(service => new MySessionServiceDto(
-                service.ServiceNumber,
-                service.ContainerName,
-                service.Environment,
-                service.PortMappings,
-                ServiceUrl.For(service.Host)))
+        // Read off the session directly rather than planned. A domain is stored literally — ServiceTemplate
+        // renders environment values, label values and volume host paths, never the domain — so the name a
+        // competitor is given is the one the administrator typed, and planning every container to find that
+        // out would buy nothing now that the name is all this page shows.
+        var services = session.DockerImages
+            .Where(image => IsReachableBy(image, sessionDatabase is not null))
+            .Select(image => new MySessionServiceDto(image.Domain!, ServiceUrl.For(image.Domain)!))
             .ToList();
 
         return new MySessionOverviewDto(
@@ -150,11 +112,29 @@ public sealed class GetMySessionOverviewHandler(
                 // calls itself over the docker network, which their laptop cannot resolve.
                 CompetitorGitUrl.For(enrolment.RepositoryUrl, host),
                 enrolment.ProvisionStatus,
-                host,
                 database,
                 services),
             NotEnrolled: false);
     }
+
+    /// <summary>
+    /// Whether this competitor actually has a container answering on the service's domain.
+    /// </summary>
+    /// <remarks>
+    /// The same two conditions the planner routes on — a domain, and the port behind it that the proxy
+    /// forwards to — plus the one subtraction it makes: a service whose settings mention a database
+    /// placeholder is never started for a competitor with no session database, and printing its address
+    /// would send them to a name that answers for nobody.
+    /// <para>
+    /// "Has a session database" stands in for "holds a SQL login", which is as close as this page can get
+    /// without an outbound connection on its render path — and the database card above already says which
+    /// one it is.
+    /// </para>
+    /// </remarks>
+    private static bool IsReachableBy(SessionDockerImage image, bool hasSessionDatabase) =>
+        !string.IsNullOrWhiteSpace(image.Domain)
+        && image.RoutedPort is not null
+        && (hasSessionDatabase || !ServiceTemplate.Scan(image).NeedsDatabase);
 
     /// <summary>Nothing is running, or the session that is has since disappeared.</summary>
     private static MySessionOverviewDto NoSession(MySessionCredentialsDto credentials) =>

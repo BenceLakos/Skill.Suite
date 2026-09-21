@@ -13,9 +13,9 @@ using Skill.Suite.Domain.Common;
 /// error on its most common path.
 /// </remarks>
 /// <param name="IpAddress">
-/// The address as the request arrived from, which is <c>HttpContext.Connection.RemoteIpAddress</c>. Forwarded
-/// headers are resolved by the pipeline before that, and only for proxies the deployment trusts, so nothing
-/// a client can set reaches this.
+/// The address the request arrived from, which is <c>HttpContext.Connection.RemoteIpAddress</c> after the
+/// pipeline has applied <c>X-Forwarded-For</c>. The deployment accepts that header from any peer, so on a
+/// network less private than a competition venue's this is a claim rather than an observation.
 /// </param>
 public sealed record GetCompetitorLoginPrefillByIpQuery(string? IpAddress)
     : IRequest<Result<CompetitorLoginPrefillDto?>>;
