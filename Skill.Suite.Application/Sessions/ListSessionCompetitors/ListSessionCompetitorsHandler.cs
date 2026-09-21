@@ -37,6 +37,7 @@ public sealed class ListSessionCompetitorsHandler(IAppDbContext db)
                 row.competitor.Id,
                 row.competitor.Username,
                 row.competitor.FullName,
+                row.competitor.CountryCode,
                 row.competitor.IpAddress,
                 row.competitor.MobileIpAddress,
                 row.enrolment.Ordinal,

@@ -20,7 +20,7 @@
                     @foreach (var competitor in Competitors)
                     {
                         <MudSelectItem Value="@competitor.CompetitorId">
-                            @competitor.Username — @competitor.FullName (@Devices(competitor))
+                            @competitor.CountryCode — @competitor.FullName (@Devices(competitor))
                         </MudSelectItem>
                     }
                 </MudSelect>
