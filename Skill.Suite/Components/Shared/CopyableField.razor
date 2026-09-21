@@ -4,6 +4,8 @@
 
 @using Skill.Suite.Services.Clipboard
 
+@implements IAsyncDisposable
+
 @*
     A read-only value the reader is meant to take somewhere else: a username, a host name, a connection
     string. Copying is the point, which is why the button is part of the field rather than something each page
@@ -24,10 +26,18 @@
                   AdornmentAriaLabel="@(_revealed ? T["common.hideSecret"] : T["common.showSecret"])"
                   OnAdornmentClick="@(() => _revealed = !_revealed)"/>
     <MudTooltip Text="@T["common.copy"]">
-        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
-                       Size="Size.Small"
-                       aria-label="@T["common.copy"]"
-                       OnClick="Copy"/>
+        @*
+            The copy runs in the browser, in this element's own click listener, because a Blazor Server
+            OnClick round trip lands outside the user gesture and Safari refuses to write to the clipboard
+            there. The button's click bubbles to this span within the same synchronous dispatch, and the
+            listener reads the value off data-copy-value, which Blazor keeps current for free. The real value
+            is copied even while the field shows a masked one.
+        *@
+        <span @ref="_copyTarget" data-copy-value="@(Value ?? string.Empty)" style="display:inline-flex;">
+            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                           Size="Size.Small"
+                           aria-label="@T["common.copy"]"/>
+        </span>
     </MudTooltip>
 </MudStack>
 
@@ -38,18 +48,43 @@
     /// <summary>Masks the value until the reader asks for it, for something that should not be read over a shoulder.</summary>
     [Parameter] public bool Secret { get; set; }
 
+    private ElementReference _copyTarget;
+    private DotNetObjectReference<CopyableField>? _self;
+    private bool _registered;
     private bool _revealed;
 
     private InputType FieldInputType => Secret && !_revealed ? InputType.Password : InputType.Text;
 
-    // The helper falls back to a selection copy where the clipboard API is missing, which over plain http is
-    // every browser. It reports rather than throws, so a failure is a warning and the value stays on screen.
-    private async Task Copy()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var copied = await Clipboard.CopyAsync(Value);
+        if (!firstRender)
+        {
+            return;
+        }
 
+        _self = DotNetObjectReference.Create(this);
+        await Clipboard.RegisterAsync(_copyTarget, _self);
+        _registered = true;
+    }
+
+    /// <summary>What the browser did with the click, reported back once the clipboard write has settled.</summary>
+    [JSInvokable]
+    public Task OnCopied(bool copied)
+    {
         Snackbar.Add(
             copied ? T["common.copied"] : T["common.copyFailed"],
             copied ? Severity.Success : Severity.Warning);
+
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_registered)
+        {
+            await Clipboard.UnregisterAsync(_copyTarget);
+        }
+
+        _self?.Dispose();
     }
 }
