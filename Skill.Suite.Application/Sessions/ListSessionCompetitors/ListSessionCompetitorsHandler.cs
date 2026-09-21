@@ -12,6 +12,11 @@ using Skill.Suite.Domain.Common;
 /// An inner join, so an enrolment whose competitor has since been deleted is left out. There is nothing left
 /// to act on for such a row — no username to name containers with, no database of theirs to connect to — and
 /// listing it would offer the admin a competitor who cannot be marked.
+/// <para>
+/// The username order is applied to the joined rows and the DTO is built after it. Sorting a projection
+/// the record constructor produced is untranslatable — EF cannot see a constructor argument as a column —
+/// so composing the sort on top of the projection fails the whole query at runtime rather than at build.
+/// </para>
 /// </remarks>
 public sealed class ListSessionCompetitorsHandler(IAppDbContext db)
     : IRequestHandler<ListSessionCompetitorsQuery, Result<List<SessionCompetitorDto>>>
@@ -26,15 +31,16 @@ public sealed class ListSessionCompetitorsHandler(IAppDbContext db)
                 db.Competitors.AsNoTracking(),
                 enrolment => enrolment.CompetitorId,
                 competitor => competitor.Id,
-                (enrolment, competitor) => new SessionCompetitorDto(
-                    competitor.Id,
-                    competitor.Username,
-                    competitor.FullName,
-                    competitor.IpAddress,
-                    competitor.MobileIpAddress,
-                    enrolment.Ordinal,
-                    enrolment.ProvisionStatus))
-            .OrderBy(competitor => competitor.Username)
+                (enrolment, competitor) => new { enrolment, competitor })
+            .OrderBy(row => row.competitor.Username)
+            .Select(row => new SessionCompetitorDto(
+                row.competitor.Id,
+                row.competitor.Username,
+                row.competitor.FullName,
+                row.competitor.IpAddress,
+                row.competitor.MobileIpAddress,
+                row.enrolment.Ordinal,
+                row.enrolment.ProvisionStatus))
             .ToListAsync(cancellationToken);
 
         return competitors;
