@@ -183,7 +183,12 @@ git -C /tmp/alice commit --allow-empty -m two && git -C /tmp/alice push
 ```
 
 **Timeout** — that same `slow` persona hits the judge's own wall clock and should end `Failed` with a reason
-mentioning the timeout, rather than hanging forever.
+mentioning the timeout, rather than hanging forever. Check this one through the platform anyway: it is the
+step whose container flags differ most from a casual `docker run`, and the flags once made the difference
+between a timeout and a silent pass. `CAP_KILL` was missing from the platform's cap list, so root's
+`timeout` could not signal the unprivileged test step, the wall clock reported 137 instead of 124, and the
+run ended `Completed` with partial results and a "no TRX file was produced" note. `--cap-add KILL` is part
+of the set now and the SIGTERM lands; the `slow-hardened` persona runs the same flags locally.
 
 **Parallel judging** — with `Webhook__MaxConcurrentRuns` at 2 or more, push from two *different* competitor
 repositories at once and confirm both runs are `Running` simultaneously.

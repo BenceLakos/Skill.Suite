@@ -39,8 +39,16 @@ public class CallLoggingProxy<T> : DispatchProxy where T : class
     /// <param name="args">Call arguments. <see cref="Stream"/> arguments are snapshotted for logging.</param>
     /// <returns>Whatever the wrapped service returned.</returns>
     /// <remarks>
+    /// <para>
     /// When no test context is current (<see cref="TestLog.Current"/> is null) the call still executes
     /// and exceptions still propagate — only the logging is skipped.
+    /// </para>
+    /// <para>
+    /// The invocation runs under <see cref="TimedCall"/>'s per-call wall clock. A call that outlives it is
+    /// abandoned and reported exactly like a service throw — a <c>call</c> event carrying
+    /// <c>threw: "TimeoutException"</c>, then the exception rethrown so xUnit fails the test too — which is
+    /// what keeps the event stream and the TRX agreeing about the same test case.
+    /// </para>
     /// </remarks>
     protected override object? Invoke(MethodInfo? method, object?[]? args)
     {
@@ -62,13 +70,16 @@ public class CallLoggingProxy<T> : DispatchProxy where T : class
             (loggedArgs[i], callArgs[i]) = PrepareArg(arguments[i]);
         }
 
-        object? returned = null;
-        bool hasReturned = false;
-        Exception? thrown = null;
+        // Under a per-call wall clock: a submission that never returns fails THIS test case with a
+        // TimeoutException instead of hanging the test host and costing the competitor every test after it.
+        // TimedCall also owns the catch — including unwrapping reflection's TargetInvocationException — because
+        // when the call runs on its own thread that is the only place the throw can be caught.
+        var hasReturned = false;
+        var returned = TimedCall.Invoke(
+            fullTarget, loggedArgs, () => method.Invoke(_target, callArgs), out var thrown);
 
-        try
+        if (thrown is null)
         {
-            returned = method.Invoke(_target, callArgs);
             hasReturned = method.ReturnType != typeof(void);
 
             // Contract check: methods whose declared return type is non-nullable
@@ -83,14 +94,6 @@ public class CallLoggingProxy<T> : DispatchProxy where T : class
                     $"{fullTarget} returned null but its declared return type " +
                     $"{method.ReturnType.Name} is non-nullable.");
             }
-        }
-        catch (TargetInvocationException tie)
-        {
-            thrown = tie.InnerException ?? tie;
-        }
-        catch (Exception ex)
-        {
-            thrown = ex;
         }
 
         if (log is not null)

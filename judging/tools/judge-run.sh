@@ -6,14 +6,25 @@
 #
 #   judging/tools/judge-run.sh ghcr.io/bencelakos/skill-suite-judge-smoke:1 ./verification/personas/fixture/happy
 #
-# The flags below mirror ProcessContainerRunner exactly, and two of them matter more than they look:
+# The flags below mirror ProcessContainerRunner, and three of them matter more than they look:
 #
 #   -w /workspace   the platform sets the working directory to the competitor checkout, overriding the
 #                   image's own WORKDIR
 #   :ro             ...and that directory is read-only
+#   --cap-drop      ALL, with six capabilities added back and no more
 #
 # Any judge step that writes to the working directory before cd-ing elsewhere works fine in a casual
 # `docker run` and fails only in production. Reproducing both here is the point of this script.
+#
+# The capability set is here for the same reason, and it was added after a scored run showed what an
+# incomplete one hides. CAP_KILL was missing from it: the test step runs as an unprivileged account, root's
+# own `timeout` could therefore not signal it, and the wall clock reported 137 rather than 124 — which the
+# judge of the day read as a completed run, so an endless loop scored partial marks. A plain `docker run`
+# keeps CAP_KILL and the SIGTERM lands, which is exactly why nothing local caught it. KILL is now part of
+# the platform's set and of the list below; keep the two identical.
+#
+# --memory, --cpus and --pids-limit are configuration rather than code (4g / 2 / 512 in the shipped
+# compose), so they are not hard-coded here; pass them as trailing arguments when a run needs them.
 
 set -euo pipefail
 
@@ -43,6 +54,11 @@ docker run --rm --name "${CONTAINER}" \
     -w /workspace \
     -e COMPETITOR_DIRECTORY=/workspace \
     -e LOG_DIRECTORY=/var/log/skill-suite \
+    --cap-drop ALL \
+    --cap-add SETUID --cap-add SETGID --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+    --cap-add KILL \
+    --security-opt no-new-privileges \
+    --network none \
     "${@:4}" \
     "${IMAGE}" || STATUS=$?
 

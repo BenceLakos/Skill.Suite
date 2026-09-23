@@ -23,4 +23,12 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!--
+    TimedCall's abandoned-call tally is process-wide static state, so its tests have to read and reset it.
+    Precedent: ServiceResolver.Reset exists for the same reason, only as public API.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Skill.Suite.TestLog.Tests" />
+  </ItemGroup>
+
 </Project>

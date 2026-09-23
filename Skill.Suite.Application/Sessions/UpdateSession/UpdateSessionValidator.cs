@@ -11,6 +11,9 @@ public sealed class UpdateSessionValidator : AbstractValidator<UpdateSessionComm
         RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
         RuleFor(x => x.EndsAt).GreaterThan(x => x.StartsAt);
         RuleFor(x => x.TemplateFolder).MaximumLength(1000);
+
+        // Length only, for the reason CreateSessionValidator gives: the image is optional, and clearing it
+        // on a live session is how an administrator turns automatic judgement off.
         RuleFor(x => x.JudgementImage).MaximumLength(500);
         RuleFor(x => x.DatabaseName).ValidDatabaseBaseName();
         RuleFor(x => x.DatabaseSeedScript).ValidSeedScript(x => x.DatabaseName);

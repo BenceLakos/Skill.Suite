@@ -101,6 +101,41 @@ if command -v dotnet >/dev/null 2>&1; then
     fi
 fi
 
+# ---------------------------------------------------------------- wall clock classification
+#
+# The status `timeout` reports is not 124 whenever the child survives the SIGTERM it sent. That is how the
+# wall clock failed on the platform: CAP_KILL was missing from the container's cap list while the test step
+# ran as an unprivileged account, so root could not signal it at all and `timeout` ended up SIGKILLing only
+# itself. A judge that tests for 124 alone calls that a successful run, and the competitor's endless loop is
+# reported as partial results with a "no TRX" note. The capability is granted now, but a child can outlive a
+# SIGTERM for other reasons - it can ignore it, as here - so the classification is still checked.
+# `trap "" TERM` reproduces the status without needing any particular capability set.
+
+status=0
+judge_run_step polite 1 sleep 30 >/dev/null 2>&1 || status=$?
+check 'a step killed by the SIGTERM timeout sent reports 124' '124' "${status}"
+judge_step_timed_out "${status}" \
+    && printf 'ok   124 is classified as a wall clock\n' \
+    || { printf 'FAIL 124 was not classified as a wall clock\n'; FAILURES=$((FAILURES + 1)); }
+
+status=0
+judge_run_step unkillable 1 bash -c 'trap "" TERM; sleep 30' >/dev/null 2>&1 || status=$?
+check 'a step that outlives the SIGTERM reports 137, not 124' '137' "${status}"
+judge_step_timed_out "${status}" \
+    && printf 'ok   137 after a full budget is classified as a wall clock\n' \
+    || { printf 'FAIL 137 after a full budget was not classified as a wall clock\n'; FAILURES=$((FAILURES + 1)); }
+
+# The other half of the rule. A test host the OOM killer takes also surfaces as 137, and calling that a
+# timeout would put "most likely an endless loop" on a submission that ran out of memory in ten seconds.
+judge_record_step_clock 300 "$(( SECONDS - 10 ))"
+judge_step_timed_out 137 \
+    && { printf 'FAIL 137 well inside the budget must not be called a timeout\n'; FAILURES=$((FAILURES + 1)); } \
+    || printf 'ok   137 well inside the budget is not a wall clock\n'
+
+judge_step_timed_out 1 \
+    && { printf 'FAIL a plain non-zero status must not be called a timeout\n'; FAILURES=$((FAILURES + 1)); } \
+    || printf 'ok   a plain failure status is not a wall clock\n'
+
 # ---------------------------------------------------------------- swap_dir
 
 mkdir -p "${COMPETITOR_DIRECTORY}/Demo.Services/bin" "${COMPETITOR_DIRECTORY}/Demo.Services/obj"

@@ -63,6 +63,18 @@ for key, value in (personas['${name}'].get('env') or {}).items():
     print(f'{key}={value}')
 ")
 
+    # Extra `docker run` flags, for a persona that has to be judged under the container hardening the
+    # platform applies rather than under `docker run`'s defaults. `slow-hardened` is the reason this exists:
+    # the cap list once omitted CAP_KILL, the judge could not signal the unprivileged account its own test
+    # step runs as, and the wall clock reported 137 instead of 124 - a fault a matrix run with default flags
+    # could not reproduce at all. The flags are copied from DockerRunArguments.Build; keep them in step.
+    mapfile -t docker_args < <(python3 -c "
+import json
+personas = {p['name']: p for p in json.load(open('${EXPECTED}'))['personas']}
+for arg in (personas['${name}'].get('dockerArgs') or []):
+    print(arg)
+")
+
     printf '.... %-16s running\n' "${name}"
 
     actual_exit=0
@@ -73,6 +85,7 @@ for key, value in (personas['${name}'].get('env') or {}).items():
         -e COMPETITOR_DIRECTORY=/workspace \
         -e LOG_DIRECTORY=/var/log/skill-suite \
         "${env_args[@]}" \
+        "${docker_args[@]}" \
         "${IMAGE}" >"${out}/stdout.log" 2>"${out}/stderr.log" || actual_exit=$?
 
     report=$(python3 - "${EXPECTED}" "${name}" "${actual_exit}" "${out}/events.jsonl" <<'PY'

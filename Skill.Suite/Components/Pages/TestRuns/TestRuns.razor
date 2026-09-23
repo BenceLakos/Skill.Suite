@@ -90,7 +90,13 @@
                commit the operator knows is stale, means use "Judge again" on that competitor before the end. *@
             <TemplateColumn Title="@T["testRuns.field.judgedCommit"]" Sortable="false">
                 <CellTemplate>
-                    @if (string.IsNullOrEmpty(context.Item.LastCommitSha))
+                    @if (!string.IsNullOrEmpty(context.Item.LastCommitSha))
+                    {
+                        <MudText Typo="Typo.body2" Style="font-family:monospace">
+                            @context.Item.LastCommitSha[..Math.Min(8, context.Item.LastCommitSha.Length)]
+                        </MudText>
+                    }
+                    else if (SelectedSessionIsJudged)
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
                             @T["testRuns.neverJudged"]
@@ -98,9 +104,9 @@
                     }
                     else
                     {
-                        <MudText Typo="Typo.body2" Style="font-family:monospace">
-                            @context.Item.LastCommitSha[..Math.Min(8, context.Item.LastCommitSha.Length)]
-                        </MudText>
+                        @* Not a fault to chase: the session names no judgement image, so nothing was ever
+                           going to run. Red here would flag every competitor on it. *@
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">@T["testRuns.sessionNotJudged"]</MudText>
                     }
                 </CellTemplate>
             </TemplateColumn>
@@ -167,6 +173,17 @@
             url += $"?session={_sessionId.Value}";
         Nav.NavigateTo(url);
     }
+
+    /// <summary>
+    /// Whether the session currently filtered to marks anything at all.
+    /// </summary>
+    /// <remarks>
+    /// True when no session is selected, because the rows then span every session and the strict reading is
+    /// the useful one: a competitor with no judged commit in a session that does judge is the case this
+    /// column exists to surface.
+    /// </remarks>
+    private bool SelectedSessionIsJudged =>
+        _sessionId is null || _sessions.FirstOrDefault(s => s.Id == _sessionId)?.RequiresJudgement != false;
 
     private string SessionLabel(SessionDto s) => s.Status == SessionStatus.Active
         ? $"★ {s.Name}"

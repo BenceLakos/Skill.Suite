@@ -98,7 +98,10 @@ Three rules, all enforced by the harness rather than by review:
 - Assert through `Log`, never bare `Assert`. A bare assertion still fails the test but emits no event, so the
   result reaches the UI as a red row with nothing explaining it.
 - Resolve with `ServiceResolver.Resolve<T>().WithCallLogging()`. The proxy records every call with its
-  arguments and return value, which is what makes a disputed mark reviewable after the fact.
+  arguments and return value, which is what makes a disputed mark reviewable after the fact — and runs each
+  call under `JUDGE_CALL_TIMEOUT_SECONDS` (10s), so a submission that never returns loses that one test case
+  instead of every test after it. Raise the variable in the module's Dockerfile if a legitimate call in this
+  session can honestly take longer.
 
 **One test case is one aspect, and an aspect counts as satisfied only when every test claiming it passes.** A
 `[Theory]` with five rows is therefore all-or-nothing — split it when the rows should score separately.
@@ -204,6 +207,12 @@ explanatory comments. The reasoning lives in the module README instead.
 **`events.jsonl` has one truncating writer.** The test host opens it with `FileMode.Create`; the shell stages
 its events to a side file and merges afterwards; the marker appends and runs last. An existing-but-empty
 `events.jsonl` yields zero results *and* suppresses the stdout fallback, so it must end up absent or non-empty.
+
+**An endless loop is no longer a lost run, but it is still a lost thread.** The per-call timeout abandons the
+hung thread rather than killing it — .NET cannot stop a synchronous loop — so it keeps burning CPU inside the
+container for the rest of the run. After eight of them the harness stands down with a `marker-error` and the
+suite wall clock takes over again. A session whose tests are genuinely slow should raise
+`JUDGE_CALL_TIMEOUT_SECONDS`, not rely on the eight.
 
 **The judging subtree is net9.0 and pinned.** Competitors work on .NET 9 and the judge images are `sdk:9.0`.
 Run `dotnet` from the module directory or from `judging/`, or you get the wrong SDK.

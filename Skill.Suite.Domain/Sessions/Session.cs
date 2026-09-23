@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Skill.Suite.Domain.Common;
 using Skill.Suite.Domain.Sessions.Events;
 
@@ -92,6 +93,21 @@ public sealed class Session : AuditableEntity<Guid>
     /// step with the session's identity.
     /// </remarks>
     public string GitOrganization => Slug;
+
+    /// <summary>
+    /// Whether pushes to this session are judged at all, which is exactly what naming a
+    /// <see cref="JudgementImage"/> amounts to.
+    /// </summary>
+    /// <remarks>
+    /// A session without one is a finished configuration, not an unfinished one: some sessions exist only to
+    /// hand every competitor a repository, a session database and their service containers, and are marked
+    /// by hand afterwards. This is the single predicate everything that would otherwise run a judgement
+    /// branches on — <c>StartSession</c> for whether to install the organisation webhook, and the webhook
+    /// handler for whether an arriving push can become a run — so the two cannot disagree about what "no
+    /// image" means.
+    /// </remarks>
+    [MemberNotNullWhen(true, nameof(JudgementImage))]
+    public bool RequiresJudgement => !string.IsNullOrWhiteSpace(JudgementImage);
 
     /// <summary>
     /// Repository inside the organisation holding the starter package every competitor repository is copied
@@ -203,11 +219,16 @@ public sealed class Session : AuditableEntity<Guid>
         // the competition, and an active one because provisioning talks to a git host over a network for
         // every competitor, so a run that half-succeeded has to be resumable. Refusing here would have left
         // the only repair being to close the session and rebuild it from scratch.
-        // The secret is regenerated and the hooks reinstalled with it, so a delivery already in flight and
-        // signed with the previous secret is rejected - which is why this is an explicit admin action.
-        if (string.IsNullOrWhiteSpace(JudgementImage))
-            return Result.Failure(SessionErrors.MissingJudgementImage);
+        // The secret the caller hands in is the one the session already holds whenever it has one, and is
+        // generated only on a first start; the hooks are reinstalled with it either way. Rotating it here
+        // instead made re-pressing Start on a live session a mark-loss event, because the new key reached
+        // the git host only at the end of provisioning and every push in between was rejected as unsigned.
 
+        // A judgement image is deliberately NOT required. See RequiresJudgement: a session may exist purely
+        // to provision the organisation, the competitor databases and the service containers, and demanding
+        // an image here made that session impossible to start at all. The secret is still stamped either
+        // way, so adding an image later and starting again installs the hook with the key this session has
+        // always had.
         if (string.IsNullOrWhiteSpace(TemplateFolder))
             return Result.Failure(SessionErrors.MissingTemplateFolder);
 

@@ -58,7 +58,9 @@ rehearsal of anything.
 | `broken-code` | Syntax error | 6 | Failed, with a diagnostic naming the compile error |
 | `missing-folder` | No `*.Services` folder | 3 | Failed |
 | `adds-package` | References a package outside the offline feed | 4 | Failed |
-| `slow` | Endless loop | 5 | Failed, cut off by the image's wall clock |
+| `slow` | Endless loop, per-call guard off | 5 | Failed, cut off by the image's wall clock |
+| `slow-call` | The same endless loop, per-call guard at its default | 0 | Completed, 5 passed / 2 failed — only the tests that call `Add` |
+| `slow-hardened` | The same endless loop, guard off, under the platform's real capability set | 5 | Failed, cut off by the image's wall clock |
 
 A persona is just a directory shaped like a competitor checkout — the swapped folder and nothing else.
 Adding one means creating the directory and a row in `expected/<session>.json`.
@@ -72,6 +74,28 @@ Two subtleties this matrix already caught, both worth keeping in mind when addin
 - **`adds-package` must pick a package that is in neither `local-nuget` nor the warmed NuGet cache.** The
   cache holds everything the image build pulled transitively, so `Newtonsoft.Json` (via the test SDK)
   restores quite legitimately. It uses `Dapper` for that reason.
+- **There are two wall clocks now, and the three `slow*` rows exist to keep them apart.** The xUnit harness
+  runs every call made through a contract interface under `JUDGE_CALL_TIMEOUT_SECONDS` (10s), so an endless
+  loop behind `ICalculator.Add` fails *that test case* and the suite carries on — `slow-call` asserts exactly
+  that: exit 0, seven units, five passed, two failed, and no `marker-error`, because two abandoned calls are
+  well under the harness's cap of eight. `judge-lib.sh`'s `JUDGE_TIMEOUT_SECONDS` remains the backstop for
+  every hang the guard cannot see: one in the test body, one in a service constructor (resolved in a field
+  initializer, before the test starts), or a ninth hang after the guard has stood down. None of those is
+  convenient to stage as a persona, so `slow` and `slow-hardened` reproduce that class of failure by setting
+  `JUDGE_CALL_TIMEOUT_SECONDS=0` on the same submission. **That zero is deliberate, not a workaround** — drop
+  it and both rows stop testing the wall clock and silently become duplicates of `slow-call`. All three keep
+  `JUDGE_TIMEOUT_SECONDS=45`, including `slow-call`, so a regression to the pre-guard behaviour costs the
+  matrix 45 seconds rather than the full budget.
+- **A persona runs under `docker run`'s defaults unless its row says otherwise**, and the platform's own
+  invocation is a good deal more restrictive. That gap hid a real fault for as long as `slow` was the only
+  timeout row: the platform's cap list omitted CAP_KILL, the test step runs as an unprivileged account, and
+  root's `timeout` could not signal it — so it killed itself and reported 137 instead of 124, which the
+  judge did not recognise as a wall clock. `slow` kept passing because a plain `docker run` keeps CAP_KILL
+  and the SIGTERM lands. `DockerRunArguments.Build` now grants KILL, so `slow-hardened` takes the same 124
+  path as `slow`; what it goes on proving is that the platform's actual `--cap-drop`/`--cap-add`/
+  `--security-opt` set runs the pipeline at all — `setpriv` included — and that the wall clock fires under
+  it. Copy new flags into that row's `dockerArgs` whenever `DockerRunArguments.Build` changes; the 137
+  classification itself lives in `judge-selftest.sh`, which reproduces it with `trap "" TERM`.
 
 ## The black-box matrix
 
@@ -136,4 +160,8 @@ keep it that way.
 4. `verify.sh <session>`.
 
 Per-persona `env` in the expectations file is passed through to `docker run` — `slow` uses it to shorten
-`JUDGE_TIMEOUT_SECONDS` so the matrix does not sit for the full default budget.
+`JUDGE_TIMEOUT_SECONDS` so the matrix does not sit for the full default budget, and to switch the harness's
+per-call guard off with `JUDGE_CALL_TIMEOUT_SECONDS=0`. Per-persona `dockerArgs` is
+passed through as raw flags, for a row that has to be judged under the isolation the platform applies
+rather than under `docker run`'s defaults; `slow-hardened` is the one that needs it, and its flags are a
+copy of `DockerRunArguments.Build`.

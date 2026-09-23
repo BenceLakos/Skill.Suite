@@ -154,8 +154,14 @@ In a white-box session, red tests are a **result**, not a failed run: expect exi
 - Assert through `Log`, never bare `Assert`. A bare assertion fails the test but emits no event, so the result
   arrives as a red row with nothing explaining it.
 - Resolve with `ServiceResolver.Resolve<T>().WithCallLogging()`. The proxy records every call with arguments
-  and return value, which is what makes a disputed mark reviewable, and enforces the nullability declared on
-  the interface.
+  and return value, which is what makes a disputed mark reviewable, enforces the nullability declared on
+  the interface, and puts each call under `JUDGE_CALL_TIMEOUT_SECONDS` (10s by default).
+
+A submission that never returns from a proxied call therefore loses **that test case**, with a
+`TimeoutException` naming the call, and the suite carries on to the rest — the outer wall clock
+(`JUDGE_TIMEOUT_SECONDS`) is only the backstop now. Raise `JUDGE_CALL_TIMEOUT_SECONDS` in this module's
+Dockerfile if a legitimate call here can genuinely take longer than ten seconds; a call made outside the
+proxy, or a hang in the test body itself, is still the outer wall clock's problem.
 
 One test case is one aspect, and an aspect is satisfied only when **every** test claiming it passes — so a
 `[Theory]` with five rows is all-or-nothing. Split it when the rows should score separately.

@@ -9,8 +9,15 @@
 #   * No arguments follow the image, so the ENTRYPOINT *is* the judge.
 #   * The container runs with `-w $COMPETITOR_DIRECTORY`, which is mounted READ-ONLY and overrides the
 #     image's WORKDIR. Always cd to $JUDGE_APP_DIR yourself; never rely on the working directory.
-#   * There is NO timeout, NO --memory/--cpus/--pids-limit, and the worker is serial - one hung
-#     container stalls every other competitor. Hence the wall clocks here.
+#   * There is NO timeout of the platform's own, and the worker is serial - one hung container stalls every
+#     other competitor. Hence the wall clocks here.
+#   * --memory, --cpus and --pids-limit ARE applied when configured, and the shipped compose configures them
+#     (4g / 2 / 512). A step can therefore be killed by something other than its own wall clock.
+#   * The container runs `--cap-drop ALL` with SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER and KILL added
+#     back. KILL is there because the test step drops to an unprivileged account and root's own `timeout`
+#     needs it to signal across a uid boundary - it was once missing, and the wall clock silently stopped
+#     working. A wall clock can still expire without the step dying for other reasons; see
+#     judge_step_timed_out, which is what classifies that correctly.
 #   * Supersede is `docker stop --time 5`: five seconds of SIGTERM grace, then SIGKILL.
 #   * Exit 0 => Completed, non-zero => Failed, and the whole of stderr is pasted into the run's failure
 #     reason. Keep stderr to one line per fatal.
@@ -45,6 +52,13 @@ judge_configure() {
     # Per-fixture coverage runs the suite once per TEST CLASS, filtered. Each run is a fraction of the whole
     # suite, so the budget is per class and small; one class that hangs is skipped rather than fatal.
     : "${JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS:=120}"
+    # The only JUDGE_* variable read INSIDE the test host: the xUnit harness runs each call into the
+    # submission under this budget, so an endless loop fails the one test case it hangs in and the rest of
+    # the suite still gets marked. Exported rather than merely defaulted, because a value assigned here is a
+    # shell variable and the test process would never see it. 0 disables it and leaves every hang to the
+    # suite wall clock above.
+    : "${JUDGE_CALL_TIMEOUT_SECONDS:=10}"
+    export JUDGE_CALL_TIMEOUT_SECONDS
     : "${JUDGE_FAIL_ON_RED:=false}"
     : "${JUDGE_LOCAL_FEED:=${JUDGE_APP_DIR}/local-nuget}"
     : "${JUDGE_NUGET_CACHE:=/root/.nuget/packages}"
@@ -200,9 +214,14 @@ judge_on_exit() {
 
 # ---------------------------------------------------------------------------- steps
 
+# Wall clock bookkeeping for the step that ran last, read by judge_step_timed_out. An exit status on its own
+# cannot tell a wall clock apart from a kill that came from somewhere else, so the elapsed time is kept too.
+JUDGE_STEP_BUDGET=0
+JUDGE_STEP_ELAPSED=0
+
 # judge_run_step <name> <timeout-seconds> <command...>
 # Streams combined output to stdout and to $JUDGE_WORK/<name>.log, enforces a wall clock, and returns the
-# command's status (124 on timeout).
+# command's status. Ask judge_step_timed_out about that status rather than comparing it to 124 by hand.
 #
 # The child runs in the BACKGROUND and is awaited with `wait` on purpose: bash defers trap handlers until
 # the current *foreground* command returns, so with a foreground child the five-second SIGTERM grace would
@@ -214,6 +233,7 @@ judge_run_step() {
 
     local log="${JUDGE_WORK}/${name}.log"
     local status=0
+    local started=${SECONDS}
 
     timeout --signal=TERM --kill-after=10s "${budget}" "$@" >"${log}" 2>&1 &
     local child=$!
@@ -225,8 +245,53 @@ judge_run_step() {
     # judge would report success for a submission that did not even compile.
     wait "${child}" || status=$?
 
+    judge_record_step_clock "${budget}" "${started}"
+
     cat "${log}"
     return "${status}"
+}
+
+# judge_record_step_clock <budget-seconds> <started-SECONDS> - the same bookkeeping for a caller that drives
+# `timeout` itself. Per-fixture coverage and the mutation step both do, because each needs its own log
+# handling and its own kill-after grace, and both still have to classify a wall clock correctly.
+judge_record_step_clock() {
+    JUDGE_STEP_BUDGET=$1
+    JUDGE_STEP_ELAPSED=$(( SECONDS - $2 ))
+}
+
+# judge_step_timed_out <status> - did the step that just finished hit its wall clock?
+#
+# `timeout` returns 124 only when the child died from the SIGTERM it sent. That is NOT the status when the
+# signal never arrives, and for a while in this container it never did: the platform's cap list left out
+# CAP_KILL while run_tests hands the test step to an unprivileged account, so root's own `timeout` got EPERM
+# signalling it. After --kill-after, `timeout` SIGKILLs its process group, of which it is itself a member,
+# and the only process it managed to kill was itself. `wait` then reported 137 while the test host ran on
+# until the container was torn down.
+#
+# Testing only for 124 let an endless loop through as a completed run: the timeout diagnostic and
+# JUDGE_EXIT_TIMEOUT were skipped, JUDGE_FAIL_ON_RED=false made the step look successful, and the run was
+# left carrying "no TRX file was produced ... treat this run's results as unverified" - true, but a symptom,
+# and it pointed whoever read it at the harness instead of at the submission's own loop.
+#
+# DockerRunArguments.Build now adds KILL back, so the signal lands and 124 is the ordinary status again.
+# This check stays as defence in depth rather than being reverted: a signal can fail to reach a child for
+# reasons other than that one capability, and it costs nothing to keep recognising the shape.
+#
+# A signal status alone is not enough to conclude a timeout, because a child the OOM killer picked also
+# reports 137. The budget is what separates them: a step reaches its wall clock only after using all of it.
+judge_step_timed_out() {
+    local status=$1
+
+    if (( status == 124 )); then
+        return 0
+    fi
+
+    # 128+SIGKILL and 128+SIGTERM, i.e. the step was signalled rather than choosing its own exit status.
+    if (( status == 137 || status == 143 )) && (( JUDGE_STEP_ELAPSED >= JUDGE_STEP_BUDGET )); then
+        return 0
+    fi
+
+    return 1
 }
 
 # judge_errors <logfile> - the interesting lines out of a restore/build/test log, for the diagnostic.
@@ -334,7 +399,7 @@ restore_offline() {
         --source "${JUDGE_LOCAL_FEED}" \
         --source "${JUDGE_NUGET_CACHE}" || status=$?
 
-    if (( status == 124 )); then
+    if judge_step_timed_out "${status}"; then
         judge_fatal "${JUDGE_EXIT_TIMEOUT}" "restore" \
             "restore exceeded ${JUDGE_TIMEOUT_SECONDS}s."
     fi
@@ -360,7 +425,7 @@ build_tests() {
     judge_run_step build "${JUDGE_TIMEOUT_SECONDS}" \
         dotnet build "${JUDGE_TEST_PROJECT}" -c Release --no-restore || status=$?
 
-    if (( status == 124 )); then
+    if judge_step_timed_out "${status}"; then
         judge_fatal "${JUDGE_EXIT_TIMEOUT}" "build" \
             "build exceeded ${JUDGE_TIMEOUT_SECONDS}s."
     fi
@@ -619,6 +684,9 @@ run_tests() {
         judge_grant_test_paths
 
         if judge_test_user_can_write; then
+            # No --reset-env, deliberately: setpriv passes the environment straight through, which is how
+            # LOG_DIRECTORY and JUDGE_CALL_TIMEOUT_SECONDS reach the test host. Adding it would leave the
+            # harness writing to stdout and running every call unguarded, with nothing saying so.
             runner=(setpriv --reuid "${JUDGE_TEST_USER}" --regid "${JUDGE_TEST_USER}" --init-groups)
             printf 'judge: running tests as %s\n' "${JUDGE_TEST_USER}"
         else
@@ -634,7 +702,7 @@ run_tests() {
         "${runner[@]}" dotnet test "${JUDGE_TEST_PROJECT}" -c Release --no-restore --no-build \
         --logger "console;verbosity=detailed" "$@" || status=$?
 
-    if (( status == 124 )); then
+    if judge_step_timed_out "${status}"; then
         # The suite is already built and restored, so this is the submission's own fault - most often an
         # infinite loop in the code under test.
         judge_fatal "${JUDGE_EXIT_TIMEOUT}" "test" \
@@ -718,7 +786,7 @@ judge_fixture_coverage() {
 
     local measured=0
     local skipped=0
-    local class simple out log status child
+    local class simple out log status child started
 
     while IFS= read -r class; do
         [[ -n "${class}" ]] || continue
@@ -733,6 +801,7 @@ judge_fixture_coverage() {
         mkdir -p "${out}"
 
         status=0
+        started=${SECONDS}
         timeout --signal=TERM --kill-after=10s "${JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS}" \
             dotnet test "${JUDGE_TEST_PROJECT}" -c Release --no-restore --no-build \
             --filter "FullyQualifiedName~${class}." \
@@ -742,12 +811,13 @@ judge_fixture_coverage() {
             >"${log}" 2>&1 &
         child=$!
         wait "${child}" || status=$?
+        judge_record_step_clock "${JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS}" "${started}"
 
         if find "${out}" -name '*.cobertura.xml' -type f -print -quit 2>/dev/null | grep -q .; then
             measured=$((measured + 1))
         else
             skipped=$((skipped + 1))
-            if (( status == 124 )); then
+            if judge_step_timed_out "${status}"; then
                 printf 'judge: per-fixture coverage for %s exceeded %ss; skipped\n' \
                     "${simple}" "${JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS}" >&2
             else

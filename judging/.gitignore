@@ -4,11 +4,13 @@ StrykerOutput/
 verification/out/
 
 # The repo-root .gitignore excludes coverage*.xml and coverage*.json, which would silently eat committed
-# Marker test fixtures. Those are named cobertura-*.xml / stryker-*.json to dodge the patterns; this
-# un-ignores the folders as a second line of defence. Both spellings, because gitignore patterns are
-# case-sensitive even on a case-insensitive filesystem.
-!**/Fixtures/**
-!**/fixtures/**
+# Marker test fixtures - fixture-coverage/*/*/coverage.cobertura.xml matches coverage*.xml exactly.
+# Keep this negation narrow and anchored to the one folder that needs it. It used to read !**/Fixtures/**
+# plus !**/fixtures/**, which also re-included everything under verification/fixtures/ and so cancelled the
+# root bin/ and obj/ rules there - 159 build-output files ended up tracked before anyone noticed.
+# A pattern containing a slash is anchored to the directory holding this file, so this is
+# judging/Skill.Suite.Marker.Tests/Fixtures/**, and only that directory's real spelling is needed.
+!Skill.Suite.Marker.Tests/Fixtures/**
 
 # Packed packages are build output, never committed: a session's Contracts package carries hidden tests.
 # The leading **/ matters - a pattern containing a slash is anchored to the directory holding this file, so

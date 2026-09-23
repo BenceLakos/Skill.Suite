@@ -30,6 +30,23 @@ public sealed class DockerRunArgumentsTests
     }
 
     [Fact]
+    public void TheJudgeCanSignalItsOwnTestStep()
+    {
+        // CAP_KILL, without which the image's wall clock is decorative. judge-lib.sh runs `timeout` as root
+        // over a test step setpriv has already handed to an unprivileged uid, and signalling a process of
+        // another uid needs this capability: without it both the SIGTERM and the SIGKILL return EPERM, and a
+        // submission that never returns is recorded as Completed with partial results.
+        var args = DockerRunArguments.Build(Request());
+
+        var added = args
+            .Select((value, index) => (value, index))
+            .Where(pair => pair.value == "--cap-add")
+            .Select(pair => args[pair.index + 1]);
+
+        Assert.Contains("KILL", added);
+    }
+
+    [Fact]
     public void NetworkIsolationIsAppliedByDefault()
     {
         // ContainerLimits defaults IsolateNetwork to true. If this ever flips, a competitor's test code gets

@@ -36,6 +36,27 @@ public sealed class ContainerHardeningTests
     }
 
     [Fact]
+    public void EveryRunAddsBackExactlyTheCapabilitiesTheJudgeNeeds()
+    {
+        var args = DockerRunArguments.Build(Minimal());
+
+        var added = args
+            .Select((value, index) => (value, index))
+            .Where(pair => pair.value == "--cap-add")
+            .Select(pair => args[pair.index + 1])
+            .ToList();
+
+        // Pinned as a whole list rather than one containment check each, because both directions have already
+        // cost a competition. Too few: dropping ALL without SETUID killed setpriv and the run produced nothing,
+        // and dropping KILL left root unable to signal the unprivileged test step, so an endless loop was
+        // recorded as Completed. Too many: every entry here is a capability a judgement container holds while
+        // executing code written to score higher.
+        Assert.Equal(
+            new[] { "SETUID", "SETGID", "CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL" },
+            added);
+    }
+
+    [Fact]
     public void EveryRunBlocksPrivilegeEscalation()
     {
         var args = DockerRunArguments.Build(Minimal());

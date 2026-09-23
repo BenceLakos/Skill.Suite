@@ -60,15 +60,56 @@
     },
     {
       "name": "slow",
-      "comment": "Endless loop. The image's own wall clock must cut it off; the platform has none, and its worker is serial.",
+      "comment": "Endless loop. The image's own wall clock must cut it off; the platform has none, and its worker is serial. The harness's per-call guard is switched OFF here on purpose - with it on, a loop reached through the contract interface is caught one test case at a time and this row could never reach the wall clock it exists to exercise.",
       "exit": 5,
       "status": "Failed",
       "units": 0,
       "markerError": true,
       "markerErrorContains": "exceeded",
+      "note": "JUDGE_CALL_TIMEOUT_SECONDS=0 is the point of this row, not a workaround. The suite wall clock is the backstop for every hang the per-call guard cannot see - a loop in the test body, in a service constructor, or after the guard has stood down having abandoned its eighth thread - and none of those is convenient to stage as a persona. Disabling the guard reproduces that class of hang with the submission that already exists. The guarded behaviour is covered by 'slow-call', which runs the identical implementation with the default budget.",
+      "env": {
+        "JUDGE_TIMEOUT_SECONDS": "45",
+        "JUDGE_CALL_TIMEOUT_SECONDS": "0"
+      }
+    },
+    {
+      "name": "slow-call",
+      "comment": "The same endless loop as 'slow', judged with the per-call guard at its default. The hang must cost the competitor only the two test cases that call ICalculator.Add - Add_TwoPositives_ReturnsSum and Add_WithNegative_ReturnsSum, each failed with a TimeoutException naming the call - while the other five tests still run and pass and the run completes normally.",
+      "exit": 0,
+      "status": "Completed",
+      "units": 7,
+      "passed": 5,
+      "failed": 2,
+      "errored": 0,
+      "markerError": false,
+      "note": "This row is the regression test for the failure that motivated the guard: on a real scored run a submission looped inside one call, the test host sat in that test until the suite wall clock tore the container down, and the competitor lost every test after the hang rather than the one that hung. A regression to that behaviour fails here twice over - as exit 5 instead of 0, and as 0 units instead of 7. JUDGE_TIMEOUT_SECONDS is kept at 45 for exactly that case, so the regression costs the matrix 45 seconds rather than the full 300. markerError is false deliberately: two abandoned calls are well under the harness's cap of eight, so nothing should be reported to the operator. The guarded run takes about 20s, two calls at the 10s default.",
       "env": {
         "JUDGE_TIMEOUT_SECONDS": "45"
       }
+    },
+    {
+      "name": "slow-hardened",
+      "comment": "The same endless loop as 'slow', run with the capability set the platform actually applies. The point is the flag set itself: setpriv has to keep working under --cap-drop ALL, and --cap-add KILL has to let root's timeout signal the unprivileged account the test step runs as. With KILL granted the SIGTERM lands and timeout reports 124, the same path 'slow' takes - exit 5 with the timeout diagnostic. The per-call guard is switched off here for the same reason as in 'slow': this row has to reach the wall clock, and a guarded run would never get there.",
+      "exit": 5,
+      "status": "Failed",
+      "units": 0,
+      "markerError": true,
+      "markerErrorContains": "exceeded",
+      "note": "This row exists because 'slow' passed throughout a period when no white-box submission could ever be cut off on the real platform: CAP_KILL was missing from the platform's cap list, root could not signal the unprivileged test step, and the wall clock surfaced as 137 instead of 124 - which the judge read as a successful run and reported as exit 0, Completed, with partial results and a 'no TRX file was produced' note that points at the harness instead of at the loop. DockerRunArguments.Build now grants KILL, so the signal lands here and the run takes the ordinary 124 path. What the row still covers is the flag set as a whole - that the pipeline runs under it and that the wall clock fires - not the 137 status, which judge-selftest.sh reproduces directly with trap \"\" TERM and judge_step_timed_out still classifies. The dockerArgs are copied from DockerRunArguments.Build, so if that list changes this row has to change with it.",
+      "env": {
+        "JUDGE_TIMEOUT_SECONDS": "45",
+        "JUDGE_CALL_TIMEOUT_SECONDS": "0"
+      },
+      "dockerArgs": [
+        "--cap-drop", "ALL",
+        "--cap-add", "SETUID",
+        "--cap-add", "SETGID",
+        "--cap-add", "CHOWN",
+        "--cap-add", "DAC_OVERRIDE",
+        "--cap-add", "FOWNER",
+        "--cap-add", "KILL",
+        "--security-opt", "no-new-privileges"
+      ]
     },
     {
       "name": "msbuild-exec",

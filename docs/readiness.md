@@ -239,10 +239,10 @@ submission is ever suspected in practice.
 
 Not a defence: signing event lines. Any key the harness holds is in the competitor's address space.
 
-### Two self-inflicted regressions found by the real platform, not by the local harness
+### Three self-inflicted regressions found by the real platform, not by the local harness
 
-Both are worth recording because they only appeared through `run-e2e.sh`, and the local `judge-run.sh` was
-green throughout:
+All three are worth recording because they only appeared through `run-e2e.sh`, and the local `judge-run.sh`
+was green throughout:
 
 - **`chown` does not take on a volume subpath.** `judge-run.sh` uses a host bind mount, which is permissive;
   the platform mounts the log directory as a docker volume subpath, where the chown silently did nothing. The
@@ -253,9 +253,29 @@ green throughout:
   "setresuid: Operation not permitted" and the container exited 1. The two hardening measures defeated each
   other. Fixed by dropping ALL and adding back only `SETUID`, `SETGID`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER` — the
   competitor's code never holds them, because it runs after the drop with `no-new-privileges` set.
+- **The same cap list also removed `CAP_KILL`, which switched the judge's wall clock off.** The test step
+  runs as the unprivileged account, so root inside the container could not signal it: `timeout`'s SIGTERM
+  and its follow-up SIGKILL both returned `EPERM`, and because `timeout` SIGKILLs its own process group the
+  only process it killed was itself — `wait` reported **137**, not 124. `run_tests` tested for 124 alone, so an
+  endless loop exited **0**, was recorded as *Completed* with whatever partial results the run had reached,
+  and carried `no TRX file was produced … treat this run's results as unverified` — a true statement about a
+  symptom, pointing at the harness rather than at the loop. Found in a scored Fibonacci run, not by the
+  matrix: `slow` kept passing because a plain `docker run` keeps `CAP_KILL` and the SIGTERM lands. Fixed in
+  three places: `judge_step_timed_out`, which classifies 124 and a signal status that consumed the whole
+  budget alike; the `slow-hardened` persona, which runs the matrix with the platform's own flags; and
+  `--cap-add KILL` in `DockerRunArguments.Build`.
+
+  No residual. The capability is what makes the termination real rather than merely classified — the wall
+  clock now signals the test step instead of only giving up on it, so 124 is the ordinary status again and
+  the run no longer pays the `--kill-after` grace for nothing. Granting it costs no isolation: the
+  competitor's own code never holds the capability, because it runs after the privilege drop with
+  `no-new-privileges` set, and `CAP_KILL` reaches nothing outside the container's own pid namespace. The
+  classification helper stays as defence in depth — a signal can fail to land for other reasons, and a test
+  host the OOM killer takes reports 137 too, which is why it also checks the elapsed budget.
 
 The lesson for the dress rehearsal: a hardening change must be verified through the platform, not the local
-runner. Every one of these would have surfaced as "every competitor scored zero" on the day.
+runner. Every one of these would have surfaced as "every competitor scored zero", or as a hang nobody could
+stop, on the day.
 
 ## Blockers remaining
 

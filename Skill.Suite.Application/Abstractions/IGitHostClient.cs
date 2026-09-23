@@ -68,6 +68,18 @@ public interface IGitHostClient
         EnsureWebhookRequest request, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Takes the organisation's push webhook off again, if one points at the given URL. Idempotent.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of <see cref="EnsureOrganizationWebhookAsync"/>, and the same delete it already
+    /// performs before reinstalling. Needed on its own because a session can stop being judged: clearing its
+    /// judgement image and starting it again has to leave the organisation without a hook, or every push
+    /// keeps being delivered to an endpoint whose only possible answer is a refusal.
+    /// </remarks>
+    Task RemoveOrganizationWebhookAsync(
+        RemoveWebhookRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Blocks until the repository reports content, or the timeout elapses.
     /// </summary>
     /// <returns><see langword="true"/> when the repository has content.</returns>
@@ -130,4 +142,9 @@ public sealed record EnsureWebhookRequest(
     string TargetUrl,
     string Secret,
     string BranchFilter,
+    BasicCredential Credential);
+
+public sealed record RemoveWebhookRequest(
+    string Organization,
+    string TargetUrl,
     BasicCredential Credential);

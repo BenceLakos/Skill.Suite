@@ -135,13 +135,22 @@ public sealed class StartSessionHandler(
         // The webhook goes on LAST, deliberately. An organisation hook fires for the pushes provisioning
         // itself performs, so installing it first produces a judgement run per competitor at start - each
         // attributed to nothing, since the template repository is not a competitor.
-        await gitHost.EnsureOrganizationWebhookAsync(
-            new EnsureWebhookRequest(
-                organization,
-                webhookOptions.Value.PublicWebhookUrl,
-                secret,
-                DefaultBranch,
-                admin),
+        //
+        // And only for a session that is judged at all - see SessionWebhookReconciler, which also removes
+        // the hook a session that has since had its judgement image cleared was left holding.
+        //
+        // The secret above is generated and persisted either way, deliberately. It costs 32 bytes, it keeps
+        // Start idempotent in both directions - adding an image later and starting again installs the hook
+        // with the key this session has always had, rather than one the domain would have to be asked for
+        // separately - and Session.Start stays a transition with a single shape.
+        await SessionWebhookReconciler.ReconcileAsync(
+            gitHost,
+            logger,
+            session,
+            webhookOptions.Value.PublicWebhookUrl,
+            DefaultBranch,
+            secret,
+            admin,
             cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);

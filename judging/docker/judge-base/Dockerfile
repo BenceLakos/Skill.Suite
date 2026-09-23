@@ -19,6 +19,9 @@ ENV DOTNET_NOLOGO=1 \
     JUDGE_TIMEOUT_SECONDS=300 \
     JUDGE_MUTATION_TIMEOUT_SECONDS=900 \
     JUDGE_FIXTURE_COVERAGE_TIMEOUT_SECONDS=120 \
+    # Read by the xUnit harness inside the test host, not by the shell. As ENV it is inherited by every
+    # child process, including the `setpriv` test step and Stryker's test hosts.
+    JUDGE_CALL_TIMEOUT_SECONDS=10 \
     JUDGE_FAIL_ON_RED=false
 
 COPY judge-lib.sh /usr/local/lib/judge-lib.sh

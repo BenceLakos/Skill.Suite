@@ -34,8 +34,19 @@ public sealed class ProcessGitWebhookHandler(
         if (session is null)
             return TestRunErrors.UnknownOrganization(request.Owner);
 
-        if (string.IsNullOrWhiteSpace(session.JudgementImage))
+        // Not a fault, and never an exception: a session with no judgement image is provisioned and run
+        // exactly like any other, it is simply marked by hand. Start leaves such an organisation without a
+        // hook, so the only deliveries that reach here come from a hook the host still holds — one installed
+        // while the session did name an image, or added by hand. Answered with a refusal rather than turned
+        // into a run there would be nothing to execute, and logged so the delivery is explicable.
+        if (!session.RequiresJudgement)
+        {
+            logger.LogInformation(
+                "Push to {Owner}/{Repo} is not judged: session {SessionId} declares no judgement image",
+                request.Owner, request.RepositorySlug, session.Id);
+
             return TestRunErrors.SessionMissingJudgementImage;
+        }
 
         var signature = VerifySignature(session, request);
         if (signature.IsFailure)

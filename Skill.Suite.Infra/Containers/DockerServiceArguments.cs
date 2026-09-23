@@ -18,6 +18,12 @@ using Skill.Suite.Domain.Sessions;
 /// capabilities are left to the image (a database server dropped to no capabilities does not start). What
 /// does carry over is <c>no-new-privileges</c>, which costs a well-behaved image nothing.
 /// </para>
+/// <para>
+/// The same goes for the <c>KILL</c> capability <see cref="DockerRunArguments"/> grants: the judge needs it
+/// because its own wall clock has to signal a test step it has handed to another uid, and a service
+/// container has neither a wall clock nor a privilege drop to signal across. Nothing is dropped here, so
+/// there is nothing to add back.
+/// </para>
 /// </remarks>
 internal static class DockerServiceArguments
 {

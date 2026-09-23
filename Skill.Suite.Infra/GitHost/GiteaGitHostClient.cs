@@ -209,15 +209,8 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
 
         // Delete before creating rather than editing in place: the secret is regenerated on every Start, so
         // a hook left from an earlier attempt would keep delivering with a key nothing verifies against.
-        var existing = await api.GetAsync<List<GiteaHook>>(path, request.Credential, cancellationToken) ?? [];
-        foreach (var hook in existing.Where(h => h.Config is not null
-                                                 && h.Config.TryGetValue("url", out var url)
-                                                 && string.Equals(url, request.TargetUrl, StringComparison.OrdinalIgnoreCase)))
-        {
-            await api.SendAsync(HttpMethod.Delete, $"{path}/{hook.Id}", null, request.Credential,
-                $"remove the previous webhook {hook.Id}", cancellationToken);
-            logger.LogInformation("Removed stale webhook {HookId} on {Org}", hook.Id, request.Organization);
-        }
+        await DeleteHooksTargetingAsync(
+            request.Organization, request.TargetUrl, request.Credential, cancellationToken);
 
         var body = new Dictionary<string, object?>
         {
@@ -239,6 +232,39 @@ internal sealed class GiteaGitHostClient(HttpClient http, ILogger<GiteaGitHostCl
 
         logger.LogInformation("Installed push webhook on {Org} -> {Url}",
             request.Organization, request.TargetUrl);
+    }
+
+    public Task RemoveOrganizationWebhookAsync(
+        RemoveWebhookRequest request, CancellationToken cancellationToken) =>
+        DeleteHooksTargetingAsync(
+            request.Organization, request.TargetUrl, request.Credential, cancellationToken);
+
+    /// <summary>
+    /// Deletes every organisation hook pointing at <paramref name="targetUrl"/>, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// Matched on the delivery URL rather than on the hook id, because the id is not something this
+    /// application stores: a hook installed by an earlier Start, or by an administrator by hand, is the same
+    /// hook as far as a delivery is concerned. Hooks pointing anywhere else belong to somebody else and are
+    /// left alone.
+    /// </remarks>
+    private async Task DeleteHooksTargetingAsync(
+        string organization,
+        string targetUrl,
+        BasicCredential credential,
+        CancellationToken cancellationToken)
+    {
+        var path = $"orgs/{GiteaApi.Escape(organization)}/hooks";
+
+        var existing = await api.GetAsync<List<GiteaHook>>(path, credential, cancellationToken) ?? [];
+        foreach (var hook in existing.Where(h => h.Config is not null
+                                                 && h.Config.TryGetValue("url", out var url)
+                                                 && string.Equals(url, targetUrl, StringComparison.OrdinalIgnoreCase)))
+        {
+            await api.SendAsync(HttpMethod.Delete, $"{path}/{hook.Id}", null, credential,
+                $"remove the previous webhook {hook.Id}", cancellationToken);
+            logger.LogInformation("Removed stale webhook {HookId} on {Org}", hook.Id, organization);
+        }
     }
 
     /// <summary>

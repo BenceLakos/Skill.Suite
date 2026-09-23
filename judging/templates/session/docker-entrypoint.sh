@@ -91,12 +91,14 @@ cp "${JUDGE_EVENT_FILE}" "${JUDGE_WORK}/events.before-mutation.jsonl"
 # right, filled with NUL bytes, with every real test event gone. Giving them a valid but disposable target
 # removes the failure mode instead of relying on the variable staying absent all the way down.
 mutation_status=0
+mutation_started=${SECONDS}
 LOG_DIRECTORY="${JUDGE_WORK}/mutation-logs" \
     timeout --signal=TERM --kill-after=30s "${JUDGE_MUTATION_TIMEOUT_SECONDS}" \
     dotnet stryker --config-file "${JUDGE_APP_DIR}/stryker-config.json" \
     >"${JUDGE_WORK}/mutation.log" 2>&1 &
 mutation_pid=$!
 wait "${mutation_pid}" || mutation_status=$?
+judge_record_step_clock "${JUDGE_MUTATION_TIMEOUT_SECONDS}" "${mutation_started}"
 
 tail -40 "${JUDGE_WORK}/mutation.log" || true
 
@@ -117,7 +119,9 @@ MUTATION_REPORT=$(find "${STRYKER_OUTPUT}" -name 'mutation-report.json' -type f 
 : "${MUTATION_REPORT:=${STRYKER_OUTPUT}/reports/mutation-report.json}"
 printf 'judge: mutation report at %s\n' "${MUTATION_REPORT}"
 
-if (( mutation_status == 124 )); then
+# 124 is not the only wall-clock status: when the step cannot be signalled, `timeout` ends up killing
+# itself and reports 137. judge_step_timed_out knows the difference; see judge-lib.sh.
+if judge_step_timed_out "${mutation_status}"; then
     # Not fatal: coverage and pass rate still score. The marker records the absent report as a warning.
     printf 'judge: mutation testing exceeded %ss and was stopped\n' "${JUDGE_MUTATION_TIMEOUT_SECONDS}" >&2
     emit_marker_error "mutation testing exceeded ${JUDGE_MUTATION_TIMEOUT_SECONDS}s; the mutation score is 0 for this run."

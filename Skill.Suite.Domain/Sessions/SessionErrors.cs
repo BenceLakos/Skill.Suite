@@ -19,10 +19,6 @@ public static class SessionErrors
     public static readonly Error NotActive =
         Error.Validation("Session.NotActive", "Only an active session can be stopped.");
 
-    public static readonly Error MissingJudgementImage =
-        Error.Validation("Session.MissingJudgementImage",
-            "Select a judgement image before starting the session — without one no push can be marked.");
-
     public static readonly Error MissingTemplateFolder =
         Error.Validation("Session.MissingTemplateFolder",
             "Set the template folder before starting the session — it is the starter package copied " +

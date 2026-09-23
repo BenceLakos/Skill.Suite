@@ -43,11 +43,11 @@ internal static class DockerRunArguments
             // which is what makes the capability drop stick rather than being a speed bump.
             "--cap-drop", "ALL",
 
-            // Added back, and only these. The judge pipeline drops to an unprivileged account for the test step,
-            // which needs SETUID/SETGID to change identity and CHOWN/DAC_OVERRIDE/FOWNER to hand that account
-            // its build output and results directory. Dropping ALL without these made setpriv fail with
-            // "setresuid: Operation not permitted" — the two hardening measures cancelled each other out, and
-            // the run produced no events at all.
+            // Added back for the privilege drop, and nothing wider. The judge pipeline drops to an
+            // unprivileged account for the test step, which needs SETUID/SETGID to change identity and
+            // CHOWN/DAC_OVERRIDE/FOWNER to hand that account its build output and results directory.
+            // Dropping ALL without these made setpriv fail with "setresuid: Operation not permitted" — the
+            // two hardening measures cancelled each other out, and the run produced no events at all.
             //
             // The competitor's own code never holds these: it executes after the drop, as an unprivileged user,
             // and no-new-privileges stops it climbing back.
@@ -56,6 +56,19 @@ internal static class DockerRunArguments
             "--cap-add", "CHOWN",
             "--cap-add", "DAC_OVERRIDE",
             "--cap-add", "FOWNER",
+
+            // KILL is what makes the judge's wall clock real. The `timeout` in judge-lib.sh runs as root, but
+            // the step it guards has already been handed to an unprivileged uid by setpriv, and signalling a
+            // process that does not share your uid needs CAP_KILL. Without it the SIGTERM and the follow-up
+            // SIGKILL both come back EPERM, `timeout` succeeds only in killing itself, and the test host runs
+            // on until the container is torn down: a submission with an endless loop was recorded as
+            // Completed, carrying whatever partial results it had reached.
+            //
+            // Adding it back does not soften the drop. It is held only by the judge's own root processes —
+            // the competitor's code runs after the privilege drop, under no-new-privileges, so it can never
+            // acquire it — and CAP_KILL grants nothing but the right to signal processes inside this
+            // container's own pid namespace. There is no host process and no sibling container within reach.
+            "--cap-add", "KILL",
 
             "--security-opt", "no-new-privileges",
         };
