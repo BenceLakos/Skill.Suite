@@ -1,0 +1,441 @@
+@implements IDisposable
+@inject ISender Mediator
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject ITranslator T
+@inject FileDropInterop FileDrop
+@inject IOptions<StarterPackagesOptions> PackageOptions
+
+@using Microsoft.Extensions.Options
+@using Skill.Suite.Application.StarterPackages
+@using Skill.Suite.Application.StarterPackages.PlanStarterPackageUpload
+@using Skill.Suite.Application.StarterPackages.UploadStarterPackageFile
+@using Skill.Suite.Domain.Common
+@using Skill.Suite.Services.FileDrop
+
+@*
+    Uploads what the drop zone collected into one folder of a package. The plan comes first, so replacements
+    are confirmed and a batch that is too large is refused before a byte moves; then one command per file,
+    one file at a time — which is what pins every failure to its file and lets Cancel stop between two of
+    them.
+
+    Inline above the folder rather than in a dialog, like provisioning on the Sessions page: there is nothing
+    to decide while it runs, and the folder it goes into stays in view underneath.
+*@
+@if (_busy && _run is not null)
+{
+    <MudPaper Outlined="true" Class="pa-4 mb-3">
+        <MudText Typo="Typo.subtitle2" Class="mb-2">
+            @T.Format("starterPackages.files.uploadingInto", _run.FolderPath)
+        </MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+            <ProvisioningProgress Label="@ProgressLabel"
+                                  Completed="@_run.Completed"
+                                  Total="@_run.Total"
+                                  Indeterminate="@(_run.Total == 0)"
+                                  Class="flex-grow-1"/>
+            @if (_run.Total > 0)
+            {
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Close"
+                           Disabled="_cancelling" OnClick="Cancel">
+                    @T["common.cancel"]
+                </MudButton>
+            }
+        </MudStack>
+    </MudPaper>
+}
+else if (_run is { Problems.Count: > 0 })
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="DismissProblems">
+        <MudText Typo="Typo.body2">@T.Format("starterPackages.files.problems", _run.FolderPath)</MudText>
+        <ul class="file-upload-problems">
+            @foreach (var problem in _run.Problems.Take(MaxProblemsListed))
+            {
+                <li>@T.Format("starterPackages.files.problem", problem.RelativePath, problem.Reason)</li>
+            }
+        </ul>
+        @if (_run.Problems.Count > MaxProblemsListed)
+        {
+            <MudText Typo="Typo.body2">
+                @T.Format("starterPackages.files.moreProblems", _run.Problems.Count - MaxProblemsListed)
+            </MudText>
+        }
+    </MudAlert>
+}
+
+@code {
+    /// <summary>How many of the files an upload would overwrite the question names before counting the rest.</summary>
+    private const int MaxReplacementsNamed = 10;
+
+    /// <summary>
+    /// How many problems the alert lists before counting the rest, so a batch that failed whole does not push
+    /// the folder off the page.
+    /// </summary>
+    private const int MaxProblemsListed = 50;
+
+    private const string NameSeparator = ", ";
+    private const string SentenceSeparator = " ";
+
+    /// <summary>
+    /// Raised with the folder a batch went into once the batch is over, however it ended; the page reloads
+    /// that folder if it is still the one on screen.
+    /// </summary>
+    [Parameter] public EventCallback<string> Finished { get; set; }
+
+    /// <summary>
+    /// Raised when a batch starts and again when it is over, so the page can hold everything that would leave
+    /// the folder or change it for as long as the batch runs.
+    /// </summary>
+    [Parameter] public EventCallback<bool> BusyChanged { get; set; }
+
+    /// <summary>The batch running now, or the last one, whose problems stay listed until dismissed.</summary>
+    private StarterPackageUploadRun? _run;
+
+    private CancellationTokenSource? _cancellation;
+    private bool _busy;
+    private bool _cancelling;
+    private bool _disposed;
+
+    private string ProgressLabel => _run is { Total: > 0, Current: { } current }
+        ? T.Format("starterPackages.files.progress", Math.Min(_run.Completed + 1, _run.Total), _run.Total, current)
+        : T["starterPackages.files.checking"];
+
+    /// <summary>
+    /// Uploads <paramref name="batch"/> into <paramref name="folderPath"/>, and releases the batch whatever
+    /// becomes of it.
+    /// </summary>
+    /// <param name="folderPath">From the starter packages root: the folder on screen when the files arrived.</param>
+    public async Task UploadAsync(string folderPath, FileDropBatch batch)
+    {
+        if (_disposed)
+        {
+            await FileDrop.ReleaseAsync(batch.Id, CancellationToken.None);
+            return;
+        }
+
+        if (_busy)
+        {
+            // Picked or dropped in the moment before the page had disabled the zone for the batch running now.
+            Snackbar.Add(T["starterPackages.files.busy"], Severity.Warning);
+            await FileDrop.ReleaseAsync(batch.Id, CancellationToken.None);
+            return;
+        }
+
+        if (batch.Files.Count == 0)
+        {
+            Snackbar.Add(T["starterPackages.files.nothingChosen"], Severity.Info);
+            await FileDrop.ReleaseAsync(batch.Id, CancellationToken.None);
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        var cancellationToken = cancellation.Token;
+        var run = new StarterPackageUploadRun(folderPath);
+        var disconnected = false;
+
+        _cancellation = cancellation;
+        _run = run;
+        _busy = true;
+        _cancelling = false;
+        StateHasChanged();
+
+        try
+        {
+            await BusyChanged.InvokeAsync(true);
+            await RunAsync(run, batch, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            run.Cancelled = true;
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is going away, and with it everybody who could be told how far the batch got.
+            disconnected = true;
+        }
+        finally
+        {
+            _cancellation = null;
+            _busy = false;
+            run.Current = null;
+
+            if (!disconnected)
+            {
+                await FinishAsync(run);
+            }
+
+            // Last, and after the page is free again: a call sent while the circuit is briefly disconnected is
+            // lost and never answers, and the page must not stay locked waiting for one.
+            await FileDrop.ReleaseAsync(batch.Id, CancellationToken.None);
+        }
+    }
+
+    private async Task RunAsync(StarterPackageUploadRun run, FileDropBatch batch, CancellationToken cancellationToken)
+    {
+        var plan = await PlanAsync(run.FolderPath, batch.Files, cancellationToken);
+        if (plan is null)
+        {
+            return;
+        }
+
+        var replacing = plan
+            .Where(item => item.Action == StarterPackageUploadAction.Replace)
+            .Select(item => item.File)
+            .ToList();
+
+        var replace = true;
+
+        if (replacing.Count > 0)
+        {
+            var answer = await ConfirmReplaceAsync(replacing);
+            if (answer is null)
+            {
+                return;
+            }
+
+            replace = answer.Value;
+        }
+
+        // Left the page while the question was open: nothing has been written, and nothing will be.
+        cancellationToken.ThrowIfCancellationRequested();
+
+        run.Started = true;
+
+        var writes = new List<(ChosenFile File, StarterPackageUploadAction Action)>();
+        foreach (var (file, action) in plan)
+        {
+            switch (action)
+            {
+                case StarterPackageUploadAction.Create:
+                case StarterPackageUploadAction.Replace when replace:
+                    writes.Add((file, action));
+                    break;
+                case StarterPackageUploadAction.Replace:
+                    run.Skipped++;
+                    break;
+                case StarterPackageUploadAction.Excluded:
+                    run.Excluded++;
+                    break;
+                case StarterPackageUploadAction.Blocked:
+                    run.Problems.Add(new StarterPackageUploadProblem(
+                        file.RelativePath, T["starterPackages.files.blocked"]));
+                    break;
+            }
+        }
+
+        run.Total = writes.Count;
+        await WriteAllAsync(run, batch.Id, writes, cancellationToken);
+    }
+
+    /// <summary>
+    /// What the command would do with each file, or <see langword="null"/> once the reason it will not is on
+    /// screen — a batch too large, or a folder that has gone.
+    /// </summary>
+    private async Task<List<(ChosenFile File, StarterPackageUploadAction Action)>?> PlanAsync(
+        string folderPath,
+        IReadOnlyList<ChosenFile> files,
+        CancellationToken cancellationToken)
+    {
+        var query = new PlanStarterPackageUploadQuery(
+            folderPath,
+            [.. files.Select(file => new StarterPackageUploadFileDto(file.RelativePath, file.SizeBytes))]);
+
+        var result = await Mediator.Send(query, cancellationToken);
+        if (result.IsFailure)
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+            return null;
+        }
+
+        // One answer per file, in the order they were asked about, so the two line up by position.
+        return [.. files.Zip(result.Value, (file, item) => (file, item.Action))];
+    }
+
+    /// <returns>
+    /// <see langword="true"/> to replace them, <see langword="false"/> to upload only the new files, and
+    /// <see langword="null"/> to upload nothing.
+    /// </returns>
+    private async Task<bool?> ConfirmReplaceAsync(IReadOnlyList<ChosenFile> replacing)
+    {
+        var named = string.Join(
+            NameSeparator,
+            replacing.Take(MaxReplacementsNamed).Select(file => file.RelativePath));
+
+        var list = replacing.Count > MaxReplacementsNamed
+            ? T.Format("starterPackages.files.andMore", named, replacing.Count - MaxReplacementsNamed)
+            : named;
+
+        // Plain text, never markup: the names are whatever the administrator's files happen to be called.
+        return await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["starterPackages.files.replaceTitle"],
+            Message = T.Format("starterPackages.files.replaceConfirm", replacing.Count, list),
+            YesText = T["starterPackages.files.replace"],
+            NoText = T["starterPackages.files.skipExisting"],
+            CancelText = T["common.cancel"],
+        });
+    }
+
+    private async Task WriteAllAsync(
+        StarterPackageUploadRun run,
+        int batchId,
+        IReadOnlyList<(ChosenFile File, StarterPackageUploadAction Action)> writes,
+        CancellationToken cancellationToken)
+    {
+        var maxBytes = PackageOptions.Value.MaxUploadBytes;
+
+        foreach (var (file, action) in writes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            run.Current = file.RelativePath;
+            StateHasChanged();
+
+            var overwrite = action == StarterPackageUploadAction.Replace;
+            var (problem, stopsBatch) = await WriteAsync(
+                run.FolderPath, batchId, file, overwrite, maxBytes, cancellationToken);
+            run.Completed++;
+
+            if (problem is null)
+            {
+                run.Uploaded++;
+
+                if (overwrite)
+                {
+                    run.Replaced++;
+                }
+
+                continue;
+            }
+
+            run.Problems.Add(new StarterPackageUploadProblem(file.RelativePath, problem));
+
+            if (stopsBatch)
+            {
+                run.Stopped = true;
+                return;
+            }
+        }
+    }
+
+    /// <summary>Copies one file out of the browser, and hands it to the command.</summary>
+    /// <returns>
+    /// Why the file was not written, or <see langword="null"/> when it was; and whether that reason is one the
+    /// files after it would run into as well.
+    /// </returns>
+    private async Task<(string? Problem, bool StopsBatch)> WriteAsync(
+        string folderPath,
+        int batchId,
+        ChosenFile file,
+        bool overwrite,
+        long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        await using var content = await FileDrop.SpoolAsync(batchId, file, maxBytes, cancellationToken);
+        if (content is null)
+        {
+            return (T["starterPackages.files.unreadable"], false);
+        }
+
+        var result = await Mediator.Send(
+            new UploadStarterPackageFileCommand(folderPath, file.RelativePath, content, overwrite),
+            cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            return (null, false);
+        }
+
+        // The volume itself — missing, read-only or full — or the package has gone: every file after this one
+        // would fail the same way, so none of them is tried.
+        return (result.Error.Message, result.Error.Type is ErrorType.Failure or ErrorType.NotFound);
+    }
+
+    private async Task FinishAsync(StarterPackageUploadRun run)
+    {
+        ShowSummary(run);
+
+        if (_disposed)
+        {
+            return;
+        }
+
+        await BusyChanged.InvokeAsync(false);
+        await Finished.InvokeAsync(run.FolderPath);
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// One snackbar for the whole batch, however it ended — shown even when the page is being left, which is
+    /// what cancelled it. The problems themselves stay listed above the folder.
+    /// </summary>
+    private void ShowSummary(StarterPackageUploadRun run)
+    {
+        if (!run.Started)
+        {
+            return;
+        }
+
+        var sentences = new List<string>();
+
+        if (run.Cancelled)
+        {
+            sentences.Add(T.Format("starterPackages.files.summary.cancelled", run.Completed, run.Total));
+        }
+        else if (run.Stopped)
+        {
+            sentences.Add(T.Format("starterPackages.files.summary.stopped", run.Completed, run.Total));
+        }
+
+        sentences.Add(T.Format("starterPackages.files.summary.uploaded", run.Uploaded));
+
+        if (run.Replaced > 0)
+        {
+            sentences.Add(T.Format("starterPackages.files.summary.replaced", run.Replaced));
+        }
+
+        if (run.Skipped > 0)
+        {
+            sentences.Add(T.Format("starterPackages.files.summary.skipped", run.Skipped));
+        }
+
+        if (run.Excluded > 0)
+        {
+            sentences.Add(T.Format("starterPackages.files.summary.excluded", run.Excluded));
+        }
+
+        if (run.Problems.Count > 0)
+        {
+            sentences.Add(T.Format("starterPackages.files.summary.failed", run.Problems.Count));
+        }
+
+        var severity = run.Cancelled || run.Stopped || run.Problems.Count > 0
+            ? Severity.Warning
+            : run.Uploaded > 0
+                ? Severity.Success
+                : Severity.Info;
+
+        Snackbar.Add(string.Join(SentenceSeparator, sentences), severity);
+    }
+
+    private void Cancel()
+    {
+        _cancelling = true;
+        _cancellation?.Cancel();
+    }
+
+    private void DismissProblems() => _run = null;
+
+    /// <summary>
+    /// Leaving the page stops the batch. The file being written when it happens is abandoned rather than kept
+    /// half-written — the command only puts a file in place once all of it has arrived.
+    /// </summary>
+    public void Dispose()
+    {
+        _disposed = true;
+        _cancellation?.Cancel();
+        _cancellation?.Dispose();
+    }
+}

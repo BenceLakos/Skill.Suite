@@ -272,6 +272,51 @@ h1:focus {
     min-width: 80px;
 }
 
+/* === File drop zone ======================================================
+ * The overlay FileDropZone shows while files are dragged across it. It
+ * ignores the pointer, so a drag over it still reaches the elements
+ * underneath — which is what keeps file-drop.js's count of entered and left
+ * elements right — and sits above the grid it covers. Palette variables, so
+ * it follows the dark theme too. */
+.file-drop-zone {
+    position: relative;
+}
+
+.file-drop-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--mud-palette-primary);
+    border-radius: var(--mud-default-borderradius);
+    background-color: rgba(var(--mud-palette-primary-rgb), 0.08);
+}
+
+.file-drop-zone.file-drop-active > .file-drop-overlay {
+    display: flex;
+}
+
+/* Opaque, so the message reads the same over whatever is underneath. */
+.file-drop-overlay-message {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-radius: var(--mud-default-borderradius);
+    background-color: var(--mud-palette-surface);
+    color: var(--mud-palette-text-primary);
+    box-shadow: var(--mud-elevation-4);
+}
+
+/* The files an upload left out, listed inside its alert. */
+.file-upload-problems {
+    margin: 4px 0 0;
+    padding-left: 20px;
+}
+
 /* A <form> wrapping a submit button needs to behave like a flex item so it
    participates in the surrounding row's vertical centering. */
 .inline-form {

@@ -8,9 +8,11 @@
 @inject ITranslator T
 
 @using Skill.Suite.Services.Clipboard
+@using Skill.Suite.Services.FileDrop
 @using Skill.Suite.Application.StarterPackages
 @using Skill.Suite.Application.StarterPackages.BrowseStarterPackage
 @using Skill.Suite.Application.StarterPackages.DeleteStarterPackage
+@using Skill.Suite.Application.StarterPackages.DeleteStarterPackageEntry
 @using Skill.Suite.Application.StarterPackages.ListStarterPackages
 
 <PageTitle>@T["starterPackages.title"]</PageTitle>
@@ -18,7 +20,7 @@
 <PageHeader Title="@T["starterPackages.title"]" Subtitle="@T["starterPackages.subtitle"]">
     <Actions>
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                   StartIcon="@Icons.Material.Filled.CloudUpload" OnClick="OpenUpload">
+                   StartIcon="@Icons.Material.Filled.CloudUpload" Disabled="_uploading" OnClick="OpenUpload">
             @T["starterPackages.upload"]
         </MudButton>
     </Actions>
@@ -104,76 +106,130 @@
 }
 else
 {
-    <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
-        <MudBreadcrumbs Items="_crumbs">
-            <ItemTemplate Context="crumb">
-                @if (crumb.Disabled)
-                {
-                    <MudText Typo="Typo.body2">@crumb.Text</MudText>
-                }
-                else
-                {
-                    <MudLink Typo="Typo.body2" OnClick="@(() => OpenCrumb(crumb))">@crumb.Text</MudLink>
-                }
-            </ItemTemplate>
-        </MudBreadcrumbs>
-        <MudStack Row="true" Spacing="2">
-            <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="LoadPackages">
-                @T["starterPackages.backToPackages"]
-            </MudButton>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.Download" OnClick="@(() => Download(_path))">
-                @T["starterPackages.action.downloadFolder"]
-            </MudButton>
-        </MudStack>
-    </MudStack>
+    @*
+        An upload runs inside this circuit, so leaving the page would simply stop it. Everything on the page
+        that leaves the folder or changes it is disabled while one runs; this catches the rest — the menu,
+        the browser's back button, a reload, closing the tab — and asks first.
+    *@
+    <NavigationLock ConfirmExternalNavigation="@_uploading" OnBeforeInternalNavigation="ConfirmLeavingUpload"/>
 
-    <MudDataGrid T="StarterPackageEntryDto"
-                 Elevation="1"
-                 Items="_entries"
-                 Loading="_loading"
-                 Hover="true"
-                 SortMode="SortMode.None"
-                 Filterable="false">
-        <Columns>
-            <TemplateColumn Title="@T["starterPackages.field.name"]" Sortable="false">
-                <CellTemplate>
-                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
-                        <MudIcon Icon="@(context.Item.IsDirectory
-                                           ? Icons.Material.Filled.Folder
-                                           : Icons.Material.Filled.InsertDriveFile)"
-                                 Color="@(context.Item.IsDirectory ? Color.Primary : Color.Default)"
-                                 Size="Size.Small"/>
-                        <MudLink Typo="Typo.body2" OnClick="@(() => OpenEntry(context.Item))">
-                            @context.Item.Name
+    @*
+        The whole folder view is the drop target, like a file manager's: files and folders dropped anywhere
+        on it, or chosen with the two upload buttons, go into the folder on screen.
+    *@
+    <FileDropZone OverlayText="@T.Format("starterPackages.files.dropHere", FolderName)"
+                  Disabled="_uploading"
+                  FilesChosen="OnFilesChosen">
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap"
+                  Class="mb-2">
+            <MudBreadcrumbs Items="_crumbs">
+                <ItemTemplate Context="crumb">
+                    @if (crumb.Disabled)
+                    {
+                        <MudText Typo="Typo.body2">@crumb.Text</MudText>
+                    }
+                    else
+                    {
+                        <MudLink Typo="Typo.body2" Disabled="_uploading" OnClick="@(() => OpenCrumb(crumb))">
+                            @crumb.Text
                         </MudLink>
-                    </MudStack>
-                </CellTemplate>
-            </TemplateColumn>
-            <TemplateColumn Title="@T["starterPackages.field.size"]" Sortable="false">
-                <CellTemplate>
-                    <MudText Typo="Typo.body2">@ByteSizeFormatter.Format(context.Item.SizeBytes)</MudText>
-                </CellTemplate>
-            </TemplateColumn>
-            <PropertyColumn Property="x => x.ModifiedAt" Title="@T["starterPackages.field.modified"]"
-                            Format="yyyy-MM-dd HH:mm"/>
-            <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
-                <CellTemplate>
-                    <MudTooltip Text="@T["starterPackages.action.download"]">
-                        <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" Color="Color.Primary"
-                                       OnClick="@(() => Download(context.Item.RelativePath))"/>
-                    </MudTooltip>
-                </CellTemplate>
-            </TemplateColumn>
-        </Columns>
-        <NoRecordsContent>
-            <MudText Class="pa-4" Color="Color.Secondary">@T["starterPackages.folderEmpty"]</MudText>
-        </NoRecordsContent>
-    </MudDataGrid>
+                    }
+                </ItemTemplate>
+            </MudBreadcrumbs>
+            <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap" AlignItems="AlignItems.Center">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.ArrowBack" Disabled="_uploading" OnClick="LoadPackages">
+                    @T["starterPackages.backToPackages"]
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.CreateNewFolder" Disabled="_uploading"
+                           OnClick="OpenNewFolder">
+                    @T["starterPackages.newFolder"]
+                </MudButton>
+                @*
+                    No OnClick on these two: a file dialog only opens inside the browser's own click listener,
+                    which the drop zone attaches, so each button only names the picker it opens.
+                *@
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.UploadFile" Disabled="_uploading"
+                           data-file-drop-pick="@FileDropZone.PickFiles">
+                    @T["starterPackages.files.uploadFiles"]
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.DriveFolderUpload" Disabled="_uploading"
+                           data-file-drop-pick="@FileDropZone.PickFolder">
+                    @T["starterPackages.files.uploadFolder"]
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Download" Disabled="_uploading"
+                           OnClick="@(() => Download(_path))">
+                    @T["starterPackages.action.downloadFolder"]
+                </MudButton>
+            </MudStack>
+        </MudStack>
+
+        <MudText Typo="Typo.body2" Class="text-muted mb-3">@T["starterPackages.files.hint"]</MudText>
+
+        <StarterPackageFileUpload @ref="_uploader" Finished="OnUploadFinished" BusyChanged="OnUploadBusyChanged"/>
+
+        <MudDataGrid T="StarterPackageEntryDto"
+                     Elevation="1"
+                     Items="_entries"
+                     Loading="_loading"
+                     Hover="true"
+                     SortMode="SortMode.None"
+                     Filterable="false">
+            <Columns>
+                <TemplateColumn Title="@T["starterPackages.field.name"]" Sortable="false">
+                    <CellTemplate>
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                            <MudIcon Icon="@(context.Item.IsDirectory
+                                               ? Icons.Material.Filled.Folder
+                                               : Icons.Material.Filled.InsertDriveFile)"
+                                     Color="@(context.Item.IsDirectory ? Color.Primary : Color.Default)"
+                                     Size="Size.Small"/>
+                            <MudLink Typo="Typo.body2" Disabled="_uploading" OnClick="@(() => OpenEntry(context.Item))">
+                                @context.Item.Name
+                            </MudLink>
+                        </MudStack>
+                    </CellTemplate>
+                </TemplateColumn>
+                <TemplateColumn Title="@T["starterPackages.field.size"]" Sortable="false">
+                    <CellTemplate>
+                        <MudText Typo="Typo.body2">@ByteSizeFormatter.Format(context.Item.SizeBytes)</MudText>
+                    </CellTemplate>
+                </TemplateColumn>
+                <PropertyColumn Property="x => x.ModifiedAt" Title="@T["starterPackages.field.modified"]"
+                                Format="yyyy-MM-dd HH:mm"/>
+                <TemplateColumn Title="@T["common.actions"]" Sortable="false" CellStyle="text-align:right">
+                    <CellTemplate>
+                        <MudTooltip Text="@T["starterPackages.action.download"]">
+                            <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                           Color="Color.Primary" Disabled="_uploading"
+                                           OnClick="@(() => Download(context.Item.RelativePath))"/>
+                        </MudTooltip>
+                        <MudTooltip Text="@T["common.delete"]">
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                           Color="Color.Error" Disabled="_uploading"
+                                           OnClick="@(() => DeleteEntry(context.Item))"/>
+                        </MudTooltip>
+                    </CellTemplate>
+                </TemplateColumn>
+            </Columns>
+            <NoRecordsContent>
+                <MudText Class="pa-4" Color="Color.Secondary">@T["starterPackages.folderEmpty"]</MudText>
+            </NoRecordsContent>
+        </MudDataGrid>
+    </FileDropZone>
 }
 
 @code {
+    /// <summary>
+    /// The folder a session's template folder points at, when it sits directly in a package — the one the
+    /// packages list checks for.
+    /// </summary>
+    private const string CompetitorStartFolderName = "competitor-start";
+
     private List<StarterPackageDto> _packages = [];
     private List<StarterPackageEntryDto> _entries = [];
     private List<BreadcrumbItem> _crumbs = [];
@@ -183,6 +239,17 @@ else
 
     private bool _loading;
     private string? _error;
+
+    /// <summary>
+    /// Whether files are being uploaded into the folder on screen. Everything that would leave the folder or
+    /// change it waits until they are.
+    /// </summary>
+    private bool _uploading;
+
+    private StarterPackageFileUpload _uploader = null!;
+
+    /// <summary>The folder on screen, by its own name — the last crumb.</summary>
+    private string FolderName => _crumbs.Count > 0 ? _crumbs[^1].Text : string.Empty;
 
     protected override async Task OnInitializedAsync() => await LoadPackages();
 
@@ -301,6 +368,115 @@ else
         else
         {
             Snackbar.Add(result.Error.Message, Severity.Error);
+        }
+    }
+
+    /// <summary>Reads the folder on screen again without leaving it, once something in it has changed.</summary>
+    private async Task ReloadFolder()
+    {
+        if (_path is not null)
+        {
+            await Open(_path);
+        }
+    }
+
+    private async Task OpenNewFolder()
+    {
+        if (_path is null)
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<StarterPackageNewFolderDialog>
+        {
+            { dialog => dialog.ParentPath, _path },
+        };
+
+        // The name field focuses itself; the dialog's own default would take the focus off it again.
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            DefaultFocus = DefaultFocus.None,
+        };
+
+        var dialog = await Dialogs.ShowAsync<StarterPackageNewFolderDialog>(
+            T["starterPackages.newFolder.title"], parameters, options);
+
+        var result = await dialog.Result;
+        if (result is { Canceled: false }) await ReloadFolder();
+    }
+
+    private async Task DeleteEntry(StarterPackageEntryDto entry)
+    {
+        var ok = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = entry.IsDirectory
+                ? T["starterPackages.deleteEntry.folderTitle"]
+                : T["starterPackages.deleteEntry.fileTitle"],
+            Message = T.Format(DeleteConfirmKey(entry), entry.Name),
+            YesText = T["common.delete"],
+            CancelText = T["common.cancel"],
+        });
+        if (ok != true) return;
+
+        var result = await Mediator.Send(new DeleteStarterPackageEntryCommand(entry.RelativePath));
+        if (result.IsSuccess)
+        {
+            Snackbar.Add(T.Format("starterPackages.deleteEntry.deleted", entry.Name), Severity.Success);
+            await ReloadFolder();
+        }
+        else
+        {
+            Snackbar.Add(result.Error.Message, Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// The louder warning for the package's own competitor-start folder, the one deletion that stops sessions
+    /// from starting — the same consequence deleting the whole package is announced with. A folder of that name
+    /// deeper down is only a folder.
+    /// </summary>
+    private static string DeleteConfirmKey(StarterPackageEntryDto entry) =>
+        !entry.IsDirectory
+            ? "starterPackages.deleteEntry.fileConfirm"
+            : StarterPackagePath.SegmentsBelowPackage(entry.RelativePath) is [CompetitorStartFolderName]
+                ? "starterPackages.deleteEntry.competitorStartConfirm"
+                : "starterPackages.deleteEntry.folderConfirm";
+
+    // The folder is the one on screen as the files arrive: nothing that changes it is enabled from the moment
+    // an upload starts until it is over. The zone only exists while a folder is on screen; were the path ever
+    // missing, the empty one is refused by the plan, with its reason, and the batch still released.
+    private Task OnFilesChosen(FileDropBatch batch) => _uploader.UploadAsync(_path ?? string.Empty, batch);
+
+    private void OnUploadBusyChanged(bool busy) => _uploading = busy;
+
+    private async Task OnUploadFinished(string folderPath)
+    {
+        if (string.Equals(_path, folderPath, StringComparison.Ordinal))
+        {
+            await ReloadFolder();
+        }
+    }
+
+    private async Task ConfirmLeavingUpload(LocationChangingContext context)
+    {
+        if (!_uploading)
+        {
+            return;
+        }
+
+        var leave = await Dialogs.ShowMessageBoxAsync(new MessageBoxOptions
+        {
+            Title = T["starterPackages.files.leaveTitle"],
+            Message = T["starterPackages.files.leaveConfirm"],
+            YesText = T["starterPackages.files.leave"],
+            CancelText = T["starterPackages.files.stay"],
+        });
+
+        if (leave != true)
+        {
+            context.PreventNavigation();
         }
     }
 

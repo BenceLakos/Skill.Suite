@@ -47,4 +47,49 @@ public interface IStarterPackageStore
         CancellationToken cancellationToken);
 
     ValueTask<Result> DeleteAsync(string name, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// What uploading <paramref name="files"/> into <paramref name="folderPath"/> would do with each of them,
+    /// without writing anything.
+    /// </summary>
+    /// <remarks>
+    /// Asked before a byte is sent, so replacements can be confirmed first and a batch that is too large is
+    /// refused whole. The answer describes the folder as it was at that moment, which is why
+    /// <see cref="WriteFileAsync"/> decides everything again for itself — by the same rules.
+    /// </remarks>
+    /// <param name="folderPath">An existing folder inside a package, or a package itself.</param>
+    /// <returns>One item per file, in the order given.</returns>
+    ValueTask<Result<IReadOnlyList<StarterPackageUploadPlanItemDto>>> PlanUploadAsync(
+        string folderPath,
+        IReadOnlyList<StarterPackageUploadFileDto> files,
+        CancellationToken cancellationToken);
+
+    /// <summary>Writes one file inside a package, creating any folder missing on the way to it.</summary>
+    /// <remarks>
+    /// The file takes its place only once all of it has arrived, so a failed or cancelled upload never leaves
+    /// a truncated file where a session reads it. A browser sends no file mode, so a replacement keeps the
+    /// mode of the file it replaces, and a new file that starts with <c>#!</c> is made executable.
+    /// </remarks>
+    /// <param name="relativePath">The file's path from the root, at least one level inside a package.</param>
+    /// <param name="content">Read once and left open for the caller to dispose.</param>
+    /// <param name="overwrite">Replaces an existing file; without it, one is refused and left as it was.</param>
+    ValueTask<Result> WriteFileAsync(
+        string relativePath,
+        Stream content,
+        bool overwrite,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates one folder inside an existing folder of a package — never the folders above it, and never a
+    /// package.
+    /// </summary>
+    ValueTask<Result> CreateFolderAsync(string relativePath, CancellationToken cancellationToken);
+
+    /// <summary>Deletes a file, or a folder with everything in it, inside a package.</summary>
+    /// <remarks>
+    /// A package itself is refused: removing one is <see cref="DeleteAsync"/>, which the packages list offers.
+    /// Unlike an upload, a path under build output or repository metadata may be deleted — that is how a
+    /// stray <c>bin/</c> from a shell push gets cleaned up.
+    /// </remarks>
+    ValueTask<Result> DeleteEntryAsync(string relativePath, CancellationToken cancellationToken);
 }

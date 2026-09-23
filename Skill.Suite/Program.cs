@@ -9,6 +9,7 @@ using Skill.Suite.Endpoints;
 using Skill.Suite.Infra;
 using Skill.Suite.Services;
 using Skill.Suite.Services.Clipboard;
+using Skill.Suite.Services.FileDrop;
 using Skill.Suite.Services.Theme;
 using Skill.Suite.Services.Translation;
 
@@ -42,6 +43,7 @@ builder.Services.AddScoped<ITranslator, JsonTranslator>();
 builder.Services.AddScoped<ThemeState>();
 builder.Services.AddScoped<ThemePersistence>();
 builder.Services.AddScoped<ClipboardInterop>();
+builder.Services.AddScoped<FileDropInterop>();
 
 // --- Application & Infrastructure ----------------------------------------------------
 builder.Services.AddApplication();

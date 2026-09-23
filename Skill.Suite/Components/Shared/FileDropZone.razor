@@ -1,0 +1,136 @@
+@inject FileDropInterop FileDrop
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using Skill.Suite.Services.FileDrop
+
+@implements IAsyncDisposable
+
+@*
+    An area files and folders can be dropped on, from the desktop, with the paths inside a folder kept; and
+    the two pickers a button inside it can open. It only collects: what the files are for, and whether they
+    may be uploaded at all, is for the FilesChosen handler to decide.
+
+    A trigger is any element inside ChildContent that carries data-file-drop-pick, set to PickFiles or
+    PickFolder, and has no OnClick. The picker has to open in the browser's own click listener, which the
+    script attaches to this zone, because a file dialog only opens inside the user gesture and a Blazor
+    OnClick reaches the browser again after a round trip, outside it. MudButton hands the attribute on to its
+    button element:
+
+        <MudButton data-file-drop-pick="@FileDropZone.PickFolder">Upload folder</MudButton>
+
+    The handler receives a batch the browser is still holding, and owns it from then on: once it is done with
+    it, uploaded or not, it must hand it back through FileDropInterop.ReleaseAsync.
+*@
+<div @ref="_zone" class="file-drop-zone @Class" data-disabled="@(Disabled ? DisabledState : EnabledState)">
+    <input @ref="_filesInput" type="file" multiple hidden disabled="@Disabled"/>
+    <input @ref="_folderInput" type="file" multiple webkitdirectory hidden disabled="@Disabled"/>
+
+    @ChildContent
+
+    @*
+        Ignores the pointer (see app.css), so a drag over it still reaches the elements underneath — which is
+        what keeps the script's count of entered and left elements right.
+    *@
+    <div class="file-drop-overlay" aria-hidden="true">
+        <div class="file-drop-overlay-message">
+            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Size="Size.Large"/>
+            <MudText Typo="Typo.subtitle1">@OverlayText</MudText>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>The <c>data-file-drop-pick</c> value of a trigger that opens the picker for files.</summary>
+    public const string PickFiles = "files";
+
+    /// <summary>The <c>data-file-drop-pick</c> value of a trigger that opens the picker for a whole folder.</summary>
+    public const string PickFolder = "folder";
+
+    /// <summary>What the script reads off <c>data-disabled</c> to ignore clicks and drops.</summary>
+    private const string DisabledState = "true";
+
+    private const string EnabledState = "false";
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Shown over the zone while files are dragged across it — where they would go, say.</summary>
+    [Parameter, EditorRequired] public string OverlayText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Refuses drops and keeps the pickers shut, for as long as whatever the handler started is still running.
+    /// </summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>
+    /// What a pick or a drop handed over, once the browser has listed it; see the ownership rule above.
+    /// </summary>
+    [Parameter] public EventCallback<FileDropBatch> FilesChosen { get; set; }
+
+    [Parameter] public string? Class { get; set; }
+
+    private readonly CancellationTokenSource _disposal = new();
+    private ElementReference _zone;
+    private ElementReference _filesInput;
+    private ElementReference _folderInput;
+    private DotNetObjectReference<FileDropZone>? _self;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _self = DotNetObjectReference.Create(this);
+        await FileDrop.RegisterAsync(_zone, _filesInput, _folderInput, _self, _disposal.Token);
+    }
+
+    /// <summary>
+    /// A pick or a drop the browser has finished collecting, reported by batch and count only: the paths are
+    /// read separately, because a folder's worth of them does not fit in one browser message.
+    /// </summary>
+    [JSInvokable]
+    public async Task OnFilesChosen(int batchId, int fileCount)
+    {
+        IReadOnlyList<ChosenFile>? files;
+        try
+        {
+            files = fileCount == 0 ? [] : await FileDrop.ReadManifestAsync(batchId, _disposal.Token);
+        }
+        catch (OperationCanceledException) when (_disposal.IsCancellationRequested)
+        {
+            // Gone while the list was being read. Unregistering let the browser forget the batch with the zone.
+            return;
+        }
+
+        if (files is null || !FilesChosen.HasDelegate)
+        {
+            await FileDrop.ReleaseAsync(batchId, CancellationToken.None);
+
+            if (files is null)
+            {
+                Snackbar.Add(T["common.filesUnreadable"], Severity.Warning);
+            }
+
+            return;
+        }
+
+        await FilesChosen.InvokeAsync(new FileDropBatch(batchId, files));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _disposal.CancelAsync();
+
+        // Whether or not registering finished: a call that was cancelled may still have reached the browser,
+        // and unregistering a zone that never was is harmless there.
+        if (_self is not null)
+        {
+            await FileDrop.UnregisterAsync(_zone, CancellationToken.None);
+        }
+
+        _self?.Dispose();
+        _disposal.Dispose();
+    }
+}

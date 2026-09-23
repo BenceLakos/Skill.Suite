@@ -1,0 +1,100 @@
+@inject ISender Mediator
+@inject ISnackbar Snackbar
+@inject ITranslator T
+
+@using Skill.Suite.Application.StarterPackages
+@using Skill.Suite.Application.StarterPackages.CreateStarterPackageFolder
+
+@*
+    Asks for one name and creates that folder inside the folder being browsed. The name rule is checked here
+    as well, so an impossible name is refused before anything is sent, but the command has the last word: only
+    it knows what the folder already holds.
+*@
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <LabeledField Label="@T["starterPackages.newFolder.name"]"
+                          Help="@T.Format("starterPackages.newFolder.help", ParentPath)">
+                <MudTextField T="string"
+                              @bind-Value="_name"
+                              Variant="Variant.Outlined"
+                              Immediate="true"
+                              AutoFocus="true"
+                              Disabled="_submitting"
+                              MaxLength="StarterPackageEntryName.MaxLength"
+                              OnKeyDown="SubmitOnEnter"/>
+            </LabeledField>
+
+            @if (_submitting)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary"/>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_error</MudAlert>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Disabled="_submitting">@T["common.cancel"]</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.CreateNewFolder"
+                   OnClick="Submit" Disabled="@(_submitting || string.IsNullOrWhiteSpace(_name))">
+            @T["common.create"]
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string EnterKey = "Enter";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = null!;
+
+    /// <summary>The folder being browsed, from the starter packages root — where the new folder goes.</summary>
+    [Parameter, EditorRequired] public string ParentPath { get; set; } = string.Empty;
+
+    private string _name = string.Empty;
+    private bool _submitting;
+    private string? _error;
+
+    private async Task SubmitOnEnter(KeyboardEventArgs args)
+    {
+        if (args.Key == EnterKey)
+        {
+            await Submit();
+        }
+    }
+
+    private async Task Submit()
+    {
+        // Enter can arrive again while the first one is still on its way.
+        if (_submitting)
+        {
+            return;
+        }
+
+        var name = _name.Trim();
+        if (!StarterPackageEntryName.IsValid(name))
+        {
+            _error = T["starterPackages.newFolder.invalidName"];
+            return;
+        }
+
+        _submitting = true;
+        _error = null;
+
+        var result = await Mediator.Send(new CreateStarterPackageFolderCommand(ParentPath, name));
+        if (result.IsFailure)
+        {
+            _error = result.Error.Message;
+            _submitting = false;
+            return;
+        }
+
+        Snackbar.Add(T.Format("starterPackages.newFolder.created", name), Severity.Success);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

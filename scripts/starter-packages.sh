@@ -11,7 +11,8 @@
 # /starter-packages in the container, so a session's TemplateFolder is /starter-packages/<name>/competitor-start.
 # The volume, rather than a host directory, is what makes the deployment identical on a Linux, macOS or
 # Windows docker host - and it means the files are only reachable through docker, which is what this script
-# does. The Starter packages page in the UI does the same over http, with zip archives.
+# does. The Starter packages page in the UI does the same over http: a new package from a zip archive, and
+# files and folders uploaded straight into a package's own folders.
 #
 # Copies go through a throwaway container that mounts the volume and the source directory, because a
 # docker-managed volume has no host path to write to directly.
